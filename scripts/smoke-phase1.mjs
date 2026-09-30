@@ -210,6 +210,13 @@ async function testFiles(userId, cookie) {
   const shown = await call('/files', { cookie });
   check('1E الملف يظهر في الصفحة', shown.text.includes('مقترح البحث'));
 
+  // منتقي الملف منسّق: input حقيقي مغطّى + بطاقة قابلة للسحب + سكربت عرض الاسم
+  const filesBody = shown.text.split('</style>')[1] || '';
+  check(
+    '1E منتقي الملف منسّق (سحب وإفلات + اسم الملف)',
+    filesBody.includes('file-picker-label') && filesBody.includes('file-picked-name') && filesBody.includes('/js/file-picker.js')
+  );
+
   const badForm = new FormData();
   badForm.append('file', new Blob(['#!/bin/sh\necho hi'], { type: 'application/x-sh' }), 'evil.sh');
   const badUpload = await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: badForm, redirect: 'manual' });

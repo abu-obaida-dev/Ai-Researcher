@@ -520,7 +520,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .choice input:checked + span { border-color: var(--sea); background: var(--mist-soft); color: var(--sea-deep); box-shadow: inset 0 0 0 1px var(--sea); }
 .choice input:focus-visible + span { outline: 2px solid var(--fresh); outline-offset: 2px; }
 .field { margin-top: 16px; }
-.field label { display: block; margin-bottom: 7px; font-size: 12.5px; font-weight: 700; color: var(--ink); }
+.field label, .field-label { display: block; margin-bottom: 7px; font-size: 12.5px; font-weight: 700; color: var(--ink); }
 .field input[type=text], .field select, .field textarea {
   width: 100%; padding: 11px 13px; border: 1px solid var(--mist); border-radius: 12px; background: #fff;
   color: var(--ink); font-family: inherit; font-size: 13px; outline: none;
@@ -528,6 +528,36 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 }
 .field textarea { min-height: 88px; line-height: 1.8; resize: vertical; }
 .field input[type=text]:focus, .field select:focus, .field textarea:focus { border-color: var(--fresh); box-shadow: 0 0 0 3px var(--fresh-12); }
+
+/* منتقي ملف مخصّص: input مخفي + label منسّق يدعم السحب والإفلات */
+.file-picker { position: relative; }
+.file-picker-input {
+  position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; margin: 0;
+}
+.file-picker-label {
+  display: flex; align-items: center; gap: 13px; margin: 0; padding: 16px;
+  border: 1.5px dashed var(--mist); border-radius: 14px; background: var(--mist-soft);
+  cursor: pointer; transition: border-color .15s ease, background .15s ease;
+}
+.file-picker-label:hover { border-color: var(--sea); background: #fff; }
+.file-picker-input:focus-visible + .file-picker-label { outline: 2px solid var(--fresh); outline-offset: 2px; }
+.file-picker-input.dragging + .file-picker-label { border-color: var(--sea); background: var(--fresh-12); border-style: solid; }
+.file-picker-icon {
+  flex: 0 0 auto; width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center;
+  background: #fff; color: var(--sea); border: 1px solid var(--mist);
+}
+.file-picker-text { display: grid; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.file-picker-title { font-size: 13.5px; color: var(--ink); }
+.file-picker-hint { font-size: 11.5px; color: var(--slate); font-weight: 500; }
+.file-picker-btn {
+  flex: 0 0 auto; padding: 7px 14px; border-radius: 999px; background: var(--ink); color: #fff;
+  font-size: 12px; font-weight: 700;
+}
+.file-picker-name {
+  margin: 8px 0 0; padding: 8px 12px; border-radius: 10px; background: var(--fresh-12);
+  color: var(--sea-deep); font-size: 12px; font-weight: 700; word-break: break-all;
+}
+.file-picker-name:empty { display: none; }
 .field-row { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 .form-actions { margin-top: 26px; display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
 

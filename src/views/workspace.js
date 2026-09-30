@@ -319,8 +319,21 @@ export function renderFilesPage({ account, unread = 0, files = [], summary = { t
     <h2>${icon('upload', 'icon-sm')} ارفع ملفاً</h2>
     <form method="post" action="/files" enctype="multipart/form-data" class="form-card">
       <div class="field">
-        <label for="file_input">الملف (الحجم الأقصى ${escapeHtml(String(maxMb))} MB)</label>
-        <input type="file" id="file_input" name="file" required />
+        <span class="field-label">الملف</span>
+        <div class="file-picker">
+          <input type="file" id="file_input" name="file" required class="file-picker-input" />
+          <label class="file-picker-label" for="file_input">
+            <span class="file-picker-icon">${icon('paperclip')}</span>
+            <span class="file-picker-text">
+              <b class="file-picker-title">اختر ملفاً من جهازك</b>
+              <span class="file-picker-hint">أو اسحبه وأفلته هنا · الحجم الأقصى ${escapeHtml(
+                String(maxMb)
+              )} MB</span>
+            </span>
+            <span class="file-picker-btn">استعراض</span>
+          </label>
+          <p class="file-picker-name" id="file-picked-name" aria-live="polite"></p>
+        </div>
         <p class="form-hint">الأنواع المسموحة: ${escapeHtml(allowedTypes)}</p>
       </div>
       <div class="field"><label for="file_title">اسم وصفي (اختياري)</label><input type="text" id="file_title" name="title" maxlength="255" placeholder="مثال: مقترح البحث — النسخة الثانية" /></div>
@@ -358,7 +371,8 @@ ${flashBox(flash)}
     activeKey: 'files',
     account,
     unread,
-    scripts: ['/js/app-shell.js'],
+    // منتقي الملف المخصّص (اسم الملف + السحب والإفلات) — تحسين اختياري
+    scripts: ['/js/file-picker.js', '/js/app-shell.js'],
     body
   });
 }
