@@ -397,6 +397,21 @@ async function testStorageLimits() {
   }
   check('1E يرفض ملف أكبر من حد الملف الواحد', sizeBlocked);
 
+  // دقة العرض: ملف صغير يجب ألا يظهر «0 MB» أو شريطاً غير مرئي
+  const small = await filesSummary(user.id);
+  check(
+    '1E الحصة تظهر بالبايت الدقيق (لا 0 MB لملف صغير)',
+    typeof small.usedLabel === 'string' && /KB|MB/.test(small.usedLabel),
+    small.usedLabel
+  );
+  check('1E شريط المساحة مرئي مع أي استخدام', small.barWidth >= 1.2, `${small.barWidth}%`);
+  const smallPage = (await call('/files', { cookie })).text.split('</style>')[1] || '';
+  const flatPage = smallPage.replace(/\s+/g, ' ');
+  check(
+    '1E الكارت يعرض «X من Y» + المتاح',
+    flatPage.includes('مساحة ملفاتك') && flatPage.includes('المتاح:') && /من [\d.]+ (MB|GB|KB)/.test(flatPage)
+  );
+
   // الترقية عبر الواجهة: ننزّل الحد إلى 5MB والرفع بالحقل يجب أن يُرفض
   await saveStorageLimits({ maxUploadMb: 5, maxStorageMb: 50 });
   const form = new FormData();
@@ -439,6 +454,3 @@ main().catch(async (error) => {
   await pool.end().catch(() => {});
   process.exitCode = 1;
 });
-
-
-

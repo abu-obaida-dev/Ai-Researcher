@@ -72,11 +72,12 @@ function normalizeFile(row) {
   };
 }
 
-/** حجم مقروء للعرض (بايت / KB / MB). */
+/** حجم مقروء للعرض (KB/MB/GB). */
 export function formatFileSize(bytes) {
   const size = Number(bytes || 0);
-  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-  if (size >= 1024) return `${Math.round(size / 1024)} KB`;
+  if (size >= 1073741824) return `${(size / 1073741824).toFixed(2)} GB`;
+  if (size >= 1048576) return `${(size / 1048576).toFixed(1)} MB`;
+  if (size >= 1024) return `${(size / 1024).toFixed(1)} KB`;
   return `${size} بايت`;
 }
 
@@ -118,6 +119,10 @@ export async function listFiles(userId, { step = '', limit = 100 } = {}) {
 /**
  * ملخّص مساحة الباحث: عدد الملفات + المستخدم + الحصة + المتبقي + نسبة الاستخدام.
  * يُستخدم في شريط المساحة أعلى صفحة «ملفاتى».
+ *
+ * ملاحظة عن الدقة: مع حصة 500 MB ورفع ملف صغير (18 KB) تكون النسبة 0.04% —
+ * لذلك نحتفظ بالبايت الدقيق، ونحسب النسبة بمنزلة عشرية، ونضمن حداً أدنى
+ * مرئياً للشريط (1.2%) ما دام المستخدم لم يفرغ، وإلا بدا الشريط معطّلاً.
  */
 export async function filesSummary(userId) {
   const { rows } = await pool.query(
@@ -128,22 +133,29 @@ export async function filesSummary(userId) {
   const usedBytes = Number(rows[0]?.bytes || 0);
   const total = Number(rows[0]?.total || 0);
   const quotaBytes = await maxStorageBytes();
-  const usedMb = Math.round((usedBytes / (1024 * 1024)) * 10) / 10;
-  const quotaMb = Math.round(quotaBytes / (1024 * 1024));
   const remainingBytes = Math.max(0, quotaBytes - usedBytes);
-  const remainingMb = Math.round((remainingBytes / (1024 * 1024)) * 10) / 10;
-  const percent = quotaBytes > 0 ? Math.min(100, Math.round((usedBytes / quotaBytes) * 100)) : 0;
+
+  const rawPercent = quotaBytes > 0 ? (usedBytes / quotaBytes) * 100 : 0;
+  const percent = Math.min(100, Math.round(rawPercent * 10) / 10);
+  // شريط مرئي دائماً عند وجود استخدام، مهما صغر
+  const barWidth = usedBytes > 0 ? Math.max(1.2, percent) : 0;
 
   return {
     total,
     bytes: usedBytes,
-    usedMb,
-    quotaMb,
+    quotaBytes,
     remainingBytes,
-    remainingMb,
+    usedLabel: formatFileSize(usedBytes),
+    quotaLabel: formatFileSize(quotaBytes),
+    remainingLabel: formatFileSize(remainingBytes),
     percent,
+    barWidth,
     isFull: remainingBytes <= 0,
-    isNearFull: percent >= 90
+    isNearFull: rawPercent >= 90,
+    // حقول بالميغابايت للتوافق مع أي استهلاك سابق
+    usedMb: Math.round((usedBytes / (1024 * 1024)) * 10) / 10,
+    quotaMb: Math.round(quotaBytes / (1024 * 1024)),
+    remainingMb: Math.round((remainingBytes / (1024 * 1024)) * 10) / 10
   };
 }
 

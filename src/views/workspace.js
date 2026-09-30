@@ -314,18 +314,25 @@ function renderStorageBar(summary) {
       ? 'المساحة أوشكت على الامتلاء.'
       : 'احذف أي ملف لتحرير مساحته فوراً.';
 
+  // نصوص جاهزة من الخدمة حتى تبقى الوحدات متسقة مع الحساب (بايت → KB/MB/GB)
+  const usedLabel = summary.usedLabel ?? `${summary.usedMb} MB`;
+  const quotaLabel = summary.quotaLabel ?? `${summary.quotaMb} MB`;
+  const remainingLabel = summary.remainingLabel ?? `${summary.remainingMb} MB`;
+  const width = summary.barWidth ?? summary.percent ?? 0;
+  const percentText = width > 0 && (summary.percent ?? 0) > 0 ? ` (${summary.percent}%)` : '';
+
   return `<div class="storage-bar ${tone}">
   <div class="storage-head">
     <b>${icon('paperclip', 'icon-sm')} مساحة ملفاتك</b>
-    <span>${escapeHtml(String(summary.usedMb))} MB من ${escapeHtml(String(summary.quotaMb))} MB</span>
+    <span>${escapeHtml(usedLabel)} من ${escapeHtml(quotaLabel)}${escapeHtml(percentText)}</span>
   </div>
-  <div class="meter"><i style="width:${summary.percent}%"></i></div>
-  <p class="muted">المتاح: ${escapeHtml(String(summary.remainingMb))} MB · ${escapeHtml(hint)}</p>
+  <div class="meter"><i style="width:${width}%"></i></div>
+  <p class="muted">المتاح: ${escapeHtml(remainingLabel)} · ${escapeHtml(hint)}</p>
 </div>`;
 }
 
 /** صفحة الملفات: نموذج رفع (multipart) + جدول الملفات مع فلترة بخطوة. */
-export function renderFilesPage({ account, unread = 0, files = [], summary = { total: 0, bytes: 0, usedMb: 0, quotaMb: 0, remainingMb: 0, percent: 0 }, stepKey = '', stepOptions = [], stepTitles = {}, maxMb = 100, allowedTypes = '', flash = null }) {
+export function renderFilesPage({ account, unread = 0, files = [], summary = { total: 0, bytes: 0, usedMb: 0, quotaMb: 0, remainingMb: 0, percent: 0, barWidth: 0, usedLabel: '0 بايت', quotaLabel: '500 MB', remainingLabel: '500 MB' }, stepKey = '', stepOptions = [], stepTitles = {}, maxMb = 100, allowedTypes = '', flash = null }) {
   const rows = files.length
     ? `<table class="file-table">
   <thead><tr><th>الملف</th><th>النوع والحجم</th><th>الخطوة</th><th>التاريخ</th><th>إجراءات</th></tr></thead>
