@@ -53,9 +53,10 @@ curl -s http://localhost:3000/api/health
 - [ ] `scripts/smoke.mjs`: فحص 200/302 لكل المسارات الأساسية (بدل صفر اختبارات)
 
 ### 🎨 P1 — المرحلة الأولى: لوحة المستخدم
-- [ ] **1A الهيكل:** `area:'app'` في `layout.js` — توب بار مضغوط (شعار + 🔔 Dropdown + أفاتار/خروج) + سايدبار يسار:
+- [x] **1A الهيكل:** `area:'app'` في `layout.js` — توب بار مضغوط (شعار + 🔔 Dropdown + أفاتار/خروج) + سايدبار يسار:
       الإحصائية · مسار البحث · المشرف الذكي · المراجع · المفكرة · ملفاتى (+ حسابى/خروج)
-      وتحويل `renderAccountPage`/`renderOnboardingPage` إلى `area:'app'` مع بقاء ترويسة الزائر كما هي
+      + تحويل `renderAccountPage`/`renderOnboardingPage`/`renderNotificationsPage` إلى `area:'app'`،
+      سكربت الجرس `/js/app-shell.js`، و`DELETE /api/notifications/:id` لحذف إشعار من الجرس
 - [ ] **1B قاعدة البيانات + البذرة:** جداول المرحلة الأولى في `db/init.js` + `db/seed.js`:
       5 مسارات (بكالوريوس/ماجستير/دكتوراه/دبلوم/باحث مستقل) وخطواتها مع `cost_type` من `TOKEN_COSTS`
 - [ ] **1C `/dashboard` (الإحصائية):** رصيد/مستهلك/إجمالي + نسبة، الباقة، آخر العمليات،
