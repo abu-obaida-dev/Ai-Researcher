@@ -35,14 +35,14 @@ export function requireAccount(req, res, next) {
     return;
   }
 
-  res.redirect(302, `/login?next=${encodeURIComponent(req.originalUrl || '/account')}`);
+  res.redirect(302, `/login?next=${encodeURIComponent(req.originalUrl || '/dashboard')}`);
 }
 
-/** الصفحة التي ينتهي إليها الحساب بعد الدخول: لوحة المدير، أو إكمال الملف، أو لوحة الباحث. */
+/** الصفحة التي ينتهي إليها الحساب بعد الدخول: لوحة المدير، أو إكمال الملف، أو الإحصائية. */
 export function homePathFor(account) {
   if (!account) return '/login';
   if (account.role === 'admin') return '/admin';
-  return account.onboarding_complete ? '/account' : '/onboarding';
+  return account.onboarding_complete ? '/dashboard' : '/onboarding';
 }
 
 /** هل يحتاج الحساب لإكمال ملفه البحثي؟ (المدير لا يحتاج) */

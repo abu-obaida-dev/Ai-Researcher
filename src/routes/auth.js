@@ -26,7 +26,7 @@ import { homePathFor, requireAccount } from '../middleware/auth.js';
 import { freeTrialTokens, getPlanByCode } from '../services/plans.js';
 import { ensureUserFromGoogle, getProfile, getUsageOverview, saveOnboarding } from '../services/users.js';
 import { activeDeviceCount, notifyUser, pushStatusHint, unreadCount } from '../services/notifications.js';
-import { renderAccountPage, renderAuthNotice, renderLoginPage, renderOnboardingPage } from '../views/auth.js';
+import { renderAccountPage, renderAuthNotice, renderDashboardPage, renderLoginPage, renderOnboardingPage } from '../views/auth.js';
 
 /**
  * صفحات المصادقة والحساب:
@@ -36,6 +36,7 @@ import { renderAccountPage, renderAuthNotice, renderLoginPage, renderOnboardingP
  * - /logout         إنهاء الجلسة
  * - /onboarding     إكمال/تعديل الملف البحثي داخل لوحة الباحث (area:'app' + سايدبار)
  * - /account        صفحة الحساب والرصيد داخل لوحة الباحث (area:'app' + سايدبار)
+ * - /dashboard      الصفحة الرئيسية للوحة الباحث: الإحصائية (الرصيد + الباقة + آخر العمليات + روابط سريعة)
  */
 
 const router = express.Router();
@@ -269,7 +270,39 @@ router.post('/onboarding', requireAccount, async (req, res) => {
     about: `الهدف الحالي: ${goalLabel} | حالة المشروع: ${progressLabel}`.trim()
   });
 
-  res.redirect(302, '/account');
+  res.redirect(302, '/dashboard');
+});
+
+/** الإحصائية — الصفحة الرئيسية للوحة الباحث بعد الدخول. */
+router.get('/dashboard', requireAccount, async (req, res) => {
+  // المدير له لوحته الخاصة — لا يدخل إحصائية الباحث
+  if (req.account.role === 'admin') {
+    res.redirect(302, '/admin');
+    return;
+  }
+
+  // من لم يُكمل ملفه يُوجَّه لإكماله أولاً (حماية إضافية فوق requireOnboarding)
+  if (req.account.onboarding_complete !== true) {
+    res.redirect(302, '/onboarding');
+    return;
+  }
+
+  const [profile, plan, usage, unread] = await Promise.all([
+    getProfile(req.account.id),
+    getPlanByCode(req.account.plan_code || FREE_PLAN_CODE),
+    getUsageOverview(req.account.id),
+    unreadCount(req.account.id)
+  ]);
+
+  res.type('html').send(
+    renderDashboardPage({
+      account: req.account,
+      profile,
+      plan,
+      usage,
+      unread
+    })
+  );
 });
 
 /** صفحة الحساب: البيانات + الباقة + الرصيد + آخر العمليات + حالة الإشعارات. */

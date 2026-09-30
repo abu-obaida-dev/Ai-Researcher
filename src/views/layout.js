@@ -528,6 +528,11 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 
 /* ==== صفحة الحساب ==== */
 .account-grid { display: grid; gap: 16px; grid-template-columns: 1.4fr 1fr; }
+/* ==== الإحصائية (الصفحة الرئيسية للوحة الباحث) ==== */
+.dash-grid { display: grid; gap: 16px; grid-template-columns: 1.4fr 1fr; }
+.dash-grid .card h2 { font-size: 15px; }
+.dash-welcome { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; }
+.dash-welcome h2 { font-size: 18px; }
 .id-card { display: flex; align-items: center; gap: 16px; }
 .avatar {
   display: grid; place-items: center; width: 58px; height: 58px; border-radius: 18px;
@@ -547,7 +552,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 @media (max-width: 900px) {
   .hero-grid { grid-template-columns: 1fr; padding: 40px 20px; }
   .hero-copy h1 { font-size: 28px; }
-  .onboarding-grid, .account-grid { grid-template-columns: 1fr; }
+  .onboarding-grid, .account-grid, .dash-grid { grid-template-columns: 1fr; }
   .footer-grid { grid-template-columns: 1fr 1fr; }
   .auth-split { grid-template-columns: 1fr; }
   .auth-aside { display: none; }
@@ -741,7 +746,7 @@ function renderAppTopbar(account, unread = 0) {
           <div class="bell-foot"><a href="/notifications">كل الإشعارات</a> · <a href="/account">حسابى</a></div>
         </div>
       </div>
-      <a class="app-user" href="/account" title="حسابى">${avatar}<span class="app-user-name">${escapeHtml(name)}</span></a>
+      <a class="app-user" href="/dashboard" title="لوحتي">${avatar}<span class="app-user-name">${escapeHtml(name)}</span></a>
       <a class="icon-btn" href="/logout" title="تسجيل الخروج" aria-label="تسجيل الخروج">${icon('logout', 'icon-sm')}</a>
     </div>
   </div>
@@ -781,7 +786,7 @@ function renderPublicHeader(account, unread = 0) {
 
   const actions = account
     ? `<a class="link-quiet" href="${needsOnboarding(account) ? '/onboarding' : homePathFor(account)}">${
-        needsOnboarding(account) ? 'أكمل ملفك البحثي' : account.role === 'admin' ? 'لوحة الإدارة' : 'حسابي'
+        needsOnboarding(account) ? 'أكمل ملفك البحثي' : account.role === 'admin' ? 'لوحة الإدارة' : 'لوحتي'
       }</a>
        <a class="btn" href="/logout">${icon('logout', 'icon-sm')} خروج</a>`
     : `<a class="link-quiet" href="/login">تسجيل الدخول</a>

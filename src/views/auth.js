@@ -201,6 +201,25 @@ function labelOf(options, value) {
   return options.find((option) => option.value === value)?.label || value || '';
 }
 
+/** بطاقة ملخص الملف البحثي — تُستخدم في الحساب والإحصائية (لا شيء إن لم يُكمل الملف). */
+function profileSummary(profile) {
+  if (!profile) {
+    return '<div class="empty">لم تُكمل ملفك البحثي بعد — أكمله ليخصّص المشرف الذكي إشرافه لك.</div>';
+  }
+
+  const stageLabel =
+    RESEARCH_STAGES.find((item) => item.value === profile.research_stage)?.label || profile.research_stage || '—';
+
+  return `<dl class="kv">
+      ${kv('المجال', profile.research_field || '—')}
+      ${kv('التخصص', profile.specialization || '—')}
+      ${kv('العنوان', profile.research_title || '—')}
+      ${kv('الدرجة', DEGREE_LEVELS.find((item) => item.value === profile.degree_level)?.label || profile.degree_level || '—')}
+      ${kv('الجامعة', profile.university || '—')}
+      ${kv('المرحلة', stageLabel)}
+    </dl>`;
+}
+
 /** صفحة حساب الباحث: البيانات الأساسية + الرصيد + الملف البحثي + آخر العمليات. */
 export function renderAccountPage({
   account,
@@ -284,7 +303,7 @@ export function renderAccountPage({
 
   <div class="card">
     <h2>ملفي البحثي</h2>
-    ${profileCard}
+    ${profileSummary(profile)}
   </div>
 
   <div class="card">
@@ -308,6 +327,86 @@ export function renderAccountPage({
     body
   });
 }
+/** صفحة الإحصائية — الرئيسية للوحة الباحث بعد الدخول: الرصيد + الباقة + آخر العمليات + الملف. */
+export function renderDashboardPage({ account, profile, plan, usage, unread = 0 }) {
+  const balance = account.tokens_balance ?? 0;
+  const used = usage.tokens ?? 0;
+  const granted = balance + used;
+  const percent = granted > 0 ? Math.min(100, Math.round((used / granted) * 100)) : 0;
+
+  const usageRows =
+    usage.recent.length === 0
+      ? []
+      : usage.recent.map(
+          (row) => `<tr>
+      <td class="muted">${escapeHtml(formatDateTime(row.created_at))}</td>
+      <td>${escapeHtml(usageLabel(row.type))}</td>
+      <td class="strong">${escapeHtml(formatNumber(row.tokens_used))}</td>
+      <td class="muted">${escapeHtml(row.summary || '—')}</td>
+    </tr>`
+        );
+
+  const firstName = String(account.full_name || 'باحث').trim().split(/\s+/)[0] || 'باحث';
+
+  const body = `<div class="dash-grid">
+  <div class="card dash-welcome">
+    <h2>أهلاً ${escapeHtml(firstName)} 👋</h2>
+    <p class="muted">هذه إحصائية حسابك — رصيدك ونشاطك الأخير في مكان واحد.</p>
+    <div class="links">
+      <a class="btn btn-primary" href="/chat">${icon('message', 'icon-sm')} ابدأ مع المشرف الذكي</a>
+      <a class="btn" href="/journey">${icon('graduation', 'icon-sm')} مسار البحث</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>رصيد التوكنز</h2>
+    <p class="balance">${escapeHtml(formatNumber(balance))} <span>توكن متاح</span></p>
+    <div class="meter"><i style="width:${percent}%"></i></div>
+    <p class="muted">استُهلك ${escapeHtml(formatNumber(used))} من إجمالي ${escapeHtml(
+      formatNumber(granted)
+    )} توكن (${percent}%).</p>
+    <dl class="kv">
+      ${kv('الباقة الحالية', plan?.title || account.plan_code || 'لا توجد باقة')}
+      ${kv('عمليات مسجّلة', formatNumber(usage.events))}
+    </dl>
+    <div class="links">
+      <a class="btn" href="/account">تفاصيل الحساب والرصيد</a>
+      <a class="btn" href="/#pricing">الباقات</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>ملفي البحثي</h2>
+    ${profileSummary(profile)}
+    <div class="links">
+      <a class="btn" href="/onboarding">${
+        profile ? 'تعديل ملفي البحثي' : 'أكمل ملفك البحثي الآن'
+      }</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>آخر عمليات الاستهلاك</h2>
+    ${renderTable({
+      columns: ['التاريخ', 'النوع', 'التوكنز', 'الملخص'],
+      rows: usageRows,
+      emptyMessage: 'لا توجد عمليات استهلاك مسجّلة بعد — ابدأ محادثة مع المشرف الذكي.'
+    })}
+  </div>
+</div>`;
+
+  return renderLayout({
+    title: 'الإحصائية',
+    subtitle: 'الصفحة الرئيسية للوحة الباحث — رصيدك ونشاطك وملفك البحثي',
+    area: 'app',
+    activeKey: 'dashboard',
+    account,
+    unread,
+    scripts: ['/js/app-shell.js'],
+    body
+  });
+}
+
 export function renderAuthNotice({ title, message, details = '', firebaseWeb = null }) {
   const firebaseBlock = firebaseWeb?.ready
     ? `<div class="notice-firebase">
