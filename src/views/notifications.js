@@ -2,8 +2,9 @@ import { formatDateTime } from './format.js';
 import { escapeHtml, renderLayout } from './layout.js';
 
 /**
- * صفحة الإشعارات: تفعيل إشعارات الهاتف (FCM Web) + قائمة الإشعارات داخل الموقع.
+ * صفحة الإشعارات داخل لوحة الباحث: تفعيل إشعارات الهاتف (FCM Web) + قائمة الإشعارات داخل الموقع.
  * أزرار التفعيل تُدار من /js/notifications-client.js (بدون أي سكربت سطري هنا).
+ * قائمة الجرس في الشريط العلوي تُدار من /js/app-shell.js عبر نفس الـ APIs.
  */
 
 /** عنصر واحد في قائمة الإشعارات (نقطة حمراء إن لم يُقرأ + زر تعليم كمقروء). */
@@ -69,18 +70,21 @@ export function renderNotificationsPage({ account, items, unread, devices, hint 
     ${listHtml}
   </div>
 </div>
-
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" defer></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js" defer></script>
-<script src="/js/notifications-client.js" defer></script>`;
+`;
 
   return renderLayout({
     title: 'الإشعارات',
     subtitle: unread ? `لديك ${unread} إشعار غير مقروء` : 'كل جديد المنصة في مكان واحد',
-    area: 'public',
+    area: 'app',
     activeKey: '',
     account,
     unread,
+    scripts: [
+      'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js',
+      'https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js',
+      '/js/notifications-client.js',
+      '/js/app-shell.js'
+    ],
     body
   });
 }

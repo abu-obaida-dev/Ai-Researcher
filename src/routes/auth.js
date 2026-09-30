@@ -29,13 +29,13 @@ import { activeDeviceCount, notifyUser, pushStatusHint, unreadCount } from '../s
 import { renderAccountPage, renderAuthNotice, renderLoginPage, renderOnboardingPage } from '../views/auth.js';
 
 /**
- * مسارات المصادقة والحساب:
+ * صفحات المصادقة والحساب:
  * - /login          صفحة الدخول (زر جوجل)
  * - /auth/google    بدء دخول جوجل (OAuth 2.0 code flow)
  * - /auth/google/callback  معالجة العودة: تحقق من الـ state ثم إنشاء/تحديث المستخدم في PostgreSQL
  * - /logout         إنهاء الجلسة
- * - /onboarding     إكمال/تعديل الملف البحثي (GET + POST)
- * - /account        صفحة الحساب والرصيد
+ * - /onboarding     إكمال/تعديل الملف البحثي داخل لوحة الباحث (area:'app' + سايدبار)
+ * - /account        صفحة الحساب والرصيد داخل لوحة الباحث (area:'app' + سايدبار)
  */
 
 const router = express.Router();

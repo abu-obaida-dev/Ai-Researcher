@@ -185,6 +185,19 @@ export async function markAllNotificationsRead(userId) {
   }
 }
 
+/** حذف إشعار واحد من قائمة صاحبه (id غير صالح يعيد false بدل رمي خطأ). */
+export async function deleteNotification(userId, id) {
+  try {
+    const { rowCount } = await pool.query('DELETE FROM notifications WHERE user_id = $1 AND id = $2', [
+      userId,
+      String(id || '')
+    ]);
+    return rowCount > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** عدد الأجهزة المفعّلة فعلياً (0 يعني إيقاف الإشعارات تماماً). */
 export async function activeDeviceCount(userId) {
   try {

@@ -43,6 +43,25 @@ const NAV_ITEMS = [
   { href: '/admin/usage', label: 'الاستهلاك', key: 'usage' }
 ];
 
+/**
+ * روابط الشريط الجانبي في لوحة الباحث (area: 'app').
+ * المصدر الواحد لأدوات المستخدم: الإحصائية، مسار البحث، المشرف الذكي، المراجع، المفكرة، ملفاتى.
+ */
+const APP_NAV = [
+  { href: '/dashboard', label: 'الإحصائية', key: 'dashboard', icon: 'coins' },
+  { href: '/journey', label: 'مسار البحث', key: 'journey', icon: 'graduation' },
+  { href: '/chat', label: 'المشرف الذكي', key: 'chat', icon: 'message' },
+  { href: '/references', label: 'المراجع', key: 'references', icon: 'book' },
+  { href: '/notes', label: 'المفكرة', key: 'notes', icon: 'list' },
+  { href: '/files', label: 'ملفاتى', key: 'files', icon: 'clipboard' }
+];
+
+/** روابط الحساب أسفل الشريط الجانبي (تظهر للجميع، ولوحة الإدارة للمدير فقط). */
+const APP_ACCOUNT_NAV = [
+  { href: '/account', label: 'حسابى والرصيد', key: 'account', icon: 'userPlus' },
+  { href: '/onboarding', label: 'ملفي البحثى', key: 'onboarding', icon: 'searchCheck' }
+];
+
 /** يمنع حقن HTML عند طباعة أي قيمة قادمة من قاعدة البيانات أو من المستخدم. */
 export function escapeHtml(value) {
   if (value === null || value === undefined) return '';
@@ -548,6 +567,96 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   .hero h1 { font-size: 22px; }
   .hero-logo { width: 84px; height: 84px; }
 }
+
+/* ==== لوحة الباحث (area: 'app'): شريط علوي مضغوط + شريط جانبي يسار ==== */
+.app-top { position: sticky; top: 0; z-index: 60; background: var(--ink); color: #fff; border-bottom: 2px solid var(--apricot); }
+.app-top-inner { max-width: 1400px; margin: 0 auto; padding: 7px 16px; display: flex; align-items: center; gap: 10px; }
+.app-top .brand { gap: 9px; }
+.app-top .brand-mark { width: 34px; height: 34px; padding: 4px; border-radius: 11px; }
+.app-top .brand-title { font-size: 15px; }
+.app-top .brand-sub { font-size: 10px; }
+.app-top-spacer { flex: 1; }
+.app-top-actions { display: flex; align-items: center; gap: 8px; }
+.icon-btn {
+  position: relative; display: inline-grid; place-items: center; width: 36px; height: 36px;
+  border-radius: 12px; border: 1px solid rgba(216, 243, 239, .26); background: rgba(255, 255, 255, .07);
+  color: #fff; cursor: pointer; font-family: inherit; padding: 0;
+}
+.icon-btn:hover { background: rgba(255, 255, 255, .17); }
+.icon-btn-badge {
+  position: absolute; top: -5px; inset-inline-start: -5px; min-width: 17px; height: 17px; padding: 0 4px;
+  border-radius: 999px; background: var(--apricot); color: var(--ink);
+  font-size: 10px; font-weight: 800; line-height: 17px; text-align: center;
+}
+.icon-btn-badge[hidden] { display: none; }
+.app-user {
+  display: inline-flex; align-items: center; gap: 8px; padding: 3px 11px 3px 5px;
+  border-radius: 999px; background: rgba(255, 255, 255, .09); color: #fff;
+  font-size: 12px; font-weight: 700; max-width: 210px;
+}
+.app-user:hover { background: rgba(255, 255, 255, .18); color: #fff; }
+.app-user img, .app-user .avatar-xs {
+  width: 28px; height: 28px; border-radius: 50%; flex: 0 0 auto; object-fit: cover;
+  display: grid; place-items: center; background: var(--paper); color: var(--sea-deep);
+  font-size: 12px; font-weight: 800;
+}
+.app-user-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ==== قائمة الجرس ==== */
+.bell-wrap { position: relative; }
+.bell-menu {
+  position: absolute; top: calc(100% + 9px); inset-inline-start: 0; width: min(370px, 92vw);
+  background: #fff; border: 1px solid var(--mist); border-radius: 16px; color: var(--slate);
+  box-shadow: 0 26px 48px -26px var(--ink-10); overflow: hidden; z-index: 80;
+}
+.bell-menu[hidden] { display: none; }
+.bell-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 13px; border-bottom: 1px solid var(--mist); }
+.bell-head b { color: var(--ink); font-size: 13px; }
+.bell-mini {
+  border: 0; background: transparent; color: var(--sea); font-family: inherit;
+  font-size: 11.5px; font-weight: 700; cursor: pointer; padding: 4px 7px; border-radius: 8px;
+}
+.bell-mini:hover { background: var(--mist-soft); }
+.bell-list { list-style: none; margin: 0; padding: 6px; max-height: 330px; overflow-y: auto; display: grid; gap: 6px; }
+.bell-list li { display: flex; gap: 8px; align-items: flex-start; padding: 9px 10px; border-radius: 12px; border: 1px solid transparent; background: var(--paper); }
+.bell-list li.unread { background: var(--mist-soft); border-color: var(--fresh-20); }
+.bell-item-body { flex: 1; min-width: 0; }
+.bell-item-title { color: var(--ink); font-size: 12.5px; font-weight: 700; }
+.bell-item-text { margin-top: 3px; font-size: 11.5px; line-height: 1.8; color: var(--slate); }
+.bell-item-time { margin-top: 4px; font-size: 10.5px; color: var(--slate); opacity: .85; }
+.bell-item-actions { display: grid; gap: 3px; flex: 0 0 auto; }
+.bell-empty { padding: 20px 14px; text-align: center; font-size: 12px; color: var(--slate); }
+.bell-empty[hidden] { display: none; }
+.bell-foot { padding: 9px 13px; border-top: 1px solid var(--mist); text-align: center; font-size: 11.5px; font-weight: 600; }
+
+/* ==== هيكل الصفحة: محتوى يمين + شريط جانبي يسار ==== */
+.app-page { padding: 0; }
+.app-shell {
+  max-width: 1400px; margin: 0 auto; padding: 14px 16px 34px;
+  display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 230px; align-items: start;
+}
+.app-main { grid-column: 1; min-width: 0; }
+.app-main .page-head h1 { font-size: 20px; }
+.app-side { grid-column: 2; position: sticky; top: 60px; }
+.app-nav { background: #fff; border: 1px solid var(--mist); border-radius: 18px; padding: 7px; box-shadow: var(--shadow); display: grid; gap: 2px; }
+.app-nav a { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 12px; color: var(--slate); font-size: 12.5px; font-weight: 600; }
+.app-nav a:hover { background: var(--mist-soft); color: var(--sea-deep); }
+.app-nav a.active { background: var(--ink); color: #fff; font-weight: 700; }
+.app-nav a.active .icon { color: var(--fresh); }
+.app-nav-label { padding: 9px 11px 3px; font-size: 10.5px; font-weight: 800; letter-spacing: .08em; color: var(--slate); }
+.app-nav-sep { height: 1px; background: var(--mist); margin: 6px 9px; }
+.app-nav a.danger:hover { background: var(--apricot-soft); color: var(--ink); }
+
+@media (max-width: 900px) {
+  .app-shell { grid-template-columns: minmax(0, 1fr); padding: 12px 14px 30px; }
+  .app-main { grid-column: 1; }
+  .app-side { grid-column: 1; position: static; order: -1; }
+  .app-nav { display: flex; overflow-x: auto; gap: 6px; padding: 6px; }
+  .app-nav a { white-space: nowrap; padding: 8px 12px; border-radius: 999px; }
+  .app-nav-label, .app-nav-sep { display: none; }
+  .app-top .brand-text { display: none; }
+  .app-user-name { display: none; }
+}
 `;
 
 /** شريط التنقل مع تمييز الصفحة الحالية. */
@@ -592,6 +701,78 @@ function renderBrand(activeKey) {
     <span class="brand-sub">${escapeHtml(sub)}</span>
   </span>
 </a>`;
+}
+
+/** الشريط العلوي المضغوط للوحة الباحث: الشعار + جرس الإشعارات + حساب المستخدم. */
+function renderAppTopbar(account, unread = 0) {
+  const name = String(account?.full_name || account?.email || 'باحث').trim();
+  const avatar = account?.photo_url
+    ? `<img src="${escapeHtml(account.photo_url)}" alt="" width="28" height="28" referrerpolicy="no-referrer" />`
+    : `<span class="avatar-xs">${escapeHtml(name.charAt(0) || '؟')}</span>`;
+
+  const badge =
+    unread > 0
+      ? `<span class="icon-btn-badge" id="bell-badge">${unread > 99 ? '99+' : unread}</span>`
+      : '<span class="icon-btn-badge" id="bell-badge" hidden>0</span>';
+
+  return `<header class="app-top">
+  <div class="app-top-inner">
+    <a class="brand" href="/dashboard">
+      <span class="brand-mark"><img src="${BRAND.icon}" alt="" width="26" height="26" /></span>
+      <span class="brand-text">
+        <span class="brand-title">${escapeHtml(APP_NAME)}</span>
+        <span class="brand-sub">${escapeHtml(APP_TAGLINE)}</span>
+      </span>
+    </a>
+    <span class="app-top-spacer"></span>
+    <div class="app-top-actions">
+      <div class="bell-wrap">
+        <button type="button" class="icon-btn" id="bell-toggle" aria-expanded="false" aria-haspopup="true" aria-controls="bell-menu" title="الإشعارات" aria-label="الإشعارات">
+          ${icon('bell', 'icon-sm')}
+          ${badge}
+        </button>
+        <div class="bell-menu" id="bell-menu" hidden>
+          <div class="bell-head">
+            <b>الإشعارات</b>
+            <button type="button" class="bell-mini" id="bell-read-all">تعليم الكل كمقروء</button>
+          </div>
+          <ul class="bell-list" id="bell-list"></ul>
+          <div class="bell-empty" id="bell-empty">جارٍ تحميل الإشعارات…</div>
+          <div class="bell-foot"><a href="/notifications">كل الإشعارات</a> · <a href="/account">حسابى</a></div>
+        </div>
+      </div>
+      <a class="app-user" href="/account" title="حسابى">${avatar}<span class="app-user-name">${escapeHtml(name)}</span></a>
+      <a class="icon-btn" href="/logout" title="تسجيل الخروج" aria-label="تسجيل الخروج">${icon('logout', 'icon-sm')}</a>
+    </div>
+  </div>
+</header>`;
+}
+
+/** الشريط الجانبي للوحة الباحث: أدوات البحث ثم روابط الحساب (واللوحة للمدير فقط). */
+function renderAppSidebar(activeKey, account) {
+  const link = (item) =>
+    `<a href="${item.href}"${item.key === activeKey ? ' class="active"' : ''}>${icon(item.icon, 'icon-sm')}<span>${escapeHtml(
+      item.label
+    )}</span></a>`;
+
+  const tools = APP_NAV.map(link).join('');
+  const accountLinks = APP_ACCOUNT_NAV.map(link).join('');
+  const admin =
+    account?.role === 'admin'
+      ? `<a href="/admin"${activeKey === 'admin' ? ' class="active"' : ''}>${icon('shield', 'icon-sm')}<span>لوحة الإدارة</span></a>`
+      : '';
+
+  return `<aside class="app-side">
+  <nav class="app-nav" aria-label="أدوات الباحث">
+    <span class="app-nav-label">أدوات البحث</span>
+    ${tools}
+    <div class="app-nav-sep"></div>
+    <span class="app-nav-label">حسابى</span>
+    ${accountLinks}
+    ${admin}
+    <a class="danger" href="/logout">${icon('logout', 'icon-sm')}<span>تسجيل الخروج</span></a>
+  </nav>
+</aside>`;
 }
 
 /** ترويسة الصفحة العامة: قائمة الموقع + زر الدخول أو الحساب حسب حالة الجلسة. */
@@ -676,7 +857,8 @@ export function renderLayout({
   area = 'admin',
   pageHead = true,
   account = null,
-  unread = 0
+  unread = 0,
+  scripts = []
 }) {
   const documentTitle = title.includes(APP_NAME) ? title : `${title} — ${APP_NAME}`;
 
@@ -685,7 +867,9 @@ export function renderLayout({
       ? renderPublicHeader(account, unread)
       : area === 'auth'
         ? ''
-        : `<header class="topbar">
+        : area === 'app'
+          ? renderAppTopbar(account, unread)
+          : `<header class="topbar">
   <div class="topbar-inner">
     ${renderBrand(activeKey)}
     <nav class="nav">${renderNav(activeKey)}</nav>
@@ -695,7 +879,7 @@ export function renderLayout({
   const footer =
     area === 'public'
       ? renderPublicFooter()
-      : area === 'auth'
+      : area === 'auth' || area === 'app'
         ? ''
         : `<footer class="footer">
   <span class="footer-brand"><img src="${BRAND.icon}" alt="" width="18" height="18" />${escapeHtml(APP_NAME)}</span>
@@ -708,6 +892,19 @@ export function renderLayout({
     ${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ''}
   </div>`
     : '';
+
+  const scriptTags = Array.isArray(scripts)
+    ? scripts.map((src) => `<script src="${escapeHtml(src)}" defer></script>`).join('\n')
+    : '';
+
+  // لوحة الباحث: المحتوى يمين + الشريط الجانبي يسار (RTL: العمود الأول يمين)
+  const mainInner =
+    area === 'app'
+      ? `<div class="app-shell"><div class="app-main">${headBlock}${body}</div>${renderAppSidebar(
+        activeKey,
+        account
+      )}</div>`
+      : `${headBlock}${body}`;
 
   return `<!doctype html>
 <html lang="ar" dir="rtl">
@@ -724,11 +921,11 @@ export function renderLayout({
 </head>
 <body>
 ${header}
-<main class="${area === 'auth' ? 'auth-main' : 'page'}">
-  ${headBlock}
-  ${body}
+<main class="${area === 'auth' ? 'auth-main' : area === 'app' ? 'app-page' : 'page'}">
+  ${mainInner}
 </main>
 ${footer}
+${scriptTags}
 </body>
 </html>`;
 }
@@ -746,4 +943,4 @@ export function renderNotice({ title, message, details = '', status = 200, extra
   return { status, html: renderLayout({ title, subtitle: 'لوحة الإدارة', activeKey: 'home', body }) };
 }
 
-export { APP_NAME, APP_TAGLINE, BRAND, NAV_ITEMS, STYLES };
+export { APP_NAME, APP_TAGLINE, BRAND, NAV_ITEMS, APP_NAV, APP_ACCOUNT_NAV, STYLES };

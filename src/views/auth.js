@@ -181,8 +181,12 @@ export function renderOnboardingPage({ account, values, errors = [], profile = n
   return renderLayout({
     title: profile ? 'ملفي البحثي' : 'أكمل ملفك البحثي',
     subtitle: 'خطوة واحدة لتخصيص إشراف المشرف الذكي لمجالك ومرحلتك',
-    area: 'public',
+    area: 'app',
+    activeKey: 'onboarding',
     account,
+    unread: 0,
+    scripts: ['/js/app-shell.js'],
+    pageHead: !account,
     body
   });
 }
@@ -296,10 +300,11 @@ export function renderAccountPage({
   return renderLayout({
     title: 'حسابي',
     subtitle: 'بياناتك البحثية ورصيد التوكنز محفوظة في قاعدة بيانات المنصة',
-    area: 'public',
-    activeKey: '',
+    area: 'app',
+    activeKey: 'account',
     account,
     unread: notifications.unread,
+    scripts: ['/js/app-shell.js'],
     body
   });
 }

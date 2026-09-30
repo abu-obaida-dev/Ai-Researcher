@@ -3,6 +3,7 @@ import { requireAccount } from '../middleware/auth.js';
 import { firebaseWebConfig } from '../services/firebase.js';
 import {
   activeDeviceCount,
+  deleteNotification,
   disableDeviceToken,
   listNotifications,
   markAllNotificationsRead,
@@ -16,13 +17,14 @@ import { renderNotificationsPage } from '../views/notifications.js';
 
 /**
  * مسارات الإشعارات:
- * - GET  /notifications                صفحة الإشعارات (القائمة + تفعيل الهاتف)
+ * - GET  /notifications                صفحة الإشعارات داخل لوحة الباحث (area:'app' + سايدبار)
  * - GET  /api/firebase-config          إعدادات Firebase العامة للواجهة والـ SW (بدون أسرار)
- * - GET  /api/notifications            JSON: عدد غير المقروء + آخر الإشعارات
+ * - GET  /api/notifications            JSON: عدد غير المقروء + آخر الإشعارات (يغذي جرس الشريط العلوي)
  * - POST /api/notifications/register    حفظ توكن جهاز (FCM)
  * - POST /api/notifications/unregister  إيقاف توكن جهاز
- * - POST /api/notifications/read-all    تعليم الكل كمقروء
- * - POST /api/notifications/:id/read    تعليم إشعار واحد كمقروء
+ * - POST /api/notifications/read-all    تعليم الكل كمقروء (يستخدمه زر الجرس «تعليم الكل كمقروء»)
+ * - POST /api/notifications/:id/read    تعليم إشعار واحد كمقروء (يستخدمه زر الجرس)
+ * - DELETE /api/notifications/:id       حذف إشعار واحد من قائمة صاحبه (يستخدمه زر «حذف» في الجرس)
  */
 const router = express.Router();
 
@@ -111,6 +113,16 @@ router.post('/api/notifications/read-all', requireAccount, async (req, res) => {
 router.post('/api/notifications/:id/read', requireAccount, async (req, res) => {
   const updated = await markNotificationRead(req.account.id, req.params.id);
   if (!updated) {
+    sendError(res, 404, 'الإشعار غير موجود.');
+    return;
+  }
+  res.json({ ok: true, unread: await unreadCount(req.account.id) });
+});
+
+// حذف إشعار واحد من قائمة الحساب (يملكه فقط صاحبه — تُستخدم من قائمة الجرس)
+router.delete('/api/notifications/:id', requireAccount, async (req, res) => {
+  const deleted = await deleteNotification(req.account.id, req.params.id);
+  if (!deleted) {
     sendError(res, 404, 'الإشعار غير موجود.');
     return;
   }

@@ -38,7 +38,7 @@ export function requireAccount(req, res, next) {
   res.redirect(302, `/login?next=${encodeURIComponent(req.originalUrl || '/account')}`);
 }
 
-/** الصفحة التي ينتهي إليها الحساب بعد الدخول: لوحة المدير، أو إكمال الملف، أو الحساب. */
+/** الصفحة التي ينتهي إليها الحساب بعد الدخول: لوحة المدير، أو إكمال الملف، أو لوحة الباحث. */
 export function homePathFor(account) {
   if (!account) return '/login';
   if (account.role === 'admin') return '/admin';
