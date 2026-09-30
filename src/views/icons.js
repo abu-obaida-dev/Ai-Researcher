@@ -23,7 +23,17 @@ const PATHS = {
   check: '<path d="m4.5 12.5 5 5 10-11"/>',
   arrow: '<path d="M19 12H5M11.5 5.5 5 12l6.5 6.5"/>',
   bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
-  logout: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 8l-4 4 4 4M6 12h9"/>'
+  logout: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 8l-4 4 4 4M6 12h9"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  download: '<path d="M12 3v12"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M4 20h16"/>',
+  trash: '<path d="M4 7h16"/><path d="M9.5 7V4.8h5V7"/><path d="M6.5 7l1 13h9l1-13"/><path d="M10.5 11v6M13.5 11v6"/>',
+  file: '<path d="M14 3v5h5"/><path d="M19 21V8l-5-5H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z"/><path d="M8.5 13h7M8.5 17h5"/>',
+  paperclip: '<path d="M20 11.5 12.3 19a4.6 4.6 0 0 1-6.5-6.5l7.9-7.9a3.1 3.1 0 0 1 4.4 4.4l-7.9 7.9a1.6 1.6 0 0 1-2.2-2.2l7-7"/>',
+  send: '<path d="M21 3 3 10.5l7.5 3 3 7.5z"/><path d="M10.5 13.5 21 3"/>',
+  edit: '<path d="M4 20h4L20 8l-4-4L4 16z"/><path d="M14.5 5.5 18.5 9.5"/>',
+  upload: '<path d="M12 21V9"/><path d="m7.5 13.5 4.5-4.5 4.5 4.5"/><path d="M4 4h16"/>',
+  pin: '<path d="M9 4h6l-1 6 4 3v2H6v-2l4-3z"/><path d="M12 15v5"/>',
+  refresh: '<path d="M20 11.5A8 8 0 1 0 18 17"/><path d="M20 5v6h-6"/>'
 };
 
 /** أيقونة واحدة بحجم افتراضي مناسب للنصوص والبطاقات. */

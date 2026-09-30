@@ -123,6 +123,7 @@ const RESEARCH_PATH_STEPS_TABLE = `
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     path_id UUID NOT NULL REFERENCES research_paths(id) ON DELETE CASCADE,
     step_no INTEGER NOT NULL,
+    step_key VARCHAR(100),
     title VARCHAR(255) NOT NULL,
     description TEXT,
     cost_type VARCHAR(100) NOT NULL DEFAULT 'chat',
@@ -144,16 +145,22 @@ const USER_PATHS_TABLE = `
   );
 `;
 
-/** تقدم الباحث في كل خطوة (لم يبدأ/جاري/تم + ملاحظة المخرجات). */
+/**
+ * تقدم الباحث في كل خطوة (لم يبدأ/جاري/تم + ملاحظة المخرجات).
+ * step_key هو المعرّف الدلالي للخطوة ('topic'، 'proposal'، …) لأنه يبقى ثابتاٌ سواء
+ * جاءت الخطوات من قاعدة البيانات (بعد db:seed) أو من التعريفات في src/data/research-paths.js،
+ * فيبقى تقدّم الباحث صحيحاٌ في الحالتين. step_id يبقى اختيارياٌ للخطوات المخزّنة.
+ */
 const USER_STEP_PROGRESS_TABLE = `
   CREATE TABLE IF NOT EXISTS user_step_progress (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    step_id UUID NOT NULL REFERENCES research_path_steps(id) ON DELETE CASCADE,
+    step_key VARCHAR(100) NOT NULL,
+    step_id UUID REFERENCES research_path_steps(id) ON DELETE CASCADE,
     status VARCHAR(50) NOT NULL DEFAULT 'not_started',
     output_note TEXT,
     completed_at TIMESTAMPTZ,
     updated_at TIMESTAMPTZ DEFAULT NOW(),
-    PRIMARY KEY (user_id, step_id)
+    PRIMARY KEY (user_id, step_key)
   );
 `;
 
@@ -431,6 +438,48 @@ const USERS_PLAN_FOREIGN_KEY = `
 `;
 
 /**
+ * ترقية المرحلة الأولى: ربط التقدم والملاحظات والمراجع والملفات بـ step_key
+ * (المعرّف الدلالي للخطوة) بدل step_id وحده، حتى يعمل «مسار البحث» من
+ * التعريفات البرمجية في src/data/research-paths.js بدون الحاجة إلى البذرة.
+ * كل عبارة idempotent وتعمل على قاعدة قائمة أو جديدة.
+ */
+const STEP_KEY_UPGRADE = `
+  ALTER TABLE research_path_steps ADD COLUMN IF NOT EXISTS step_key VARCHAR(100);
+  ALTER TABLE user_references ADD COLUMN IF NOT EXISTS step_key VARCHAR(100);
+  ALTER TABLE notes ADD COLUMN IF NOT EXISTS step_key VARCHAR(100);
+  ALTER TABLE files ADD COLUMN IF NOT EXISTS step_key VARCHAR(100);
+  ALTER TABLE conversations ADD COLUMN IF NOT EXISTS step_key VARCHAR(100);
+  ALTER TABLE user_step_progress ADD COLUMN IF NOT EXISTS step_key VARCHAR(100);
+  UPDATE user_step_progress SET step_key = 'legacy-' || step_id::text WHERE step_key IS NULL;
+  UPDATE user_step_progress p SET step_key = s.step_key
+    FROM research_path_steps s WHERE p.step_id = s.id AND s.step_key IS NOT NULL;
+  -- مفتاح جدول التقدم كان (user_id, step_id) — يُسقط أولاّ ثم يصبح (user_id, step_key)
+  DO $$
+  BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_step_progress_pkey') THEN
+      ALTER TABLE user_step_progress DROP CONSTRAINT user_step_progress_pkey;
+    END IF;
+  END $$;
+  ALTER TABLE user_step_progress ALTER COLUMN step_id DROP NOT NULL;
+  ALTER TABLE user_step_progress ALTER COLUMN step_key SET NOT NULL;
+  DO $$
+  BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_step_progress_pkey') THEN
+      ALTER TABLE user_step_progress ADD CONSTRAINT user_step_progress_pkey PRIMARY KEY (user_id, step_key);
+    END IF;
+  END $$;
+`;
+
+/** فهارس المرحلة الأولى على المفاتيح الجديدة. */
+const STEP_KEY_INDEXES = `
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_path_steps_key ON research_path_steps(path_id, step_key) WHERE step_key IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_user_refs_step_key ON user_references(user_id, step_key);
+  CREATE INDEX IF NOT EXISTS idx_notes_step_key ON notes(user_id, step_key);
+  CREATE INDEX IF NOT EXISTS idx_files_step_key ON files(user_id, step_key);
+  CREATE INDEX IF NOT EXISTS idx_conversations_step_key ON conversations(user_id, step_key);
+`;
+
+/**
  * ينشئ قاعدة البيانات المستهدفة إن لم تكن موجودة.
  * يتصل بقاعدة الصيانة postgres، وإذا فشل الاتصال بها نُكمل ونترك الخطأ يظهر عند الاتصال بالقاعدة الهدف.
  */
@@ -500,7 +549,9 @@ async function initializeDatabase() {
     await pool.query(PLANS_EXTRA_COLUMNS);
     await pool.query(USERS_GOOGLE_SUB_UNIQUE);
     await pool.query(USERS_PLAN_FOREIGN_KEY);
+    await pool.query(STEP_KEY_UPGRADE);
     await pool.query(INDEXES);
+    await pool.query(STEP_KEY_INDEXES);
     await pool.query(NOTIFICATION_INDEXES);
 
     console.log(`Database initialized successfully on ${target.host}:${target.port}/${target.database}.`);

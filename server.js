@@ -8,7 +8,10 @@ import { pool, testDatabaseConnection } from './src/db/client.js';
 import { hintForDatabaseError } from './src/db/errors.js';
 import { adminRouter } from './src/routes/admin.js';
 import { authRouter } from './src/routes/auth.js';
+import { chatRouter } from './src/routes/chat.js';
+import { journeyRouter } from './src/routes/journey.js';
 import { notificationsRouter } from './src/routes/notifications.js';
+import { workspaceRouter } from './src/routes/workspace.js';
 import { attachAccount } from './src/middleware/auth.js';
 import { freeTrialTokens, listPublicPlans } from './src/services/plans.js';
 import { renderLandingPage } from './src/views/landing.js';
@@ -132,6 +135,11 @@ app.use(authRouter);
 
 // الإشعارات: صفحة /notifications + APIs توكنات الأجهزة وقائمة الإشعارات
 app.use(notificationsRouter);
+
+// مساحة عمل الباحث (1D + 1E + 1F): مسار البحث، المراجع، المفكرة، الملفات، الشات
+app.use(journeyRouter);
+app.use(workspaceRouter);
+app.use(chatRouter);
 
 // لوحة الإدارة (صفحات HTML مولَّدة على الخادم) — بديل واجهة Next.js القديمة
 app.use('/admin', adminRouter);

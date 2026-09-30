@@ -1,0 +1,242 @@
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { pool } from '../db/client.js';
+import { FILE_UPLOAD_LIMITS } from '../constants.js';
+import { isValidStepKeyForUser } from './journey.js';
+
+/**
+ * ملفات الباحث (1E): الميتاداتا في جدول files والبايتات على القرص تحت
+ * storage/users/{userId}/files/ كما هو موصوف في storage/README.md.
+ * كل عملية تتأكد أن الملف مملوك لصاحب الجلسة، والرفع محدود بالحجم والأنواع
+ * المسموحة (constants.js → FILE_UPLOAD_LIMITS) مع اسم ملف نظيف داخل المجلد.
+ */
+
+const STORAGE_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'storage');
+
+/** حجم الرفع الأقصى بالبايت (يُقرأ من البيئة عند النداء). */
+export function maxUploadBytes() {
+  const mb = Math.max(1, Number(process.env.MAX_UPLOAD_MB) || FILE_UPLOAD_LIMITS.maxMb || 10);
+  return mb * 1024 * 1024;
+}
+
+/** نص الأنواع المسموحة للعرض في الصفحة. */
+export function allowedTypesLabel() {
+  return FILE_UPLOAD_LIMITS.allowedExtensions.map((item) => `.${item}`).join(' · ');
+}
+
+/** اسم ملف آمن للتخزين: حروف وأرقام وشرطات فقط، مع الاحتفاظ بالامتداد. */
+function safeName(name) {
+  const base = path.basename(String(name || 'file')).replace(/\.[^.]*$/, '');
+  const slug =
+    base
+      .normalize('NFKD')
+      .replace(/[^\p{L}\p{N}]+/gu, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'file';
+  return slug.replace(/[\\/]/g, '-');
+}
+
+/** الامتداد بحروف صغيرة أو null. */
+function extensionOf(name) {
+  const match = /\.([A-Za-z0-9]{1,8})$/.exec(String(name || ''));
+  return match ? match[1].toLowerCase() : null;
+}
+
+/** وصف مختصر لنوع الملف بالعرض. */
+function kindOf(extension) {
+  if (['jpg', 'jpeg', 'png', 'webp'].includes(extension)) return 'صورة';
+  if (extension === 'pdf') return 'مستند PDF';
+  if (['xls', 'xlsx', 'csv'].includes(extension)) return 'جدول بيانات';
+  if (['doc', 'docx', 'txt', 'md'].includes(extension)) return 'مستند نصي';
+  if (['ppt', 'pptx'].includes(extension)) return 'عرض تقديمي';
+  if (extension === 'zip') return 'ملف مضغوط';
+  return 'مستند';
+}
+
+/** صف ملف جاهز للعرض. */
+function normalizeFile(row) {
+  const extension = extensionOf(row.file_name);
+
+  return {
+    id: row.id,
+    title: row.title || row.file_name,
+    fileName: row.file_name,
+    extension: extension || '',
+    kind: kindOf(extension),
+    mime: row.mime || '',
+    sizeBytes: Number(row.size_bytes || 0),
+    stepKey: row.step_key || '',
+    source: row.source || 'upload',
+    createdAt: row.created_at
+  };
+}
+
+/** حجم مقروء للعرض (بايت / KB / MB). */
+export function formatFileSize(bytes) {
+  const size = Number(bytes || 0);
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  if (size >= 1024) return `${Math.round(size / 1024)} KB`;
+  return `${size} بايت`;
+}
+
+/** المسار المطلق للملف على القرص بعد التأكد أنه داخل storage/. */
+function absolutePath(storedPath) {
+  const absolute = path.resolve(STORAGE_ROOT, String(storedPath || ''));
+  if (!absolute.startsWith(path.resolve(STORAGE_ROOT) + path.sep)) {
+    const error = new Error('مسار ملف غير صالح.');
+    error.code = 'BAD_PATH';
+    throw error;
+  }
+  return absolute;
+}
+
+/** ملفات الباحث (كلها أو لخطوة معيّنة) — الأحدث أولاً. */
+export async function listFiles(userId, { step = '', limit = 100 } = {}) {
+  const stepKey = String(step || '').trim().slice(0, 100);
+  const values = [userId];
+  let stepFilter = '';
+
+  if (stepKey) {
+    values.push(stepKey);
+    stepFilter = `AND step_key = $${values.length}`;
+  }
+
+  values.push(Math.min(Math.max(Number(limit) || 100, 1), 200));
+
+  const { rows } = await pool.query(
+    `SELECT * FROM files
+      WHERE user_id = $1 ${stepFilter}
+      ORDER BY created_at DESC
+      LIMIT $${values.length}`,
+    values
+  );
+
+  return rows.map(normalizeFile);
+}
+
+/** إحصاء سريع: عدد الملفات وحجمها الكلي. */
+export async function filesSummary(userId) {
+  const { rows } = await pool.query(
+    'SELECT count(*)::int AS total, COALESCE(sum(size_bytes), 0)::bigint AS bytes FROM files WHERE user_id = $1',
+    [userId]
+  );
+
+  return { total: Number(rows[0]?.total || 0), bytes: Number(rows[0]?.bytes || 0) };
+}
+
+/** صف واحد بملكيته (null إن لم يكن له) — يُستخدم للتحميل والحذف. */
+export async function getFileRow(userId, fileId) {
+  const { rows } = await pool.query('SELECT * FROM files WHERE id = $2 AND user_id = $1', [userId, fileId]);
+  return rows[0] || null;
+}
+
+/**
+ * رفع ملف: يتحقق من الامتداد والحجم ونوع المحتوى، يكتب البايتات في مجلد الباحث،
+ * يسجّل صف metadata في files، ويعيده. أي فشل بعد الكتابة ينظّف الملف جزئياٌ.
+ */
+export async function saveUpload(userId, { file, title = '', step = '' } = {}) {
+  const extension = extensionOf(file?.name);
+  if (!extension || !FILE_UPLOAD_LIMITS.allowedExtensions.includes(extension)) {
+    const error = new Error(`نوع الملف غير مسموح. المسموح: ${allowedTypesLabel()}`);
+    error.code = 'BAD_TYPE';
+    throw error;
+  }
+
+  const limit = maxUploadBytes();
+  if (Number(file.size || 0) > limit) {
+    const error = new Error(`حجم الملف أكبر من الحد المسموح (${Math.round(limit / (1024 * 1024))} MB).`);
+    error.code = 'TOO_LARGE';
+    throw error;
+  }
+
+  const mime = String(file.type || '').slice(0, 100);
+  const isGenericText = ['txt', 'md', 'csv'].includes(extension) && mime.startsWith('text/');
+  if (mime && !isGenericText && !FILE_UPLOAD_LIMITS.allowedMimeTypes.includes(mime)) {
+    const error = new Error('نوع المحتوى لا يطابق امتداد الملف.');
+    error.code = 'BAD_MIME';
+    throw error;
+  }
+
+  const stepKey = String(step || '').trim().slice(0, 100);
+  if (!(await isValidStepKeyForUser(userId, stepKey))) {
+    const error = new Error('هذه الخطوة غير موجودة في مسار بحثك.');
+    error.code = 'BAD_STEP';
+    throw error;
+  }
+
+  const bytes = Buffer.from(await file.arrayBuffer());
+  if (bytes.length > limit) {
+    const error = new Error('حجم الملف أكبر من الحد المسموح.');
+    error.code = 'TOO_LARGE';
+    throw error;
+  }
+
+  const relativeDir = path.join('users', String(userId), 'files');
+  const absoluteDir = absolutePath(relativeDir);
+  await mkdir(absoluteDir, { recursive: true });
+
+  const fileName = `${safeName(file.name)}.${extension}`;
+  const storedPath = path.join(relativeDir, fileName);
+  await writeFile(absolutePath(storedPath), bytes);
+
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO files (user_id, title, file_name, stored_path, mime, size_bytes, source, step_key)
+       VALUES ($1, $2, $3, $4, $5, $6, 'upload', NULLIF($7, ''))
+       RETURNING *`,
+      [
+        userId,
+        String(title || file.name).trim().slice(0, 255) || fileName,
+        fileName,
+        storedPath,
+        mime,
+        bytes.length,
+        stepKey
+      ]
+    );
+
+    return normalizeFile(rows[0]);
+  } catch (error) {
+    // لا نُبقي بايتات بلا صف metadata (يتيمة على القرص)
+    try {
+      await unlink(absolutePath(storedPath));
+    } catch (cleanupError) {
+      if (cleanupError.code !== 'ENOENT') console.warn(`تعذّر تنظيف الملف اليتيم: ${cleanupError.code}`);
+    }
+    throw error;
+  }
+}
+
+/** قراءة بايتات ملف مملوك للباحث (لتحميله أو عرضه) — null إن لم يوجد. */
+export async function readOwnedFile(userId, fileId) {
+  const row = await getFileRow(userId, fileId);
+  if (!row) return null;
+
+  try {
+    return { row, buffer: await readFile(absolutePath(row.stored_path)) };
+  } catch (error) {
+    console.warn(`تعذّرت قراءة الملف ${row.file_name}: ${error.code || error.message}`);
+    return { row, buffer: null };
+  }
+}
+
+/** حذف ملف من مراجعات الباحث: البايتات أولاً ثم صف metadata. */
+export async function deleteFile(userId, fileId) {
+  const row = await getFileRow(userId, fileId);
+  if (!row) return false;
+
+  try {
+    await unlink(absolutePath(row.stored_path));
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn(`تعذّر حذف الملف ${row.file_name}: ${error.code || error.message}`);
+  }
+
+  await pool.query('DELETE FROM files WHERE id = $2 AND user_id = $1', [userId, fileId]);
+  return true;
+}
+
+/** مجلد التخزين على القرص (للتشخيص فقط). */
+export function storageRoot() {
+  return path.resolve(STORAGE_ROOT);
+}

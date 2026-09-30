@@ -122,6 +122,10 @@ DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require
 | `npm run db:seed` | إدخال الباقات الافتراضية (آمن للتشغيل المتكرر) |
 | `npm run db:reset` | `db:init` ثم `db:seed` |
 | `npm run db:up` / `db:down` | تشغيل/إيقاف PostgreSQL عبر Docker |
+| `npm run smoke:phase1` | اختبار دخان حيّ لمسارات الباحث (مسار البحث · المراجع · المفكرة · الملفات · الشات) — يحتاج الخادم شغّالاً |
+
+> ملاحظة: `db:seed` اختياري تماماً. تعريفات مسارات البحث في `src/data/research-paths.js`
+> تعمل مباشرة في صفحة «مسار البحث»، والبذرة فقط تنقلها إلى جداول `research_paths`.
 
 ## متغيرات البيئة
 
@@ -192,6 +196,33 @@ usage_logs (
 | `GET /api/users` | أحدث 50 مستخدماً |
 | `GET /api/plans` | قائمة الباقات |
 
+## لوحة الباحث (HTML بدون React)
+
+كل الصفحات تحتاج جلسة فعّالة (`requireAccount`) — والزائر يُحوَّل إلى `/login?next=…`.
+كل النماذج `POST` عادية تنتهي بـ `303 redirect`، فلا تعتمد على JavaScript إطلاقاً.
+
+| المسار | الوصف |
+| --- | --- |
+| `GET /dashboard` | الإحصائية: الرصيد + الباقة + آخر العمليات + الملف البحثي + **شريط تقدّم مسار البحث** |
+| `GET /journey` | خطوات مسار درجة الباحث مع حالته في كل خطوة وملاحظة مخرجاتها |
+| `POST /journey/steps/:key` | تغيير حالة الخطوة (`not_started` / `in_progress` / `done`) |
+| `GET /references` | بحث في مكتبة المنصة + «مراجعي» (إضافة يدوية أو من المكتبة + حالة القراءة) |
+| `POST /references` · `/:id/status` · `/:id/delete` | إدارة المراجع |
+| `GET /notes` | المفكرة: إنشاء/تعديل/تثبيت/بحث/ربط بخطوة |
+| `POST /notes` · `/:id` · `/:id/pin` · `/:id/delete` | إدارة الملاحظات |
+| `GET /files` | ملفات الباحث: رفع (multipart) + تحميل + حذف |
+| `POST /files` · `GET /files/:id/raw` · `POST /files/:id/delete` | إدارة الملفات (بملكية الجلسة فقط) |
+| `GET /chat` | المشرف الذكي: سجل المحادثات + سياق الخطوة (`?step=`) |
+| `POST /chat` · `POST /chat/:id/delete` | إرسال رسالة (30 توكن) وحذف محادثة |
+
+**ملاحظات مهمة**
+
+- **الخطوات**: تُقرأ من `research_paths` إن كانت مبذورة، وإلا من `src/data/research-paths.js` — فالصفحة تعمل بلا بذرة.
+- **الربط بالخطوة**: كل الخطوات/المراجع/الملاحظات/الملفات تُربط بـ `step_key` دلالي (`topic`, `proposal`, …) لا بمعرّف UUID.
+- **المزوّدون**: `src/services/ai.js` يجرّب بالترتيب OpenRouter ← Gemini ← Gemini- احتياطي ← Grok،
+  ويعيد المحاولة عند 429/5xx. إذا فشلوا كلهم **تُعاد توكنات الباحث** ويُسجَّل `chat_failed` في `usage_logs`.
+- **الرفع**: حد الحجم `MAX_UPLOAD_MB` (افتراضي 10) + قائمة أنواع مسموحة في `constants.js`، واسم الملف يُنظَّف ويُخزَّن في `storage/users/{userId}/files/`.
+
 ## لوحة الإدارة (HTML بدون React)
 
 صفحات مولَّدة على الخادم (Server-Side Rendering) بنفس هوية المنصة البصرية، بدون أي حزمة واجهة وبدون خطوة بناء — بديل مسارات `/admin` القديمة:
@@ -224,7 +255,7 @@ usage_logs (
 - `/admin/users` — جدول الباحثين
 - `/admin` و`/admin/plans` و`/admin/usage`
 
-أما مسارات الواجهة القديمة الأخرى (`/dashboard` و`/login` و`/pricing` ...) فلم تعد موجودة، وفتحها يعطيك صفحة 404 عربية فيها روابط الصفحات المتاحة.
+أما مسارات الواجهة القديمة الأخرى (`/api/users` و`/api/send-message` ...) فلم تعد موجودة، وفتحها يعطيك صفحة 404 عربية فيها روابط الصفحات المتاحة. أما صفحات الباحث (`/dashboard` و`/journey` و`/chat` و`/references` و`/notes` و`/files`) فموجودة الآن كصفحات HTML على الخادم — راجع قسم «لوحة الباحث» أعلاه.
 
 ### `GET /api/users` يعيد `{"hint":"الجداول غير موجودة بعد..."}`
 

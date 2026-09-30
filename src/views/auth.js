@@ -328,7 +328,7 @@ export function renderAccountPage({
   });
 }
 /** صفحة الإحصائية — الرئيسية للوحة الباحث بعد الدخول: الرصيد + الباقة + آخر العمليات + الملف. */
-export function renderDashboardPage({ account, profile, plan, usage, unread = 0 }) {
+export function renderDashboardPage({ account, profile, plan, usage, journey = null, unread = 0 }) {
   const balance = account.tokens_balance ?? 0;
   const used = usage.tokens ?? 0;
   const granted = balance + used;
@@ -373,6 +373,18 @@ export function renderDashboardPage({ account, profile, plan, usage, unread = 0 
       <a class="btn" href="/dashboard">لوحتي (الإحصائية)</a>
       <a class="btn" href="/#pricing">الباقات</a>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>${icon('graduation', 'icon-sm')} تقدّمي في مسار البحث</h2>
+    ${
+      journey
+        ? `<div class="meter"><i style="width:${journey.percent}%"></i></div>
+    <p class="muted">${escapeHtml(journey.title)} — أنجزت ${journey.done} من ${journey.total} خطوة (${journey.percent}%).</p>
+    <p class="muted">الخطوة التالية: ${escapeHtml(journey.currentTitle)}</p>
+    <div class="links"><a class="btn" href="/journey">افتح مسار البحث</a></div>`
+        : '<div class="empty">أكمل ملفك البحثي أولاً ليظهر مسار بحثك.</div>'
+    }
   </div>
 
   <div class="card">

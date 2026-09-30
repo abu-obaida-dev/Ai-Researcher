@@ -199,6 +199,62 @@ export const DEFAULT_PLANS = [
   }
 ];
 
+/**
+ * حالات خطوة في مسار البحث — قيمها تُخزَّن في user_step_progress.status.
+ * 'not_started' هي القيمة الافتراضية في قاعدة البيانات.
+ */
+export const STEP_STATUSES = [
+  { value: 'not_started', label: 'لم يبدأ' },
+  { value: 'in_progress', label: 'جاري' },
+  { value: 'done', label: 'تم' }
+];
+
+/** حالات قراءة المرجع — قيمها تُخزَّن في user_references.status. */
+export const READING_STATUSES = [
+  { value: 'to_read', label: 'مرشّح للقراءة' },
+  { value: 'reading', label: 'قيد القراءة' },
+  { value: 'read', label: 'مقروء' },
+  { value: 'cited', label: 'مُستخدم في البحث' }
+];
+
+/**
+ * أدوار النظام (بذرة جدول roles — تفعيلها في الـ middleware يأتي مع المرحلة الثانية).
+ * level يُستخدم للمقارنة («هذا الدور لا يقل عن X») عند تفعيل requireRole.
+ */
+export const DEFAULT_ROLES = [
+  { code: 'user', title: 'مستخدم', level: 0, permissions: ['dashboard:view', 'chat:use'] },
+  { code: 'researcher', title: 'باحث', level: 1, permissions: ['dashboard:view', 'chat:use', 'journey:edit', 'library:browse'] },
+  { code: 'supervisor', title: 'مشرف أكاديمي', level: 2, permissions: ['dashboard:view', 'chat:use', 'journey:edit', 'library:browse', 'students:view'] },
+  { code: 'admin', title: 'مدير المنصة', level: 9, permissions: ['*'] }
+];
+
+/**
+ * حدود رفع ملفات الباحث — تُطبَّق في services/files.js وفي نص نموذج الرفع.
+ * maxBytes يُقرأ من البيئة عند النداء (بعد تحميل dotenv في server.js) لا عند الاستيراد.
+ */
+export const FILE_UPLOAD_LIMITS = {
+  maxMb: Math.max(1, Number(process.env.MAX_UPLOAD_MB) || 10),
+  allowedExtensions: [
+    'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt', 'md', 'ppt', 'pptx', 'zip', 'jpg', 'jpeg', 'png', 'webp'
+  ],
+  allowedMimeTypes: [
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'text/csv',
+    'text/plain',
+    'text/markdown',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/zip',
+    'image/jpeg',
+    'image/png',
+    'image/webp'
+  ]
+};
+
 /** إعدادات المنصة الافتراضية — تُزرع في جدول settings */
 export const DEFAULT_SETTINGS = [
   ['site_name', APP_NAME],

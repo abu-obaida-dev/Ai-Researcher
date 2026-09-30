@@ -23,6 +23,7 @@ import {
   UNIVERSITIES
 } from '../constants.js';
 import { homePathFor, requireAccount } from '../middleware/auth.js';
+import { getJourneySummary } from '../services/journey.js';
 import { freeTrialTokens, getPlanByCode } from '../services/plans.js';
 import { ensureUserFromGoogle, getProfile, getUsageOverview, saveOnboarding } from '../services/users.js';
 import { activeDeviceCount, notifyUser, pushStatusHint, unreadCount } from '../services/notifications.js';
@@ -287,10 +288,12 @@ router.get('/dashboard', requireAccount, async (req, res) => {
     return;
   }
 
-  const [profile, plan, usage, unread] = await Promise.all([
-    getProfile(req.account.id),
+  // الملف البحثي أولاً لأن درجته هي التي تختار مسار البحث المعروض في الإحصائية
+  const profile = await getProfile(req.account.id);
+  const [plan, usage, journey, unread] = await Promise.all([
     getPlanByCode(req.account.plan_code || FREE_PLAN_CODE),
     getUsageOverview(req.account.id),
+    getJourneySummary(req.account.id, profile?.degree_level || 'bachelor'),
     unreadCount(req.account.id)
   ]);
 
@@ -300,6 +303,7 @@ router.get('/dashboard', requireAccount, async (req, res) => {
       profile,
       plan,
       usage,
+      journey,
       unread
     })
   );

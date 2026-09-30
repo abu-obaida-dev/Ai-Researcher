@@ -15,6 +15,7 @@
     "db:setup": "sudo bash scripts/setup-postgres.sh",
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
+    "smoke:phase1": "node scripts/smoke-phase1.mjs",
     "fonts:fetch": "node scripts/fetch-fonts.mjs"
   },
   "dependencies": {
