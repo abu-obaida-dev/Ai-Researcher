@@ -237,7 +237,7 @@ async function testFiles(userId, cookie) {
 async function testChat(userId, cookie) {
   const page = await call('/chat', { cookie });
   check('1F /chat يفتح', page.ok && page.text.includes('المشرف الذكي'));
-  check('1F يعرض تكلفة الرسالة', page.text.includes('تكلفة الرسالة'));
+  check('1F بلا سطر الرصيد/التكلفة داخل الكارت', !page.text.includes('تكلفة الرسالة'));
   console.log(`ℹ️  مزوّدو الذكاء الاصطناعي مفعّلون: ${page.text.includes('لا يوجد مزوّد ذكاء اصطناعي مفعّل') ? 'لا' : 'نعم'}`);
 
   const withStep = await call('/chat?step=methodology', { cookie });
@@ -291,7 +291,11 @@ async function testChat(userId, cookie) {
   check('1F بلا ترويسة صفحة (أقصى مساحة للدردشة)', !chatBody.includes('page-head'));
   check('1F بلا هيدر لكارت الدردشة', !chatBody.includes('chat-head'));
   check('1F بلا اقتراحات داخل الكارت', !chatBody.includes('اقترح لي ٥ عناوين'));
-  check('1F زر «محادثة جديدة» في السايدبار لا في الكارت', chatBody.includes('chat-side-card') && chatBody.includes('btn-block'));
+  // المحادثات يجب أن تكون داخل <nav> نفسه لا بطاقة منفصلة (ChatGPT/Claude style)
+  const navHtml = chatBody.slice(chatBody.indexOf('<nav class="app-nav"'), chatBody.indexOf('</nav>'));
+  check('1F المحادثات داخل قائمة السايدبار نفسها', navHtml.includes('class="chat-nav"') && !chatBody.includes('chat-side-card'));
+  check('1F زر «محادثة جديدة» في أعلى القائمة', navHtml.includes('btn-block') && navHtml.indexOf('محادثة جديدة') < navHtml.indexOf('href="/journey"'));
+  check('1F لا يوجد نص «أدوات البحث»', !chatBody.includes('أدوات البحث'));
 
   // الحذف لا يجب أن يُرجِع التوكنز: نسجّل الرصيد قبل حذف كل المحادثات
   const beforeDelete = await pool.query('SELECT tokens_balance, tokens_used FROM users WHERE id = $1', [userId]);

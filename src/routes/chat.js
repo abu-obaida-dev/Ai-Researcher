@@ -3,7 +3,6 @@ import { requireAccount } from '../middleware/auth.js';
 import { availableProviders } from '../services/ai.js';
 import {
   askSupervisor,
-  chatCost,
   deleteConversation,
   getConversation,
   listConversations
@@ -80,8 +79,6 @@ router.get('/chat', requireAccount, async (req, res) => {
         stepName: stepKey ? await stepTitle(stepKey) : '',
         // ?prompt= يملأ مربع الرسالة مسبقاً (يصل من روابط الخطوات/الملاحظات)
         prefill: seedPrompt,
-        balance: Number(req.account.tokens_balance || 0),
-        cost: chatCost(),
         providers: availableProviders(),
         flash: flashFromQuery(req.query)
       })

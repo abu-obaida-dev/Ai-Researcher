@@ -1,4 +1,4 @@
-import { formatDateTime, formatNumber } from './format.js';
+import { formatDateTime } from './format.js';
 import { icon } from './icons.js';
 import { escapeHtml, renderLayout } from './layout.js';
 
@@ -36,7 +36,7 @@ function messageCountLabel(count) {
 }
 
 /**
- * قائمة المحادثات — تُعرض داخل السايدبار فقط.
+ * قائمة المحادثات — تُدرَج في أعلى قائمة السايدبار (مثل ChatGPT/Claude).
  * زر «محادثة جديدة» في الأعلى، ولكل محادثة زر حذف مستقل.
  */
 function renderConversations(conversations, activeId) {
@@ -58,13 +58,11 @@ function renderConversations(conversations, activeId) {
 </ul>`
     : '<p class="chat-side-empty">لا محادثات محفوظة بعد.</p>';
 
-  return `<section class="card chat-side-card">
-  <div class="chat-side-head">
-    <a class="btn btn-primary btn-block" href="/chat">${icon('plus', 'icon-sm')} محادثة جديدة</a>
-  </div>
+  return `<div class="chat-nav">
+  <a class="btn btn-primary btn-block" href="/chat">${icon('plus', 'icon-sm')} محادثة جديدة</a>
   ${list}
   <p class="chat-side-note">حذف المحادثة لا يُرجِع التوكنز المستهلكة.</p>
-</section>`;
+</div>`;
 }
 
 /** صفحة الشات كاملة. */
@@ -76,8 +74,6 @@ export function renderChatPage({
   stepKey = '',
   stepName = '',
   prefill = '',
-  balance = 0,
-  cost = 30,
   providers = [],
   flash = null
 }) {
@@ -118,7 +114,6 @@ export function renderChatPage({
       aria-label="رسالتك إلى المشرف الذكي">${escapeHtml(prefill)}</textarea>
     <button class="btn btn-primary chat-send" type="submit" title="إرسال" aria-label="إرسال">${icon('send')}</button>
   </form>
-  <p class="chat-hint">الرصيد: ${formatNumber(balance)} توكن · تكلفة الرسالة: ${cost} توكن</p>
 </section>`;
 
   return renderLayout({
@@ -130,7 +125,8 @@ export function renderChatPage({
     account,
     unread,
     scripts: ['/js/chat-auto-scroll.js', '/js/app-shell.js'],
-    sideExtra: renderConversations(conversations, conversation?.id || ''),
+    // المحادثات جزء من قائمة السايدبار نفسه (أعلى أدوات البحث)
+    navTop: renderConversations(conversations, conversation?.id || ''),
     body
   });
 }

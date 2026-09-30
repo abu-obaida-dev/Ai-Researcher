@@ -755,9 +755,9 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .note-body { white-space: pre-wrap; font-size: 13.5px; line-height: 1.8; }
 .note-tags { display: flex; gap: 6px; flex-wrap: wrap; }
 
-/* ---- صفحة الشات: كارت واحد بملء الارتفاع + قائمة المحادثات في السايدبار ---- */
+/* ---- صفحة الشات: كارت واحد بملء الارتفاع + المحادثات داخل قائمة السايدبار ---- */
 .app-side { display: grid; gap: 12px; align-content: start; max-height: calc(100vh - 76px); overflow-y: auto; }
-.app-side > .app-nav:only-child { min-height: calc(100vh - 110px); }
+.app-side > .app-nav { min-height: calc(100vh - 110px); }
 .chat-card {
   display: flex; flex-direction: column; gap: 0;
   height: calc(100vh - 108px); min-height: 460px; padding: 14px 16px 12px;
@@ -794,26 +794,28 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .chat-send {
   flex: 0 0 auto; width: 46px; height: 46px; padding: 0; border-radius: 14px; display: grid; place-items: center;
 }
-.chat-hint { margin-top: 7px; font-size: 11px; color: var(--slate); text-align: center; }
 
-/* قائمة المحادثات داخل السايدبار */
-.chat-side-card { padding: 10px; display: flex; flex-direction: column; gap: 9px; min-height: 0; }
-.chat-side-head { display: grid; }
-.chat-side-empty { font-size: 12px; color: var(--slate); text-align: center; padding: 10px 4px; }
-.chat-side-note { font-size: 10.5px; color: var(--slate); opacity: .9; text-align: center; padding-top: 2px; border-top: 1px solid var(--mist); }
-.chat-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 42vh; overflow-y: auto; }
-.chat-item { display: flex; align-items: center; gap: 4px; border-radius: 11px; padding: 4px 4px 4px 8px; }
+/* قائمة المحادثات داخل قائمة السايدبار نفسها (ChatGPT/Claude style) */
+.chat-nav { display: grid; gap: 6px; margin-bottom: 2px; }
+.chat-side-empty { font-size: 11.5px; color: var(--slate); text-align: center; padding: 6px 4px; }
+.chat-side-note { font-size: 10px; color: var(--slate); opacity: .85; text-align: center; padding: 2px 4px 4px; }
+.chat-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; max-height: 38vh; overflow-y: auto; }
+.chat-item { display: flex; align-items: center; gap: 2px; border-radius: 10px; }
 .chat-item:hover { background: var(--mist-soft); }
 .chat-item.is-active { background: var(--ink); }
 .chat-item.is-active a, .chat-item.is-active a span { color: #fff; }
-.chat-item a { flex: 1 1 auto; display: grid; min-width: 0; padding: 5px 0; }
-.chat-item a b { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chat-item a span { font-size: 10.5px; }
-.chat-del { margin: 0; }
-.chat-del-btn {
-  flex: 0 0 auto; width: 26px; height: 26px; display: grid; place-items: center; cursor: pointer;
-  background: transparent; border: 0; border-radius: 8px; color: var(--slate);
+.chat-item a {
+  flex: 1 1 auto; min-width: 0; display: grid; padding: 6px 9px; color: var(--slate);
+  font-size: 12px; font-weight: 600; line-height: 1.4;
 }
+.chat-item a b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-item a span { font-size: 10.5px; font-weight: 400; opacity: .85; }
+.chat-del { margin: 0; flex: 0 0 auto; }
+.chat-del-btn {
+  width: 26px; height: 26px; margin-inline-end: 4px; display: grid; place-items: center; cursor: pointer;
+  background: transparent; border: 0; border-radius: 8px; color: var(--slate); opacity: 0;
+}
+.chat-item:hover .chat-del-btn, .chat-item.is-active .chat-del-btn { opacity: 1; }
 .chat-del-btn:hover { background: var(--apricot-soft); color: #7c2b1f; }
 
 @media (max-width: 900px) {
@@ -926,10 +928,11 @@ function renderAppTopbar(account, unread = 0) {
 }
 
 /**
- * الشريط الجانبي للوحة الباحث: أدوات البحث ثم روابط الحساب (واللوحة للمدير فقط).
- * sideExtra محتوى إضافي يظهر داخل الشريط (تستخدمه صفحة الشات لقائمة محادثاتها).
+ * الشريط الجانبي للوحة الباحث: روابط الأدوات ثم روابط الحساب (واللوحة للمدير فقط).
+ * navTop محتوى إضافي يُدرَج في أعلى القائمة نفسه (تستخدمه صفحة الشات لقائمة
+ * محادثاتها، فتظهر جزءاً من الشريط لا بطاقة منفصلة تحته).
  */
-function renderAppSidebar(activeKey, account, sideExtra = '') {
+function renderAppSidebar(activeKey, account, navTop = '') {
   const link = (item) =>
     `<a href="${item.href}"${item.key === activeKey ? ' class="active"' : ''}>${icon(item.icon, 'icon-sm')}<span>${escapeHtml(
       item.label
@@ -944,7 +947,8 @@ function renderAppSidebar(activeKey, account, sideExtra = '') {
 
   return `<aside class="app-side">
   <nav class="app-nav" aria-label="أدوات الباحث">
-    <span class="app-nav-label">أدوات البحث</span>
+    ${navTop}
+    ${navTop ? '<div class="app-nav-sep"></div>' : ''}
     ${tools}
     <div class="app-nav-sep"></div>
     <span class="app-nav-label">حسابى</span>
@@ -952,7 +956,6 @@ function renderAppSidebar(activeKey, account, sideExtra = '') {
     ${admin}
     <a class="danger" href="/logout">${icon('logout', 'icon-sm')}<span>تسجيل الخروج</span></a>
   </nav>
-  ${sideExtra}
 </aside>`;
 }
 
@@ -1040,7 +1043,7 @@ export function renderLayout({
   account = null,
   unread = 0,
   scripts = [],
-  sideExtra = ''
+  navTop = ''
 }) {
   const documentTitle = title.includes(APP_NAME) ? title : `${title} — ${APP_NAME}`;
 
@@ -1080,13 +1083,13 @@ export function renderLayout({
     : '';
 
   // لوحة الباحث: السايدبار يمين (RTL) والمحتوى في العمود الثاني.
-  // sideExtra محتوى إضافي يُمرَّر داخل السايدبار (قائمة محادثات الشات مثلاً).
+  // navTop محتوى إضافي يُدرَج في أعلى قائمة السايدبار نفسه (قائمة محادثات الشات مثلاً).
   const mainInner =
     area === 'app'
       ? `<div class="app-shell"><div class="app-main">${headBlock}${body}</div>${renderAppSidebar(
         activeKey,
         account,
-        sideExtra
+        navTop
       )}</div>`
       : `${headBlock}${body}`;
 
