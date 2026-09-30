@@ -85,7 +85,184 @@ const PLANS_TABLE = `
   );
 `;
 
-/** سجل استهلاك التوكنز لكل مستخدم. */
+/** أدوار النظام + صلاحياتها (P2 يفعّل requireRole — هنا البنية فقط). */
+const ROLES_TABLE = `
+  CREATE TABLE IF NOT EXISTS roles (
+    code VARCHAR(50) PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    level INTEGER NOT NULL DEFAULT 0,
+    is_system BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`;
+
+const ROLE_PERMISSIONS_TABLE = `
+  CREATE TABLE IF NOT EXISTS role_permissions (
+    role_code VARCHAR(50) NOT NULL REFERENCES roles(code) ON DELETE CASCADE,
+    permission VARCHAR(100) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (role_code, permission)
+  );
+`;
+
+/** مسارات البحث: مسار واحد لكل درجة (بكالوريوس/ماجستير/دكتوراه/دبلوم/باحث مستقل). */
+const RESEARCH_PATHS_TABLE = `
+  CREATE TABLE IF NOT EXISTS research_paths (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    degree_level VARCHAR(100) UNIQUE NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    is_default BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`;
+
+/** خطوات كل مسار — cost_type يطابق TOKEN_COSTS في constants.js (chat/translate/outline/sources/review). */
+const RESEARCH_PATH_STEPS_TABLE = `
+  CREATE TABLE IF NOT EXISTS research_path_steps (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    path_id UUID NOT NULL REFERENCES research_paths(id) ON DELETE CASCADE,
+    step_no INTEGER NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    cost_type VARCHAR(100) NOT NULL DEFAULT 'chat',
+    is_required BOOLEAN DEFAULT true,
+    guidance TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (path_id, step_no)
+  );
+`;
+
+/** مسار الباحث الحالي (صف واحد لكل مستخدم). */
+const USER_PATHS_TABLE = `
+  CREATE TABLE IF NOT EXISTS user_paths (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    path_id UUID NOT NULL REFERENCES research_paths(id) ON DELETE RESTRICT,
+    current_step_no INTEGER NOT NULL DEFAULT 1,
+    started_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`;
+
+/** تقدم الباحث في كل خطوة (لم يبدأ/جاري/تم + ملاحظة المخرجات). */
+const USER_STEP_PROGRESS_TABLE = `
+  CREATE TABLE IF NOT EXISTS user_step_progress (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    step_id UUID NOT NULL REFERENCES research_path_steps(id) ON DELETE CASCADE,
+    status VARCHAR(50) NOT NULL DEFAULT 'not_started',
+    output_note TEXT,
+    completed_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (user_id, step_id)
+  );
+`;
+
+/** المكتبة العلمية المركزية — يرفعها المدير مرة واحدة ويشير إليها كل باحث. */
+const LIBRARY_ITEMS_TABLE = `
+  CREATE TABLE IF NOT EXISTS library_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title VARCHAR(500) NOT NULL,
+    authors TEXT,
+    year INTEGER,
+    source VARCHAR(255),
+    abstract TEXT,
+    stored_path TEXT,
+    degree_level VARCHAR(100),
+    field VARCHAR(255),
+    citation_style VARCHAR(50) DEFAULT 'apa7',
+    citation_text TEXT,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`;
+
+/** مراجع الباحث: رابط لعنصر المكتبة أو مرجع يدوي — مع حالة القراءة وربط اختياري بخطوة. */
+const USER_REFERENCES_TABLE = `
+  CREATE TABLE IF NOT EXISTS user_references (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    library_item_id UUID REFERENCES library_items(id) ON DELETE SET NULL,
+    custom_title VARCHAR(500),
+    custom_authors TEXT,
+    custom_year INTEGER,
+    custom_source VARCHAR(255),
+    status VARCHAR(50) NOT NULL DEFAULT 'to_read',
+    note TEXT,
+    step_id UUID REFERENCES research_path_steps(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`;
+
+/** مفكرة الباحث: ملاحظات شخصية مع تثبيت ووسوم وربط اختياري بخطوة أو مرجع. */
+const NOTES_TABLE = `
+  CREATE TABLE IF NOT EXISTS notes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    body TEXT,
+    tags TEXT,
+    pinned BOOLEAN DEFAULT false,
+    step_id UUID REFERENCES research_path_steps(id) ON DELETE SET NULL,
+    reference_id UUID REFERENCES user_references(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`;
+
+/** ملفات الباحث: الميتاداتا في PostgreSQL والبايتات في storage/users/. */
+const FILES_TABLE = `
+  CREATE TABLE IF NOT EXISTS files (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    stored_path TEXT NOT NULL,
+    mime VARCHAR(100),
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    source VARCHAR(50) NOT NULL DEFAULT 'upload',
+    step_id UUID REFERENCES research_path_steps(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`;
+
+/** محادثات المشرف الذكي + رسائلها (تكلفة التوكنز تُسجَّل في usage_logs). */
+const CONVERSATIONS_TABLE = `
+  CREATE TABLE IF NOT EXISTS conversations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(255),
+    step_id UUID REFERENCES research_path_steps(id) ON DELETE SET NULL,
+    provider VARCHAR(100),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`;
+
+const MESSAGES_TABLE = `
+  CREATE TABLE IF NOT EXISTS messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    role VARCHAR(50) NOT NULL,
+    content TEXT NOT NULL,
+    tokens_used INTEGER NOT NULL DEFAULT 0,
+    model VARCHAR(255),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`;
+
+/** مراقبة مزودي الذكاء الاصطناعي (زمن الاستجابة والحالة والأخطاء). */
+const AI_REQUESTS_TABLE = `
+  CREATE TABLE IF NOT EXISTS ai_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    provider VARCHAR(100) NOT NULL,
+    model VARCHAR(255),
+    latency_ms INTEGER,
+    status VARCHAR(50) NOT NULL DEFAULT 'ok',
+    error TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`;
 const USAGE_LOGS_TABLE = `
   CREATE TABLE IF NOT EXISTS usage_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -178,6 +355,19 @@ const INDEXES = `
     ON usage_logs (user_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS users_plan_code_idx
     ON users (plan_code);
+  CREATE INDEX IF NOT EXISTS idx_path_steps_path ON research_path_steps(path_id, step_no);
+  CREATE INDEX IF NOT EXISTS idx_progress_user ON user_step_progress(user_id);
+  CREATE INDEX IF NOT EXISTS idx_library_active ON library_items(is_active) WHERE is_active = true;
+  CREATE INDEX IF NOT EXISTS idx_library_field ON library_items(field);
+  CREATE INDEX IF NOT EXISTS idx_user_refs_user ON user_references(user_id);
+  CREATE INDEX IF NOT EXISTS idx_user_refs_library ON user_references(library_item_id);
+  CREATE INDEX IF NOT EXISTS idx_notes_user ON notes(user_id);
+  CREATE INDEX IF NOT EXISTS idx_notes_pinned ON notes(user_id, pinned) WHERE pinned = true;
+  CREATE INDEX IF NOT EXISTS idx_files_user ON files(user_id);
+  CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id);
+  CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
+  CREATE INDEX IF NOT EXISTS idx_ai_requests_user ON ai_requests(user_id);
+  CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_logs(user_id);
 `;
 
 /**
@@ -285,6 +475,19 @@ async function initializeDatabase() {
     await pool.query(USERS_TABLE);
     await pool.query(PROFILES_TABLE);
     await pool.query(PLANS_TABLE);
+    await pool.query(ROLES_TABLE);
+    await pool.query(ROLE_PERMISSIONS_TABLE);
+    await pool.query(RESEARCH_PATHS_TABLE);
+    await pool.query(RESEARCH_PATH_STEPS_TABLE);
+    await pool.query(USER_PATHS_TABLE);
+    await pool.query(USER_STEP_PROGRESS_TABLE);
+    await pool.query(LIBRARY_ITEMS_TABLE);
+    await pool.query(USER_REFERENCES_TABLE);
+    await pool.query(NOTES_TABLE);
+    await pool.query(FILES_TABLE);
+    await pool.query(CONVERSATIONS_TABLE);
+    await pool.query(MESSAGES_TABLE);
+    await pool.query(AI_REQUESTS_TABLE);
     await pool.query(USAGE_LOGS_TABLE);
     await pool.query(SETTINGS_TABLE);
     await pool.query(NOTIFICATIONS_TABLE);

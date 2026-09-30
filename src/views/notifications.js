@@ -20,7 +20,7 @@ function renderItem(item) {
   return `<li class="notif-item${unreadClass}" data-notif-id="${escapeHtml(item.id)}">
     ${dot}
     <div class="notif-content">
-      <p class="notif-title"><a class="notif-link" href="${escapeHtml(item.url || '/account')}">${escapeHtml(
+      <p class="notif-title"><a class="notif-link" href="${escapeHtml(item.url || '/dashboard')}">${escapeHtml(
         item.title
       )}</a></p>
       ${body ? `<p class="notif-body">${body}</p>` : ''}
@@ -53,7 +53,7 @@ export function renderNotificationsPage({ account, items, unread, devices, hint 
         hint.webReady ? '' : ' disabled'
       }>تفعيل على هذا الجهاز</button>
       <button type="button" class="btn" id="btn-disable-push">إيقاف على هذا الجهاز</button>
-      <a class="btn" href="/account">حسابي</a>
+      <a class="btn" href="/dashboard">لوحتي</a>
     </div>
     ${
       hint.webReady

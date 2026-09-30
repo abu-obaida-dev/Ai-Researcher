@@ -743,7 +743,7 @@ function renderAppTopbar(account, unread = 0) {
           </div>
           <ul class="bell-list" id="bell-list"></ul>
           <div class="bell-empty" id="bell-empty">جارٍ تحميل الإشعارات…</div>
-          <div class="bell-foot"><a href="/notifications">كل الإشعارات</a> · <a href="/account">حسابى</a></div>
+          <div class="bell-foot"><a href="/notifications">كل الإشعارات</a> · <a href="/dashboard">لوحتي</a></div>
         </div>
       </div>
       <a class="app-user" href="/dashboard" title="لوحتي">${avatar}<span class="app-user-name">${escapeHtml(name)}</span></a>

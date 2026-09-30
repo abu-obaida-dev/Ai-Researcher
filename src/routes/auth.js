@@ -159,7 +159,7 @@ router.get('/auth/google/callback', async (req, res) => {
         title: 'أهلاً بك في Zena AI',
         body: `رصيدك الترحيبي ${user.tokens_granted} توكن — أكمل ملفك البحثي وابدأ مع المشرف الذكي.`,
         kind: 'welcome',
-        url: user.onboarding_complete ? '/account' : '/onboarding'
+        url: user.onboarding_complete ? '/dashboard' : '/onboarding'
       }).catch(() => {});
     }
 

@@ -370,7 +370,7 @@ export function renderDashboardPage({ account, profile, plan, usage, unread = 0 
       ${kv('عمليات مسجّلة', formatNumber(usage.events))}
     </dl>
     <div class="links">
-      <a class="btn" href="/account">تفاصيل الحساب والرصيد</a>
+      <a class="btn" href="/dashboard">لوحتي (الإحصائية)</a>
       <a class="btn" href="/#pricing">الباقات</a>
     </div>
   </div>

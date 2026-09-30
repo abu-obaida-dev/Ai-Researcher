@@ -1,7 +1,13 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
 import { resolveDatabaseTarget, describeDatabaseError } from './errors.js';
-import { DEFAULT_PLANS, DEFAULT_SETTINGS } from '../constants.js';
+import {
+  DEFAULT_PLANS,
+  DEFAULT_SETTINGS,
+  DEFAULT_RESEARCH_PATHS,
+  DEFAULT_ROLES,
+  TOKEN_COSTS
+} from '../constants.js';
 
 dotenv.config();
 
