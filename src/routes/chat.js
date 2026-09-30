@@ -3,6 +3,7 @@ import { requireAccount } from '../middleware/auth.js';
 import { availableProviders } from '../services/ai.js';
 import {
   askSupervisor,
+  chatCost,
   deleteConversation,
   getConversation,
   listConversations
@@ -66,11 +67,8 @@ router.get('/chat', requireAccount, async (req, res) => {
       unreadCount(userId)
     ]);
 
-    // عند القدوم من مسار البحث مع خطوة، ننشئ محادثة جديدة تحمل سياق الخطوة
-    let conversation = conversationId ? await getConversation(userId, conversationId) : null;
-    if (!conversation && stepKey && seedPrompt) {
-      conversation = null; // السؤال الأول يأتي في النموذج أدناه
-    }
+    // المحادثة الحالية: ?c= لاختيار محادثة محفوظة، وإلا محادثة جديدة فارغة
+    const conversation = conversationId ? await getConversation(userId, conversationId) : null;
 
     res.type('html').send(
       renderChatPage({
@@ -80,9 +78,10 @@ router.get('/chat', requireAccount, async (req, res) => {
         conversations,
         stepKey,
         stepName: stepKey ? await stepTitle(stepKey) : '',
-        // اقتراحات البداية (?prompt=…) تُملأ بها مربع الرسالة مسبقاً
+        // ?prompt= يملأ مربع الرسالة مسبقاً (يصل من روابط الخطوات/الملاحظات)
         prefill: seedPrompt,
         balance: Number(req.account.tokens_balance || 0),
+        cost: chatCost(),
         providers: availableProviders(),
         flash: flashFromQuery(req.query)
       })

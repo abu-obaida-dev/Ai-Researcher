@@ -661,6 +661,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .card-head h2 { margin: 0; }
 .btn-sm { padding: 7px 12px; font-size: 12.5px; }
+.btn-block { width: 100%; justify-content: center; }
 
 /* سجل الاستهلاك: قائمة مضغوطة بدل جدول */
 .usage-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
@@ -754,28 +755,68 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .note-body { white-space: pre-wrap; font-size: 13.5px; line-height: 1.8; }
 .note-tags { display: flex; gap: 6px; flex-wrap: wrap; }
 
-.chat-layout { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr) 280px; align-items: start; }
-.chat-main { min-width: 0; }
-.chat-side { position: sticky; top: 62px; }
-.chat-head { border-bottom: 1px solid var(--mist); padding-bottom: 9px; margin-bottom: 10px; }
-.chat-body { max-height: 58vh; overflow-y: auto; display: grid; gap: 10px; padding: 4px 2px 10px; }
-.bubble { border-radius: 16px; padding: 10px 13px; max-width: 88%; }
-.bubble-user { background: var(--mist-soft); border: 1px solid var(--mist); justify-self: start; }
-.bubble-ai { background: #fff; border: 1px solid #cfe3f0; justify-self: end; }
-.bubble-text { white-space: pre-wrap; font-size: 13.5px; line-height: 1.85; }
-.bubble-meta { font-size: 11px; color: var(--slate); margin-top: 5px; }
-.chat-form { border-top: 1px solid var(--mist); padding-top: 12px; display: grid; gap: 8px; }
-.chat-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.chat-item { display: flex; align-items: center; gap: 6px; border: 1px solid var(--mist); border-radius: 12px; padding: 7px 9px; }
-.chat-item.is-active { border-color: var(--ink); background: var(--mist-soft); }
-.chat-item a { flex: 1 1 auto; display: grid; min-width: 0; }
-.chat-item a b { font-size: 12.5px; }
-.chat-item a span { font-size: 11px; }
-.chat-side-links { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+/* ---- صفحة الشات: كارت واحد بملء الارتفاع + قائمة المحادثات في السايدبار ---- */
+.app-side { display: grid; gap: 12px; align-content: start; max-height: calc(100vh - 76px); overflow-y: auto; }
+.app-side > .app-nav:only-child { min-height: calc(100vh - 110px); }
+.chat-card {
+  display: flex; flex-direction: column; gap: 0;
+  height: calc(100vh - 108px); min-height: 460px; padding: 14px 16px 12px;
+}
+.chat-flash { margin: 0 0 10px; }
+.chat-context {
+  display: flex; align-items: center; gap: 7px; margin-bottom: 10px; padding: 7px 11px;
+  background: var(--mist-soft); border-radius: 12px; font-size: 12px; color: var(--slate);
+}
+.chat-context a { margin-inline-start: auto; font-size: 11.5px; font-weight: 700; color: var(--sea-deep); }
+.chat-body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+  padding: 4px 4px 10px; scroll-behavior: smooth;
+}
+.chat-welcome {
+  margin: auto; text-align: center; color: var(--slate); display: grid; gap: 10px; justify-items: center;
+  padding: 20px;
+}
+.chat-welcome p { font-size: 13px; max-width: 420px; }
+.bubble { border-radius: 16px; padding: 10px 13px; max-width: min(86%, 720px); font-size: 13.5px; line-height: 1.9; }
+/* نحدّد اللون هنا لأن .bubble-user في صفحة الهبوط يستخدم خلفية غامقة ونصاً أبيض */
+.bubble-user { background: var(--mist-soft); color: var(--ink); border: 1px solid var(--mist); align-self: flex-start; }
+.bubble-ai { background: #fff; color: var(--ink); border: 1px solid #cfe3f0; align-self: flex-end; }
+.bubble-text { white-space: pre-wrap; line-height: 1.9; overflow-wrap: anywhere; }
+.bubble-meta { font-size: 10.5px; color: var(--slate); margin-top: 6px; }
+.chat-composer {
+  display: flex; align-items: flex-end; gap: 8px; border-top: 1px solid var(--mist); padding-top: 11px;
+}
+.chat-composer textarea {
+  flex: 1 1 auto; min-height: 46px; max-height: 170px; resize: vertical; line-height: 1.7;
+  padding: 12px 14px; border-radius: 14px; border: 1px solid var(--mist); font: inherit; font-size: 13.5px;
+}
+.chat-composer textarea:focus { outline: 2px solid var(--sea); outline-offset: 1px; }
+.chat-send {
+  flex: 0 0 auto; width: 46px; height: 46px; padding: 0; border-radius: 14px; display: grid; place-items: center;
+}
+.chat-hint { margin-top: 7px; font-size: 11px; color: var(--slate); text-align: center; }
+
+/* قائمة المحادثات داخل السايدبار */
+.chat-side-card { padding: 10px; display: flex; flex-direction: column; gap: 9px; min-height: 0; }
+.chat-side-head { display: grid; }
+.chat-side-empty { font-size: 12px; color: var(--slate); text-align: center; padding: 10px 4px; }
+.chat-side-note { font-size: 10.5px; color: var(--slate); opacity: .9; text-align: center; padding-top: 2px; border-top: 1px solid var(--mist); }
+.chat-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 42vh; overflow-y: auto; }
+.chat-item { display: flex; align-items: center; gap: 4px; border-radius: 11px; padding: 4px 4px 4px 8px; }
+.chat-item:hover { background: var(--mist-soft); }
+.chat-item.is-active { background: var(--ink); }
+.chat-item.is-active a, .chat-item.is-active a span { color: #fff; }
+.chat-item a { flex: 1 1 auto; display: grid; min-width: 0; padding: 5px 0; }
+.chat-item a b { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-item a span { font-size: 10.5px; }
+.chat-del { margin: 0; }
+.chat-del-btn {
+  flex: 0 0 auto; width: 26px; height: 26px; display: grid; place-items: center; cursor: pointer;
+  background: transparent; border: 0; border-radius: 8px; color: var(--slate);
+}
+.chat-del-btn:hover { background: var(--apricot-soft); color: #7c2b1f; }
 
 @media (max-width: 900px) {
-  .chat-layout { grid-template-columns: minmax(0, 1fr); }
-  .chat-side { position: static; }
   .ref-table thead, .file-table thead { display: none; }
   .ref-table tr, .file-table tr { display: grid; gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--mist); }
   .ref-table td, .file-table td { border: 0; padding: 0; }
@@ -784,12 +825,14 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 @media (max-width: 900px) {
   .app-shell { grid-template-columns: minmax(0, 1fr); padding: 12px 14px 30px; }
   .app-main { grid-column: 1; grid-row: 2; }
-  .app-side { grid-column: 1; grid-row: 1; position: static; }
+  .app-side { grid-column: 1; grid-row: 1; position: static; max-height: none; overflow: visible; }
   .app-nav { display: flex; overflow-x: auto; gap: 6px; padding: 6px; min-height: 0; }
   .app-nav a { white-space: nowrap; padding: 8px 12px; border-radius: 999px; }
   .app-nav-label, .app-nav-sep { display: none; }
   .app-top .brand-text { display: none; }
   .app-user-name { display: none; }
+  .chat-card { height: auto; min-height: 60vh; }
+  .chat-list { max-height: none; }
 }
 `;
 
@@ -882,8 +925,11 @@ function renderAppTopbar(account, unread = 0) {
 </header>`;
 }
 
-/** الشريط الجانبي للوحة الباحث: أدوات البحث ثم روابط الحساب (واللوحة للمدير فقط). */
-function renderAppSidebar(activeKey, account) {
+/**
+ * الشريط الجانبي للوحة الباحث: أدوات البحث ثم روابط الحساب (واللوحة للمدير فقط).
+ * sideExtra محتوى إضافي يظهر داخل الشريط (تستخدمه صفحة الشات لقائمة محادثاتها).
+ */
+function renderAppSidebar(activeKey, account, sideExtra = '') {
   const link = (item) =>
     `<a href="${item.href}"${item.key === activeKey ? ' class="active"' : ''}>${icon(item.icon, 'icon-sm')}<span>${escapeHtml(
       item.label
@@ -906,6 +952,7 @@ function renderAppSidebar(activeKey, account) {
     ${admin}
     <a class="danger" href="/logout">${icon('logout', 'icon-sm')}<span>تسجيل الخروج</span></a>
   </nav>
+  ${sideExtra}
 </aside>`;
 }
 
@@ -992,7 +1039,8 @@ export function renderLayout({
   pageHead = true,
   account = null,
   unread = 0,
-  scripts = []
+  scripts = [],
+  sideExtra = ''
 }) {
   const documentTitle = title.includes(APP_NAME) ? title : `${title} — ${APP_NAME}`;
 
@@ -1031,12 +1079,14 @@ export function renderLayout({
     ? scripts.map((src) => `<script src="${escapeHtml(src)}" defer></script>`).join('\n')
     : '';
 
-  // لوحة الباحث: المحتوى يمين + الشريط الجانبي يسار (RTL: العمود الأول يمين)
+  // لوحة الباحث: السايدبار يمين (RTL) والمحتوى في العمود الثاني.
+  // sideExtra محتوى إضافي يُمرَّر داخل السايدبار (قائمة محادثات الشات مثلاً).
   const mainInner =
     area === 'app'
       ? `<div class="app-shell"><div class="app-main">${headBlock}${body}</div>${renderAppSidebar(
         activeKey,
-        account
+        account,
+        sideExtra
       )}</div>`
       : `${headBlock}${body}`;
 

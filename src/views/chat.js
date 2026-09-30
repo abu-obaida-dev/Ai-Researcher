@@ -1,23 +1,18 @@
-import { TOKEN_COSTS } from '../constants.js';
 import { formatDateTime, formatNumber } from './format.js';
 import { icon } from './icons.js';
 import { escapeHtml, renderLayout } from './layout.js';
 
 /**
- * صفحة الشات (1F): محادثات الباحث مع المشرف الذكي + نموذج الإرسال.
- * بلا JavaScript: نموذج POST عادي يعيد الرسم بعد كل رسالة (نفس estrategia
- * صفحة المسار والملاحظات) — فتعمل حتى مع تعطّل السكربتات.
+ * صفحة الشات (1F): صندوق دردشة بملء الشاشة + قائمة المحادثات داخل السايدبار.
+ *
+ * قرارات التصميم:
+ * - بلا ترويسة صفحة (pageHead:false) وبلا هيدر للكارت: أقصى مساحة لمربع الدردشة.
+ * - زر «محادثة جديدة» في أعلى قائمة المحادثات بالسايدبار (لا مكان له داخل الكارت).
+ * - زر الإرسال بجانب مربع الكتابة مباشرة (وليس تحته).
+ * - بلا اقتراحات داخل الكارت: «محادثة جديدة» تبدأ محادثة نظيفة.
+ * - الحذف لا يلمس التوكنز: الاستهلاك يُسجَّل في usage_logs وقت كل رسالة،
+ *   وحذف المحادثة يحذف المحادثة ورسائلها فقط (لا رصيد ولا سجل استهلاك).
  */
-
-const CHAT_COST = TOKEN_COSTS.find((item) => item.type === 'chat')?.tokens || 30;
-
-/** اقتراحات سريعة لبداية المحادثة (تحافظ على رصيد الباحث: كل رسالة ٣٠ توكن). */
-const STARTERS = [
-  'اقترح لي ٥ عناوين بحث في مجالي مع سؤال بحث لكل عنوان',
-  'راجع لي منهجي البحثي واذكر نقاط القوة والضعف',
-  'كيف أصيغ فجوة بحثية واضحة في مقدمة رسالتي؟',
-  'اقترح هيكلاً تفصيلياً لفصل التحليل في رسالتي'
-];
 
 /** فقاعة رسالة واحدة (لون حسب الدور) مع الوقت. */
 function renderMessage(message) {
@@ -31,27 +26,45 @@ function renderMessage(message) {
 </div>`;
 }
 
-/** قائمة محادثات الباحث الجانبية. */
-function renderConversations(conversations, activeId) {
-  if (!conversations.length) {
-    return '<div class="empty">لا محادثات بعد — ابدأ بسؤال من القائمة الجانبية.</div>';
-  }
+/** تصريف عربي مبسّط لعدد الرسائل: 1 → رسالة واحدة · 2 → رسالتان · 3-10 → N رسائل · غير ذلك → N رسالة. */
+function messageCountLabel(count) {
+  const n = Number(count) || 0;
+  if (n === 1) return 'رسالة واحدة';
+  if (n === 2) return 'رسالتان';
+  if (n >= 3 && n <= 10) return `${n} رسائل`;
+  return `${n} رسالة`;
+}
 
-  return `<ul class="chat-list">
+/**
+ * قائمة المحادثات — تُعرض داخل السايدبار فقط.
+ * زر «محادثة جديدة» في الأعلى، ولكل محادثة زر حذف مستقل.
+ */
+function renderConversations(conversations, activeId) {
+  const list = conversations.length
+    ? `<ul class="chat-list">
   ${conversations
     .map(
       (item) => `<li class="chat-item${item.id === activeId ? ' is-active' : ''}">
-    <a href="/chat?c=${escapeHtml(item.id)}">
+    <a href="/chat?c=${escapeHtml(item.id)}" title="${escapeHtml(item.title || 'محادثة')}">
       <b>${escapeHtml(item.title || 'محادثة')}</b>
-      <span class="muted">${item.messages_count} رسالة · ${escapeHtml(formatDateTime(item.updated_at))}</span>
+      <span class="muted">${escapeHtml(messageCountLabel(item.messages_count))} · ${escapeHtml(formatDateTime(item.updated_at))}</span>
     </a>
-    <form method="post" action="/chat/${escapeHtml(item.id)}/delete" class="inline-form">
-      <button class="btn btn-quiet" type="submit" aria-label="حذف المحادثة">${icon('trash', 'icon-sm')}</button>
+    <form method="post" action="/chat/${escapeHtml(item.id)}/delete" class="chat-del">
+      <button class="chat-del-btn" type="submit" title="حذف المحادثة" aria-label="حذف المحادثة">${icon('trash', 'icon-sm')}</button>
     </form>
   </li>`
     )
     .join('')}
-</ul>`;
+</ul>`
+    : '<p class="chat-side-empty">لا محادثات محفوظة بعد.</p>';
+
+  return `<section class="card chat-side-card">
+  <div class="chat-side-head">
+    <a class="btn btn-primary btn-block" href="/chat">${icon('plus', 'icon-sm')} محادثة جديدة</a>
+  </div>
+  ${list}
+  <p class="chat-side-note">حذف المحادثة لا يُرجِع التوكنز المستهلكة.</p>
+</section>`;
 }
 
 /** صفحة الشات كاملة. */
@@ -64,86 +77,60 @@ export function renderChatPage({
   stepName = '',
   prefill = '',
   balance = 0,
+  cost = 30,
   providers = [],
   flash = null
 }) {
   const flashHtml = flash
     ? flash.type === 'error'
-      ? `<div class="alert">${escapeHtml(flash.message)}</div>`
-      : `<div class="notice">${escapeHtml(flash.message)}</div>`
+      ? `<div class="alert chat-flash">${escapeHtml(flash.message)}</div>`
+      : `<div class="notice chat-flash">${escapeHtml(flash.message)}</div>`
     : '';
 
   const providerWarning = providers.length
     ? ''
-    : `<div class="alert"><b>لا يوجد مزوّد ذكاء اصطناعي مفعّل.</b> أضف أحد المفاتيح <code>OPENROUTER_API_KEY</code> أو <code>GEMINI_API_KEY</code> أو <code>GROK_API_KEY</code> في ملف <code>.env</code> ثم أعد تشغيل الخادم.</div>`;
+    : `<div class="alert chat-flash"><b>لا يوجد مزوّد ذكاء اصطناعي مفعّل.</b> أضف أحد المفاتيح <code>OPENROUTER_API_KEY</code> أو <code>GEMINI_API_KEY</code> أو <code>GROK_API_KEY</code> في ملف <code>.env</code> ثم أعد تشغيل الخادم.</div>`;
 
   const stepContext = stepKey
-    ? `<p class="form-hint">السياق: ${escapeHtml(stepName || 'خطوة من مسار البحث')} — يمزجه المشرف الذكي في إجابته.</p>`
+    ? `<div class="chat-context">${icon('clipboard', 'icon-sm')} <span>السياق: ${escapeHtml(
+        stepName || 'خطوة من مسار البحث'
+      )}</span><a href="/chat">إزالة</a></div>`
     : '';
 
   const messagesHtml = conversation?.messages?.length
     ? conversation.messages.map(renderMessage).join('')
-    : `<div class="empty">ابدأ بسؤال من Suggestions أو اكتب سؤالك في الأسفل.</div>`;
-
-  const startersHtml = conversation?.messages?.length
-    ? ''
-    : `<div class="chips">${STARTERS.map(
-        (text) =>
-          `<a class="chip" href="/chat?step=${encodeURIComponent(stepKey)}&amp;prompt=${encodeURIComponent(text)}">${escapeHtml(
-            text
-          )}</a>`
-      ).join('')}</div>`;
-
-  const body = `<div class="chat-layout">
-  <section class="card chat-main">
-    <div class="chat-head">
-      <h2>${escapeHtml(conversation?.title || 'محادثة جديدة')}</h2>
-      <p class="muted">الرصيد: ${formatNumber(balance)} توكن · تكلفة الرسالة: ${formatNumber(CHAT_COST)} توكن</p>
-    </div>
-
-    ${providerWarning}
-    ${flashHtml}
-    ${stepContext}
-
-    <div class="chat-body" id="messages">${messagesHtml}</div>
-    ${startersHtml}
-
-    <form class="chat-form" method="post" action="/chat">
-      <input type="hidden" name="conversation_id" value="${escapeHtml(conversation?.id || '')}" />
-      <input type="hidden" name="step" value="${escapeHtml(stepKey)}" />
-      <div class="field">
-        <label for="message">رسالتك إلى المشرف الذكي</label>
-        <textarea id="message" name="message" rows="4" required maxlength="8000" placeholder="مثال: أراجع منهج الوصفي في دراستي — هل يناسب سؤال البحث؟">${escapeHtml(prefill)}</textarea>
-      </div>
-      <div class="form-actions">
-        <button class="btn btn-primary" type="submit">${icon('send', 'icon-sm')} إرسال</button>
-        <a class="btn btn-quiet" href="/chat">${icon('plus', 'icon-sm')} محادثة جديدة</a>
-        <span class="muted">يُحفظ سجل المحادثة في حسابك ويظهر في لوحتك.</span>
-      </div>
-    </form>
-  </section>
-
-  <aside class="card chat-side">
-    <h3>محادثاتي</h3>
-    ${renderConversations(conversations, conversation?.id || '')}
-    <div class="chat-side-links">
-      <a class="btn btn-quiet" href="/journey">${icon('clipboard', 'icon-sm')} مسار البحث</a>
-      <a class="btn btn-quiet" href="/notes">${icon('list', 'icon-sm')} المفكرة</a>
-      <a class="btn btn-quiet" href="/files">${icon('paperclip', 'icon-sm')} الملفات</a>
-    </div>
-  </aside>
+    : `<div class="chat-welcome">
+  ${icon('sparkles')}
+  <p>ابدأ بسؤال واحد واضح — المنهج، أو الموضوع، أو فصل تريد مراجعته.</p>
 </div>`;
+
+  const body = `<section class="card chat-card">
+  ${providerWarning}
+  ${flashHtml}
+  ${stepContext}
+  <div class="chat-body" id="messages">${messagesHtml}</div>
+
+  <form class="chat-composer" method="post" action="/chat">
+    <input type="hidden" name="conversation_id" value="${escapeHtml(conversation?.id || '')}" />
+    <input type="hidden" name="step" value="${escapeHtml(stepKey)}" />
+    <textarea id="message" name="message" rows="1" required maxlength="8000"
+      placeholder="اكتب رسالتك إلى المشرف الذكي…"
+      aria-label="رسالتك إلى المشرف الذكي">${escapeHtml(prefill)}</textarea>
+    <button class="btn btn-primary chat-send" type="submit" title="إرسال" aria-label="إرسال">${icon('send')}</button>
+  </form>
+  <p class="chat-hint">الرصيد: ${formatNumber(balance)} توكن · تكلفة الرسالة: ${cost} توكن</p>
+</section>`;
 
   return renderLayout({
     title: 'المشرف الذكي',
-    subtitle: 'اسأل عن منهجك أو موضوعك أو فصولك — وسيجيبك بناءً على ملفك ومسارك',
+    // بلا ترويسة صفحة: أقصى مساحة لمربع الدردشة
+    pageHead: false,
     area: 'app',
     activeKey: 'chat',
     account,
     unread,
     scripts: ['/js/chat-auto-scroll.js', '/js/app-shell.js'],
+    sideExtra: renderConversations(conversations, conversation?.id || ''),
     body
   });
 }
-
-export { CHAT_COST };

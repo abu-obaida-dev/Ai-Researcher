@@ -152,9 +152,13 @@ async function testNotes(userId, cookie) {
   });
   check('1E إنشاء ملاحظة (303)', add.ok && add.location.includes('ok=note_added'), add.location);
 
-  const rows = await pool.query('SELECT id, pinned, tags, step_key FROM notes WHERE user_id = $1', [userId]);
+  // نحدد الملاحظة بالعنوان: الاختبار أنشأ ملاحظة أخرى مرتبطة بالمرجع في testReferences
+  const rows = await pool.query(
+    "SELECT id, pinned, tags, step_key FROM notes WHERE user_id = $1 AND title = 'ملاحظة اختبار'",
+    [userId]
+  );
   const note = rows.rows[0];
-  check('1E الملاحظة محفوظة (مثبّتة + وسوم + خطوة)', Boolean(note) && note.pinned === true && note.step_key === 'methodology');
+  check('1E الملاحظة محفوظة (مثبّتة + وسوم + خطوة)', Boolean(note) && note.pinned === true && note.step_key === 'methodology', JSON.stringify(note || {}));
 
   const pin = await call(`/notes/${note.id}/pin`, { method: 'POST', cookie, expect: [303] });
   check('1E تبديل التثبيت (303)', pin.ok);
@@ -283,11 +287,29 @@ async function testChat(userId, cookie) {
   const listed = await call('/chat', { cookie });
   check('1F المحادثة تظهر في السجل', listed.text.includes('أراجع منهجي'));
 
+  const chatBody = listed.text.split('</style>')[1] || '';
+  check('1F بلا ترويسة صفحة (أقصى مساحة للدردشة)', !chatBody.includes('page-head'));
+  check('1F بلا هيدر لكارت الدردشة', !chatBody.includes('chat-head'));
+  check('1F بلا اقتراحات داخل الكارت', !chatBody.includes('اقترح لي ٥ عناوين'));
+  check('1F زر «محادثة جديدة» في السايدبار لا في الكارت', chatBody.includes('chat-side-card') && chatBody.includes('btn-block'));
+
+  // الحذف لا يجب أن يُرجِع التوكنز: نسجّل الرصيد قبل حذف كل المحادثات
+  const beforeDelete = await pool.query('SELECT tokens_balance, tokens_used FROM users WHERE id = $1', [userId]);
   const conversation = await pool.query('SELECT id FROM conversations WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1', [userId]);
   const del = await call(`/chat/${conversation.rows[0].id}/delete`, { method: 'POST', cookie, expect: [303] });
   check('1F حذف المحادثة (303)', del.ok);
   const gone = await pool.query('SELECT count(*)::int AS total FROM conversations WHERE id = $1', [conversation.rows[0].id]);
   check('1F حُذفت المحادثة برسائلها', gone.rows[0].total === 0);
+
+  const afterDelete = await pool.query('SELECT tokens_balance, tokens_used FROM users WHERE id = $1', [userId]);
+  check(
+    '1F الحذف لا يُرجِع التوكنز المستهلكة',
+    afterDelete.rows[0].tokens_balance === beforeDelete.rows[0].tokens_balance &&
+      afterDelete.rows[0].tokens_used === beforeDelete.rows[0].tokens_used,
+    `الرصيد ${beforeDelete.rows[0].tokens_balance} → ${afterDelete.rows[0].tokens_balance}`
+  );
+  const usageKept = await pool.query('SELECT count(*)::int AS n FROM usage_logs WHERE user_id = $1', [userId]);
+  check('1F سجل الاستهلاك يبقى بعد حذف المحادثات', usageKept.rows[0].n > 0, `${usageKept.rows[0].n} سطر`);
 }
 
 async function main() {
