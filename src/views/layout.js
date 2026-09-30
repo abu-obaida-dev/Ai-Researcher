@@ -50,11 +50,13 @@ const NAV_ITEMS = [
 const APP_NAV = [
   { href: '/dashboard', label: 'الإحصائية', key: 'dashboard', icon: 'coins' },
   { href: '/journey', label: 'مسار البحث', key: 'journey', icon: 'graduation' },
-  { href: '/chat', label: 'المشرف الذكي', key: 'chat', icon: 'message' },
   { href: '/references', label: 'المراجع', key: 'references', icon: 'book' },
   { href: '/notes', label: 'المفكرة', key: 'notes', icon: 'list' },
   { href: '/files', label: 'ملفاتى', key: 'files', icon: 'clipboard' }
 ];
+
+/** رابط المشرف الذكي منفصلاً: يُعرض أسفل القائمة وفوق سجل الجلسات (ChatGPT/Claude). */
+const APP_CHAT_NAV = { href: '/chat', label: 'المشرف الذكي', key: 'chat', icon: 'message' };
 
 /**
  * روابط الحساب: الحساب والملف البحثي في الشريط العلوي، وتعديل الملف من
@@ -648,9 +650,11 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .app-side { grid-column: 1; grid-row: 1; position: sticky; top: 60px; }
 .app-nav {
   background: #fff; border: 1px solid var(--mist); border-radius: 18px; padding: 7px;
-  box-shadow: var(--shadow); display: grid; gap: 2px; align-content: start;
+  box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 2px;
   min-height: calc(100vh - 110px);
 }
+/* قسم المشرف الذكي + سجل الجلسات مثبّت أسفل القائمة (margin-top:auto في flex column) */
+.app-nav-foot { margin-top: auto; display: grid; gap: 2px; padding-top: 2px; }
 .app-nav a { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 12px; color: var(--slate); font-size: 12.5px; font-weight: 600; }
 .app-nav a:hover { background: var(--mist-soft); color: var(--sea-deep); }
 .app-nav a.active { background: var(--ink); color: #fff; font-weight: 700; }
@@ -758,12 +762,29 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .note-body { white-space: pre-wrap; font-size: 13.5px; line-height: 1.8; }
 .note-tags { display: flex; gap: 6px; flex-wrap: wrap; }
 
-/* ---- صفحة الشات: كارت واحد بملء الارتفاع + المحادثات داخل قائمة السايدبار ---- */
+/* ---- صفحة الشات: كارت واحد بملء الارتفاع + الجلسات أسفل رابط المشرف الذكي ---- */
+/* شريط التمرير بلون الهوية (كحلي + أخضر زنجبي) في كل مكان */
+* { scrollbar-width: thin; scrollbar-color: var(--sea) var(--mist-soft); }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: var(--mist-soft); border-radius: 999px; }
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--sea), var(--sea-deep));
+  border-radius: 999px; border: 2px solid var(--mist-soft);
+}
+*::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, var(--sea-deep), var(--ink)); }
+*::-webkit-scrollbar-corner { background: var(--mist-soft); }
+
+/* وضع ملء الارتفاع: لا سكرول في الصفحة، والتمرير داخل الصناديق فقط */
+.app-shell--fit { height: calc(100vh - 50px); padding-bottom: 14px; }
+.app-shell--fit .app-main { height: 100%; min-height: 0; }
+.app-shell--fit .app-side { max-height: 100%; }
+.app-shell--fit .app-nav { min-height: 100%; }
+
 .app-side { display: grid; gap: 12px; align-content: start; max-height: calc(100vh - 76px); overflow-y: auto; }
-.app-side > .app-nav { min-height: calc(100vh - 110px); }
+.app-nav-sep.first { margin-top: 2px; }
 .chat-card {
   display: flex; flex-direction: column; gap: 0;
-  height: calc(100vh - 108px); min-height: 460px; padding: 14px 16px 12px;
+  height: 100%; min-height: 0; padding: 14px 16px 12px;
 }
 .chat-flash { margin: 0 0 10px; }
 .chat-context {
@@ -798,11 +819,11 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   flex: 0 0 auto; width: 46px; height: 46px; padding: 0; border-radius: 14px; display: grid; place-items: center;
 }
 
-/* قائمة المحادثات داخل قائمة السايدبار نفسها (ChatGPT/Claude style) */
-.chat-nav { display: grid; gap: 6px; margin-bottom: 2px; }
+/* سجل الجلسات أسفل رابط المشرف الذكي داخل نفس القائمة (ChatGPT/Claude style) */
+.chat-nav { display: grid; gap: 6px; margin-top: 4px; min-height: 0; }
 .chat-side-empty { font-size: 11.5px; color: var(--slate); text-align: center; padding: 6px 4px; }
 .chat-side-note { font-size: 10px; color: var(--slate); opacity: .85; text-align: center; padding: 2px 4px 4px; }
-.chat-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; max-height: 38vh; overflow-y: auto; }
+.chat-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; max-height: min(34vh, 300px); overflow-y: auto; }
 .chat-item { display: flex; align-items: center; gap: 2px; border-radius: 10px; }
 .chat-item:hover { background: var(--mist-soft); }
 .chat-item.is-active { background: var(--ink); }
@@ -829,15 +850,19 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 
 @media (max-width: 900px) {
   .app-shell { grid-template-columns: minmax(0, 1fr); padding: 12px 14px 30px; }
+  .app-shell--fit { height: auto; padding-bottom: 12px; }
   .app-main { grid-column: 1; grid-row: 2; }
   .app-side { grid-column: 1; grid-row: 1; position: static; max-height: none; overflow: visible; }
   .app-nav { display: flex; overflow-x: auto; gap: 6px; padding: 6px; min-height: 0; }
   .app-nav a { white-space: nowrap; padding: 8px 12px; border-radius: 999px; }
-  .app-nav-label, .app-nav-sep { display: none; }
+  .app-nav-foot { margin-top: 0; display: flex; align-items: center; gap: 6px; }
+  .app-nav-sep { display: none; }
   .app-top .brand-text { display: none; }
   .app-user-name { display: none; }
-  .chat-card { height: auto; min-height: 60vh; }
-  .chat-list { max-height: none; }
+  .chat-card { height: 70vh; min-height: 420px; }
+  .chat-nav { margin-top: 0; }
+  .chat-list { max-height: 120px; }
+  .chat-side-note { display: none; }
 }
 `;
 
@@ -932,18 +957,17 @@ function renderAppTopbar(account, unread = 0) {
 }
 
 /**
- * الشريط الجانبي للوحة الباحث: أدوات البحث فقط.
- * الحساب والملف البحثي والخروج كلها في الشريط العلوي، فلا نكرّرها هنا.
- * navTop محتوى إضافي يُدرَج في أعلى القائمة نفسه (تستخدمه صفحة الشات لقائمة
- * محادثاتها، فتظهر جزءاً من الشريط لا بطاقة منفصلة تحته).
+ * الشريط الجانبي للوحة الباحث.
+ * الترتيب: فاصل ← أدوات البحث ← فاصل ← المشرف الذكي ← سجل الجلسات.
+ * navBottom محتوى إضافي تحت رابط المشرف الذكي (تستخدمه صفحة الشات لسجل جلساتها)،
+ * والحساب/الملف البحثي/الخروج كلها في الشريط العلوي فلا نكرّرها هنا.
  */
-function renderAppSidebar(activeKey, account, navTop = '') {
+function renderAppSidebar(activeKey, account, navBottom = '') {
   const link = (item) =>
     `<a href="${item.href}"${item.key === activeKey ? ' class="active"' : ''}>${icon(item.icon, 'icon-sm')}<span>${escapeHtml(
       item.label
     )}</span></a>`;
 
-  const tools = APP_NAV.map(link).join('');
   const admin =
     account?.role === 'admin'
       ? `<a href="/admin"${activeKey === 'admin' ? ' class="active"' : ''}>${icon('shield', 'icon-sm')}<span>لوحة الإدارة</span></a>`
@@ -951,10 +975,14 @@ function renderAppSidebar(activeKey, account, navTop = '') {
 
   return `<aside class="app-side">
   <nav class="app-nav" aria-label="أدوات الباحث">
-    ${navTop}
-    ${navTop ? '<div class="app-nav-sep"></div>' : ''}
-    ${tools}
+    <div class="app-nav-sep first"></div>
+    ${APP_NAV.map(link).join('')}
     ${admin}
+    <div class="app-nav-foot">
+      <div class="app-nav-sep"></div>
+      ${link(APP_CHAT_NAV)}
+      ${navBottom}
+    </div>
   </nav>
 </aside>`;
 }
@@ -1043,7 +1071,8 @@ export function renderLayout({
   account = null,
   unread = 0,
   scripts = [],
-  navTop = ''
+  navBottom = '',
+  fitViewport = false
 }) {
   const documentTitle = title.includes(APP_NAME) ? title : `${title} — ${APP_NAME}`;
 
@@ -1083,13 +1112,15 @@ export function renderLayout({
     : '';
 
   // لوحة الباحث: السايدبار يمين (RTL) والمحتوى في العمود الثاني.
-  // navTop محتوى إضافي يُدرَج في أعلى قائمة السايدبار نفسه (قائمة محادثات الشات مثلاً).
+  // navBottom محتوى إضافي أسفل قائمة السايدبار (سجل جلسات الشات مثلاً).
+  // fitViewport يمنع سكرول الصفحة ويجعل المحتوى يملأ ما تبقى من ارتفاع الشاشة.
+  const shellClass = fitViewport ? 'app-shell app-shell--fit' : 'app-shell';
   const mainInner =
     area === 'app'
-      ? `<div class="app-shell"><div class="app-main">${headBlock}${body}</div>${renderAppSidebar(
+      ? `<div class="${shellClass}"><div class="app-main">${headBlock}${body}</div>${renderAppSidebar(
         activeKey,
         account,
-        navTop
+        navBottom
       )}</div>`
       : `${headBlock}${body}`;
 

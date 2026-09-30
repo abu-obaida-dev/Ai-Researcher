@@ -294,7 +294,7 @@ async function testChat(userId, cookie) {
   // المحادثات يجب أن تكون داخل <nav> نفسه لا بطاقة منفصلة (ChatGPT/Claude style)
   const navHtml = chatBody.slice(chatBody.indexOf('<nav class="app-nav"'), chatBody.indexOf('</nav>'));
   check('1F المحادثات داخل قائمة السايدبار نفسها', navHtml.includes('class="chat-nav"') && !chatBody.includes('chat-side-card'));
-  check('1F زر «محادثة جديدة» في أعلى القائمة', navHtml.includes('btn-block') && navHtml.indexOf('محادثة جديدة') < navHtml.indexOf('href="/journey"'));
+  check('1F زر «محادثة جديدة» أسفل رابط المشرف الذكي', navHtml.includes('btn-block') && navHtml.indexOf('محادثة جديدة') > navHtml.indexOf('href="/chat"'));
   check('1F لا يوجد نص «أدوات البحث»', !chatBody.includes('أدوات البحث'));
   // لا تكرار: الحساب/الملف/الخروج في الشريط العلوي لا في السايدبار
   check(
@@ -303,6 +303,18 @@ async function testChat(userId, cookie) {
   );
   const topbar = chatBody.slice(chatBody.indexOf('<header class="app-top">'), chatBody.indexOf('</header>'));
   check('1F الشريط العلوي فيه الحساب والخروج', topbar.includes('href="/account"') && topbar.includes('href="/logout"'));
+
+  // رابط «المشرف الذكي» هو آخر رابط تنقّل (قبله روابط الجلسات /chat?c=)
+  const tools = [...navHtml.matchAll(/<a href="(\/(?:dashboard|journey|references|notes|files|chat|account|admin|onboarding))"/g)].map((m) => m[1]);
+  check('1F المشرف الذكي آخر رابط أدوات في القائمة', tools[tools.length - 1] === '/chat', tools.join(' '));
+  check('1F الجلسات أسفل رابط المشرف الذكي', navHtml.indexOf('class="chat-nav"') > navHtml.indexOf('href="/chat"'));
+  check('1F فاصل أعلى الأدوات وآخر قبل المشرف', navHtml.indexOf('app-nav-sep first') < navHtml.indexOf('href="/dashboard"') && navHtml.indexOf('app-nav-foot') < navHtml.indexOf('href="/chat"'));
+
+  // لا سكرول في الصفحة: الشل يملأ ما تحت التوب بار، والتمرير داخل الصناديق
+  check('1F وضع ملء الارتفاع مفعّل (لا سكرول في الصفحة)', chatBody.includes('app-shell app-shell--fit'));
+  const css = (await call('/chat', { cookie })).text.split('</style>')[0];
+  check('1F التمرير داخل صندوق الشات وسجل الجلسات', /\.chat-body \{[^}]*overflow-y: auto/.test(css) && /\.chat-list \{[^}]*overflow-y: auto/.test(css));
+  check('1F شريط التمرير بلون الهوية', /scrollbar-color: var\(--sea\)/.test(css) && /::-webkit-scrollbar-thumb/.test(css));
 
   // الحذف لا يجب أن يُرجِع التوكنز: نسجّل الرصيد قبل حذف كل المحادثات
   const beforeDelete = await pool.query('SELECT tokens_balance, tokens_used FROM users WHERE id = $1', [userId]);

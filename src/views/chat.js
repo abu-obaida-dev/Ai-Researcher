@@ -124,9 +124,11 @@ export function renderChatPage({
     activeKey: 'chat',
     account,
     unread,
+    // لا سكرول في الصفحة: الشات يملأ ما تبقى من الشاشة والتمرير داخل صندوقه
+    fitViewport: true,
     scripts: ['/js/chat-auto-scroll.js', '/js/app-shell.js'],
-    // المحادثات جزء من قائمة السايدبار نفسه (أعلى أدوات البحث)
-    navTop: renderConversations(conversations, conversation?.id || ''),
+    // سجل الجلسات أسفل رابط «المشرف الذكي» داخل نفس القائمة
+    navBottom: renderConversations(conversations, conversation?.id || ''),
     body
   });
 }
