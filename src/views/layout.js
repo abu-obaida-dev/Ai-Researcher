@@ -56,9 +56,12 @@ const APP_NAV = [
   { href: '/files', label: 'ملفاتى', key: 'files', icon: 'clipboard' }
 ];
 
-/** روابط الحساب أسفل الشريط الجانبي (تظهر للجميع، ولوحة الإدارة للمدير فقط). */
+/**
+ * روابط الحساب: الحساب والملف البحثي في الشريط العلوي، وتعديل الملف من
+ * بطاقات الإحصائية ومسار البحث — فلا تكرار في السايدبار.
+ */
 const APP_ACCOUNT_NAV = [
-  { href: '/account', label: 'حسابى والرصيد', key: 'account', icon: 'userPlus' },
+  { href: '/account', label: 'حسابى والرصيد', key: 'account', icon: 'user' },
   { href: '/onboarding', label: 'ملفي البحثى', key: 'onboarding', icon: 'searchCheck' }
 ];
 
@@ -921,6 +924,7 @@ function renderAppTopbar(account, unread = 0) {
         </div>
       </div>
       <a class="app-user" href="/dashboard" title="لوحتي">${avatar}<span class="app-user-name">${escapeHtml(name)}</span></a>
+      <a class="icon-btn" href="/account" title="حسابي ورصيد التوكنز" aria-label="حسابي ورصيد التوكنز">${icon('user', 'icon-sm')}</a>
       <a class="icon-btn" href="/logout" title="تسجيل الخروج" aria-label="تسجيل الخروج">${icon('logout', 'icon-sm')}</a>
     </div>
   </div>
@@ -928,7 +932,8 @@ function renderAppTopbar(account, unread = 0) {
 }
 
 /**
- * الشريط الجانبي للوحة الباحث: روابط الأدوات ثم روابط الحساب (واللوحة للمدير فقط).
+ * الشريط الجانبي للوحة الباحث: أدوات البحث فقط.
+ * الحساب والملف البحثي والخروج كلها في الشريط العلوي، فلا نكرّرها هنا.
  * navTop محتوى إضافي يُدرَج في أعلى القائمة نفسه (تستخدمه صفحة الشات لقائمة
  * محادثاتها، فتظهر جزءاً من الشريط لا بطاقة منفصلة تحته).
  */
@@ -939,7 +944,6 @@ function renderAppSidebar(activeKey, account, navTop = '') {
     )}</span></a>`;
 
   const tools = APP_NAV.map(link).join('');
-  const accountLinks = APP_ACCOUNT_NAV.map(link).join('');
   const admin =
     account?.role === 'admin'
       ? `<a href="/admin"${activeKey === 'admin' ? ' class="active"' : ''}>${icon('shield', 'icon-sm')}<span>لوحة الإدارة</span></a>`
@@ -950,11 +954,7 @@ function renderAppSidebar(activeKey, account, navTop = '') {
     ${navTop}
     ${navTop ? '<div class="app-nav-sep"></div>' : ''}
     ${tools}
-    <div class="app-nav-sep"></div>
-    <span class="app-nav-label">حسابى</span>
-    ${accountLinks}
     ${admin}
-    <a class="danger" href="/logout">${icon('logout', 'icon-sm')}<span>تسجيل الخروج</span></a>
   </nav>
 </aside>`;
 }

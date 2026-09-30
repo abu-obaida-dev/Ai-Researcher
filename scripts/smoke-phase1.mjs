@@ -296,6 +296,13 @@ async function testChat(userId, cookie) {
   check('1F المحادثات داخل قائمة السايدبار نفسها', navHtml.includes('class="chat-nav"') && !chatBody.includes('chat-side-card'));
   check('1F زر «محادثة جديدة» في أعلى القائمة', navHtml.includes('btn-block') && navHtml.indexOf('محادثة جديدة') < navHtml.indexOf('href="/journey"'));
   check('1F لا يوجد نص «أدوات البحث»', !chatBody.includes('أدوات البحث'));
+  // لا تكرار: الحساب/الملف/الخروج في الشريط العلوي لا في السايدبار
+  check(
+    '1F السايدبار بلا قسم «حسابى» ولا خروج',
+    !navHtml.includes('حسابى') && !navHtml.includes('ملفي البحثى') && !navHtml.includes('تسجيل الخروج')
+  );
+  const topbar = chatBody.slice(chatBody.indexOf('<header class="app-top">'), chatBody.indexOf('</header>'));
+  check('1F الشريط العلوي فيه الحساب والخروج', topbar.includes('href="/account"') && topbar.includes('href="/logout"'));
 
   // الحذف لا يجب أن يُرجِع التوكنز: نسجّل الرصيد قبل حذف كل المحادثات
   const beforeDelete = await pool.query('SELECT tokens_balance, tokens_used FROM users WHERE id = $1', [userId]);

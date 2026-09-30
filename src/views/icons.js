@@ -33,7 +33,8 @@ const PATHS = {
   edit: '<path d="M4 20h4L20 8l-4-4L4 16z"/><path d="M14.5 5.5 18.5 9.5"/>',
   upload: '<path d="M12 21V9"/><path d="m7.5 13.5 4.5-4.5 4.5 4.5"/><path d="M4 4h16"/>',
   pin: '<path d="M9 4h6l-1 6 4 3v2H6v-2l4-3z"/><path d="M12 15v5"/>',
-  refresh: '<path d="M20 11.5A8 8 0 1 0 18 17"/><path d="M20 5v6h-6"/>'
+  refresh: '<path d="M20 11.5A8 8 0 1 0 18 17"/><path d="M20 5v6h-6"/>',
+  user: '<circle cx="12" cy="8" r="3.6"/><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0"/>'
 };
 
 /** أيقونة واحدة بحجم افتراضي مناسب للنصوص والبطاقات. */
