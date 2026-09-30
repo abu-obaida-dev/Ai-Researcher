@@ -1,0 +1,36 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+
+# builds / artifacts
+/build
+/dist
+
+# backups (نسخة ملفات الواجهة القديمة)
+/backup/
+
+# storage للملفات المرفوعة
+/storage/library/
+/storage/users/
+
+# misc
+.DS_Store
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files
+.env
+.env*.local
+
+# أسرار OAuth من Google Cloud Console (لا تُرفع للريبو أبداً)
+client_secret_*.json
+
+# logs
+/logs
+*.log
+

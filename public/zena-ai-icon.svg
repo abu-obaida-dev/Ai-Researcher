@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 140" role="img" aria-label="Zena AI icon">
+  <rect width="140" height="140" rx="38" fill="#102A43"/>
+  <path d="M38 57c17-10 32-10 42 0v48c-11-8-25-8-42 0V57Z" fill="#F7FBFC"/>
+  <path d="M102 57c-17-10-32-10-42 0v48c11-8 25-8 42 0V57Z" fill="#D8F3EF"/>
+  <path d="M60 57v48" stroke="#102A43" stroke-width="5" stroke-linecap="round"/>
+  <path d="M39 111c18-9 35-9 48 0 12 8 21 8 28 2v13c-10 6-19 5-29-1-14-8-30-8-47 0v-14Z" fill="#19B5A5"/>
+  <path d="M111 28l4 10 10 4-10 4-4 10-4-10-10-4 10-4 4-10Z" fill="#F4A261"/>
+</svg>
