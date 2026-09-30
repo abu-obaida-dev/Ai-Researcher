@@ -229,11 +229,13 @@ export const DEFAULT_ROLES = [
 ];
 
 /**
- * حدود رفع ملفات الباحث — تُطبَّق في services/files.js وفي نص نموذج الرفع.
- * maxBytes يُقرأ من البيئة عند النداء (بعد تحميل dotenv في server.js) لا عند الاستيراد.
+ * حدود رفع ملفات الباحث — الافتراضي فقط؛ الحد الفعلي يضبطه المدير من
+ * لوحة الإدارة (/admin/settings) عبر services/settings.js (جدول settings).
+ * الأنواع المسموحة تُطبَّق دائماً من هذه القائمة.
  */
 export const FILE_UPLOAD_LIMITS = {
-  maxMb: Math.max(1, Number(process.env.MAX_UPLOAD_MB) || 10),
+  // Fallback فقط حين لا يوجد إعداد في جدول settings ولا في .env
+  maxMb: 100,
   allowedExtensions: [
     'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt', 'md', 'ppt', 'pptx', 'zip', 'jpg', 'jpeg', 'png', 'webp'
   ],

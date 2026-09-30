@@ -71,6 +71,7 @@ export function renderAdminHome({ counts, latestUsers, sent = 0, adminToken = ''
       <a class="btn btn-primary" href="/admin/users">إدارة الباحثين</a>
       <a class="btn" href="/admin/plans">الباقات</a>
       <a class="btn" href="/admin/usage">سجل الاستهلاك</a>
+      <a class="btn" href="/admin/settings">إعدادات التخزين</a>
       <a class="btn" href="/api/health">/api/health</a>
       <a class="btn" href="/api/users">/api/users</a>
     </div>
@@ -254,6 +255,83 @@ export function renderAdminPlans({ plans, totalSubscribers }) {
     title: 'الباقات',
     subtitle: 'الباقات المتاحة وعدد المشتركين في كل باقة',
     activeKey: 'plans',
+    body
+  });
+}
+
+/** يحول البايتات إلى نص مقروء (KB/MB/GB). */
+function humanBytes(bytes) {
+  const size = Number(bytes || 0);
+  if (size >= 1073741824) return `${(size / 1073741824).toFixed(2)} GB`;
+  if (size >= 1048576) return `${(size / 1048576).toFixed(1)} MB`;
+  if (size >= 1024) return `${Math.round(size / 1024)} KB`;
+  return `${size} بايت`;
+}
+
+/**
+ * إعدادات التخزين: يضبط المدير حجم الملف الواحد والمساحة الكلية لكل باحث.
+ * التغيير يُحفظ في جدول settings ويسري فوراً على كل الحسابات بلا إعادة تشغيل.
+ */
+export function renderAdminSettings({ limits, usage = {}, saved = false, error = '', adminToken = '' }) {
+  const token = adminToken ? `?token=${encodeURIComponent(adminToken)}` : '';
+  const stats = [
+    ['أقصى حجم للملف الواحد', `${limits.maxUploadMb} MB`],
+    ['المساحة الكلية لكل باحث', `${limits.maxStorageMb} MB`],
+    ['إجمالي ملفات المنصة', `${humanBytes(usage.bytes)} · ${usage.files || 0} ملف`],
+    ['باحثون رفعوا ملفات', `${usage.users || 0} باحث`]
+  ]
+    .map(([label, value]) => renderStat(label, value))
+    .join('');
+
+  const body = `
+  <div class="grid">${stats}</div>
+  ${
+    saved
+      ? '<div class="notice">حُفظت حدود التخزين — تسري على كل الباحثين فوراً.</div>'
+      : ''
+  }
+  ${error ? `<div class="alert"><b>تعذّر الحفظ:</b> ${escapeHtml(error)}</div>` : ''}
+  <div class="card mt-16">
+    <h2>حدود رفع الملفات</h2>
+    <p class="muted">
+      حجم الملف الواحد: أقصى حجم لملف يرفعه الباحث. المساحة الكلية: مجموع ما يمكن أن يرفعه
+      باحث واحد (لو ملأها لن يستطيع الرفع حتى يحذف ملفاً). يجب أن تكون المساحة الكلية
+      أكبر من أو تساوي حجم الملف الواحد.
+    </p>
+    <form method="post" action="/admin/settings/storage${token}" class="form-card">
+      <div class="field-row">
+        <div class="field">
+          <label for="max_upload_mb">أقصى حجم للملف الواحد (MB)</label>
+          <input type="number" id="max_upload_mb" name="max_upload_mb" min="1" max="2048" step="1" required
+            value="${escapeHtml(String(limits.maxUploadMb))}" />
+          <p class="form-hint">مثال: 100 يعني 100 ميجابايت كحد أقصى للملف.</p>
+        </div>
+        <div class="field">
+          <label for="max_storage_mb">المساحة الكلية لكل باحث (MB)</label>
+          <input type="number" id="max_storage_mb" name="max_storage_mb" min="10" max="102400" step="10" required
+            value="${escapeHtml(String(limits.maxStorageMb))}" />
+          <p class="form-hint">مثال: 500 يعني 500 ميجابايت إجمالاً. (1024 = 1 جيجابايت)</p>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">حفظ الحدود</button>
+        <span class="muted">يُطبَّق فوراً — لا يحتاج إعادة تشغيل الخادم.</span>
+      </div>
+    </form>
+  </div>
+  <div class="card">
+    <h2>روابط سريعة</h2>
+    <div class="links">
+      <a class="btn" href="/admin">نظرة عامة</a>
+      <a class="btn" href="/admin/users">إدارة الباحثين</a>
+      <a class="btn" href="/admin/plans">الباقات</a>
+    </div>
+  </div>`;
+
+  return renderLayout({
+    title: 'إعدادات التخزين',
+    subtitle: 'حدود رفع الملفات والمساحة المخصصة لكل باحث',
+    activeKey: 'settings',
     body
   });
 }

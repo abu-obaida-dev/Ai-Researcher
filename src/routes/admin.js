@@ -3,9 +3,11 @@ import { pool } from '../db/client.js';
 import { hintForDatabaseError } from '../db/errors.js';
 import { renderNotice } from '../views/layout.js';
 import { notifyUser } from '../services/notifications.js';
+import { saveStorageLimits, storageLimits } from '../services/settings.js';
 import {
   renderAdminHome,
   renderAdminPlans,
+  renderAdminSettings,
   renderAdminUsage,
   renderAdminUsers
 } from '../views/admin.js';
@@ -225,6 +227,55 @@ router.get('/users', (req, res) => {
     },
     renderAdminUsers
   );
+});
+
+/**
+ * إعدادات التخزين: يضبط المدير أقصى حجم للملف الواحد وأقصى مساحة إجمالية
+ * لكل باحث. تُحفظ في جدول settings فتُطبَّق فوراً على كل الحسابات بلا إعادة تشغيل.
+ */
+router.get('/settings', (req, res) =>
+  renderPage(
+    res,
+    async () => {
+      const [limits, usage] = await Promise.all([
+        storageLimits(),
+        pool.query(
+          `SELECT count(*)::int AS files, COALESCE(sum(size_bytes), 0)::bigint AS bytes,
+                  count(DISTINCT user_id)::int AS users
+             FROM files`
+        )
+      ]);
+
+      return {
+        limits,
+        usage: usage.rows[0],
+        saved: req.query.saved === '1',
+        error: String(req.query.error || '').slice(0, 300),
+        adminToken: String(req.query.token || '').slice(0, 200)
+      };
+    },
+    renderAdminSettings
+  )
+);
+
+/** حفظ حدود التخزين بعد التحقق (المساحة الكلية ≥ حجم الملف). */
+router.post('/settings/storage', async (req, res) => {
+  const backToken = String(req.query.token || '').slice(0, 200);
+  const params = (extra) => {
+    const query = new URLSearchParams(extra);
+    if (backToken) query.set('token', backToken);
+    return `/admin/settings?${query.toString()}`;
+  };
+
+  try {
+    await saveStorageLimits({
+      maxUploadMb: req.body?.max_upload_mb,
+      maxStorageMb: req.body?.max_storage_mb
+    });
+    res.redirect(302, params({ saved: '1' }));
+  } catch (error) {
+    res.redirect(302, params({ error: error?.message || 'تعذّر الحفظ' }));
+  }
 });
 
 /**

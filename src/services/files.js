@@ -4,21 +4,21 @@ import { fileURLToPath } from 'node:url';
 import { pool } from '../db/client.js';
 import { FILE_UPLOAD_LIMITS } from '../constants.js';
 import { isValidStepKeyForUser } from './journey.js';
+import { maxStorageBytes, maxUploadBytes } from './settings.js';
 
 /**
  * ملفات الباحث (1E): الميتاداتا في جدول files والبايتات على القرص تحت
  * storage/users/{userId}/files/ كما هو موصوف في storage/README.md.
- * كل عملية تتأكد أن الملف مملوك لصاحب الجلسة، والرفع محدود بالحجم والأنواع
- * المسموحة (constants.js → FILE_UPLOAD_LIMITS) مع اسم ملف نظيف داخل المجلد.
+ * كل عملية تتأكد أن الملف مملوك لصاحب الجلسة، والرفع محدود بـ:
+ *   - حجم الملف الواحد  (حدّ يضبطه المدير من لوحة الإدارة)
+ *   - المساحة الكلية للمستخدم (حدّ يضبطه المدير من لوحة الإدارة)
+ *   - قائمة الأنواع المسموحة (constants.js → FILE_UPLOAD_LIMITS)
+ * مع اسم ملف نظيف داخل المجلد.
  */
 
 const STORAGE_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'storage');
 
-/** حجم الرفع الأقصى بالبايت (يُقرأ من البيئة عند النداء). */
-export function maxUploadBytes() {
-  const mb = Math.max(1, Number(process.env.MAX_UPLOAD_MB) || FILE_UPLOAD_LIMITS.maxMb || 10);
-  return mb * 1024 * 1024;
-}
+export { maxUploadBytes, maxStorageBytes };
 
 /** نص الأنواع المسموحة للعرض في الصفحة. */
 export function allowedTypesLabel() {
@@ -115,14 +115,36 @@ export async function listFiles(userId, { step = '', limit = 100 } = {}) {
   return rows.map(normalizeFile);
 }
 
-/** إحصاء سريع: عدد الملفات وحجمها الكلي. */
+/**
+ * ملخّص مساحة الباحث: عدد الملفات + المستخدم + الحصة + المتبقي + نسبة الاستخدام.
+ * يُستخدم في شريط المساحة أعلى صفحة «ملفاتى».
+ */
 export async function filesSummary(userId) {
   const { rows } = await pool.query(
     'SELECT count(*)::int AS total, COALESCE(sum(size_bytes), 0)::bigint AS bytes FROM files WHERE user_id = $1',
     [userId]
   );
 
-  return { total: Number(rows[0]?.total || 0), bytes: Number(rows[0]?.bytes || 0) };
+  const usedBytes = Number(rows[0]?.bytes || 0);
+  const total = Number(rows[0]?.total || 0);
+  const quotaBytes = await maxStorageBytes();
+  const usedMb = Math.round((usedBytes / (1024 * 1024)) * 10) / 10;
+  const quotaMb = Math.round(quotaBytes / (1024 * 1024));
+  const remainingBytes = Math.max(0, quotaBytes - usedBytes);
+  const remainingMb = Math.round((remainingBytes / (1024 * 1024)) * 10) / 10;
+  const percent = quotaBytes > 0 ? Math.min(100, Math.round((usedBytes / quotaBytes) * 100)) : 0;
+
+  return {
+    total,
+    bytes: usedBytes,
+    usedMb,
+    quotaMb,
+    remainingBytes,
+    remainingMb,
+    percent,
+    isFull: remainingBytes <= 0,
+    isNearFull: percent >= 90
+  };
 }
 
 /** صف واحد بملكيته (null إن لم يكن له) — يُستخدم للتحميل والحذف. */
@@ -132,8 +154,9 @@ export async function getFileRow(userId, fileId) {
 }
 
 /**
- * رفع ملف: يتحقق من الامتداد والحجم ونوع المحتوى، يكتب البايتات في مجلد الباحث،
- * يسجّل صف metadata في files، ويعيده. أي فشل بعد الكتابة ينظّف الملف جزئياٌ.
+ * رفع ملف: يتحقق من الامتداد وحجم الملف الواحد ونوع المحتوى، ثم يتأكد أن
+ * المساحة الكلية للمستخدم تكفي، ثم يكتب البايتات في مجلد الباحث ويسجّل صف
+ * metadata. أي فشل بعد الكتابة ينظّف الملف جزئياٌ.
  */
 export async function saveUpload(userId, { file, title = '', step = '' } = {}) {
   const extension = extensionOf(file?.name);
@@ -143,10 +166,20 @@ export async function saveUpload(userId, { file, title = '', step = '' } = {}) {
     throw error;
   }
 
-  const limit = maxUploadBytes();
+  const [limit, quotaBytes] = await Promise.all([maxUploadBytes(), maxStorageBytes()]);
   if (Number(file.size || 0) > limit) {
     const error = new Error(`حجم الملف أكبر من الحد المسموح (${Math.round(limit / (1024 * 1024))} MB).`);
     error.code = 'TOO_LARGE';
+    throw error;
+  }
+
+  // الحصة الكلية: نرفض الرفع إن لم تتسع للملف بحجمه المُعلن.
+  const usedBefore = await filesSummary(userId);
+  if (usedBefore.bytes + Number(file.size || 0) > quotaBytes) {
+    const error = new Error(
+      `مساحتك لا تكفي: المستخدم ${usedBefore.usedMb} MB من ${usedBefore.quotaMb} MB. احذف ملفاً أو احجز مساحة أكبر.`
+    );
+    error.code = 'QUOTA_EXCEEDED';
     throw error;
   }
 
@@ -169,6 +202,15 @@ export async function saveUpload(userId, { file, title = '', step = '' } = {}) {
   if (bytes.length > limit) {
     const error = new Error('حجم الملف أكبر من الحد المسموح.');
     error.code = 'TOO_LARGE';
+    throw error;
+  }
+
+  // إعادة الفحص بالحجم الحقيقي (بعد قراءة البايتات) في حال أخبر المتصفح بحجم أقل
+  if (usedBefore.bytes + bytes.length > quotaBytes) {
+    const error = new Error(
+      `مساحتك لا تكفي: المستخدم ${usedBefore.usedMb} MB من ${usedBefore.quotaMb} MB. احذف ملفاً أو احجز مساحة أكبر.`
+    );
+    error.code = 'QUOTA_EXCEEDED';
     throw error;
   }
 

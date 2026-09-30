@@ -5,6 +5,8 @@
  */
 import { createSessionCookie, SESSION_COOKIE_NAME } from '../src/auth/google.js';
 import { pool } from '../src/db/client.js';
+import { deleteFile, filesSummary, saveUpload } from '../src/services/files.js';
+import { saveStorageLimits, storageLimits } from '../src/services/settings.js';
 
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:3000';
 const results = [];
@@ -342,6 +344,75 @@ async function testChat(userId, cookie) {
   check('1F سجل الاستهلاك يبقى بعد حذف المحادثات', usageKept.rows[0].n > 0, `${usageKept.rows[0].n} سطر`);
 }
 
+/**
+ * اختبارات حدود التخزين: الافتراضي 100/500، ضبط المدير، رفض القيم غير المنطقية،
+ * ورفض الرفع عند تجاوز حصة المستخدم. تُعيد القيم الافتراضية في النهاية.
+ */
+async function testStorageLimits() {
+  const defaults = await storageLimits();
+  check('1E الحد الافتراضي: ملف 100 MB / حصة 500 MB', defaults.maxUploadMb === 100 && defaults.maxStorageMb === 500, JSON.stringify(defaults));
+
+  const adminPage = await call('/admin/settings', { expect: [200] });
+  check('1E صفحة إعدادات التخزين تفتح للمدير', adminPage.ok && adminPage.text.includes('name="max_upload_mb"') && adminPage.text.includes('name="max_storage_mb"'));
+
+  await saveStorageLimits({ maxUploadMb: 30, maxStorageMb: 50 });
+  const changed = await storageLimits();
+  check('1E المدير يغيّر الحدود (30/50)', changed.maxUploadMb === 30 && changed.maxStorageMb === 50, JSON.stringify(changed));
+
+  let rejected = false;
+  try {
+    await saveStorageLimits({ maxUploadMb: 100, maxStorageMb: 10 });
+  } catch (error) {
+    rejected = error.code === 'INVALID_LIMITS';
+  }
+  check('1E ترفض حصة أقل من حجم الملف الواحد', rejected);
+
+  // باحث يرفع 30MB ثم يحاول تجاوز الحصة الباقية (20MB)
+  const { user, cookie } = await createTestUser();
+  const megabytes = (n) => Buffer.alloc(n * 1024 * 1024, 0x41);
+  const fakeFile = (name, sizeMb) => ({
+    name,
+    size: sizeMb * 1024 * 1024,
+    type: 'application/pdf',
+    arrayBuffer: async () => megabytes(sizeMb).buffer
+  });
+
+  await saveUpload(user.id, { file: fakeFile('a.pdf', 30) });
+  const summary = await filesSummary(user.id);
+  check('1E الملخّص يحسب المستخدم والمتبقي', summary.usedMb === 30 && summary.quotaMb === 50 && summary.remainingMb === 20, JSON.stringify(summary));
+
+  let quotaBlocked = false;
+  try {
+    await saveUpload(user.id, { file: fakeFile('b.pdf', 30) });
+  } catch (error) {
+    quotaBlocked = error.code === 'QUOTA_EXCEEDED';
+  }
+  check('1E يرفض رفع يتجاوز الحصة الكلية', quotaBlocked);
+
+  let sizeBlocked = false;
+  try {
+    await saveUpload(user.id, { file: fakeFile('c.pdf', 31) });
+  } catch (error) {
+    sizeBlocked = error.code === 'TOO_LARGE';
+  }
+  check('1E يرفض ملف أكبر من حد الملف الواحد', sizeBlocked);
+
+  // الترقية عبر الواجهة: ننزّل الحد إلى 5MB والرفع بالحقل يجب أن يُرفض
+  await saveStorageLimits({ maxUploadMb: 5, maxStorageMb: 50 });
+  const form = new FormData();
+  form.append('file', new Blob([megabytes(10)], { type: 'application/pdf' }), 'ten.pdf');
+  const viaForm = await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: form, redirect: 'manual' });
+  check('1E الحد الجديد يطبَّق فوراً على الرفع', viaForm.status === 303 && (viaForm.headers.get('location') || '').includes('err=file_bad'));
+
+  // تنظيف + إعادة الافتراضي
+  const files = await pool.query('SELECT id FROM files WHERE user_id = $1', [user.id]);
+  for (const file of files.rows) await deleteFile(user.id, file.id);
+  await pool.query('DELETE FROM users WHERE id = $1', [user.id]);
+  await saveStorageLimits({ maxUploadMb: defaults.maxUploadMb, maxStorageMb: defaults.maxStorageMb });
+  const restored = await storageLimits();
+  check('1E العودة للافتراضي بعد الاختبار', restored.maxUploadMb === 100 && restored.maxStorageMb === 500, JSON.stringify(restored));
+}
+
 async function main() {
   const { user, cookie } = await createTestUser();
 
@@ -351,6 +422,7 @@ async function main() {
     await testNotes(user.id, cookie);
     await testFiles(user.id, cookie);
     await testChat(user.id, cookie);
+    await testStorageLimits();
   } finally {
     await pool.query('DELETE FROM users WHERE id = $1', [user.id]);
     await pool.end();

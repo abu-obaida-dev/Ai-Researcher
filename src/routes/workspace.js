@@ -255,12 +255,13 @@ router.get('/files', requireAccount, async (req, res) => {
     const userId = req.account.id;
     const stepKey = String(req.query.step || '').trim().slice(0, 100);
 
-    const [files, summary, stepOptions, stepTitles, unread] = await Promise.all([
+    const [files, summary, stepOptions, stepTitles, unread, maxBytes] = await Promise.all([
       listFiles(userId, { step: stepKey }),
       filesSummary(userId),
       stepOptionsForDegree(await degreeOfUser(userId)),
       stepTitlesForUser(userId),
-      unreadCount(userId)
+      unreadCount(userId),
+      maxUploadBytes()
     ]);
 
     res.type('html').send(
@@ -272,7 +273,7 @@ router.get('/files', requireAccount, async (req, res) => {
         stepKey,
         stepOptions,
         stepTitles,
-        maxMb: Math.round(maxUploadBytes() / (1024 * 1024)),
+        maxMb: Math.round(maxBytes / (1024 * 1024)),
         allowedTypes: allowedTypesLabel(),
         flash: flashFromQuery(req.query)
       })
@@ -316,7 +317,9 @@ router.post('/files', requireAccount, async (req, res) => {
     res.redirect(303, `/files?ok=file_uploaded${step ? `&step=${encodeURIComponent(step)}` : ''}`);
   } catch (error) {
     console.warn(`فشل رفع الملف: ${error?.code || error?.message}`);
-    const key = ['TOO_LARGE', 'BAD_TYPE', 'BAD_MIME', 'BAD_STEP'].includes(error?.code) ? 'file_bad' : 'file_missing';
+    const key = ['TOO_LARGE', 'BAD_TYPE', 'BAD_MIME', 'BAD_STEP', 'QUOTA_EXCEEDED'].includes(error?.code)
+      ? 'file_bad'
+      : 'file_missing';
     res.redirect(303, `/files?err=${key}`);
   }
 });

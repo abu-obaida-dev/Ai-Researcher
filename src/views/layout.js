@@ -558,6 +558,18 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   color: var(--sea-deep); font-size: 12px; font-weight: 700; word-break: break-all;
 }
 .file-picker-name:empty { display: none; }
+
+/* شريط مساحة المستخدم (صفحة «ملفاتى») */
+.storage-bar { display: grid; gap: 7px; }
+.storage-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.storage-head b { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink); }
+.storage-head span { font-size: 12.5px; font-weight: 800; color: var(--sea-deep); }
+.storage-bar .meter { margin: 0; }
+.storage-bar.is-near .meter i { background: linear-gradient(90deg, #f4a261, #e07a3f); }
+.storage-bar.is-near .storage-head span { color: #b4651f; }
+.storage-bar.is-full .meter i { background: linear-gradient(90deg, #d64545, #a12d2d); }
+.storage-bar.is-full .storage-head span { color: #a12d2d; }
+.storage-bar .meter i { background: linear-gradient(90deg, var(--fresh), var(--sea)); }
 .field-row { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 .form-actions { margin-top: 26px; display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
 

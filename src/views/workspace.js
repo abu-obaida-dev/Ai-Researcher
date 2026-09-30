@@ -305,8 +305,27 @@ function renderFileRow(file, stepTitles) {
 </tr>`;
 }
 
+/** شريط مساحة المستخدم: المستخدم / الحصة + المتبقي، بلون تحذيري عند الامتلاء. */
+function renderStorageBar(summary) {
+  const tone = summary.isFull ? 'is-full' : summary.isNearFull ? 'is-near' : '';
+  const hint = summary.isFull
+    ? 'وصلت للحد الأقصى — احذف ملفاً لتحرير مساحة.'
+    : summary.isNearFull
+      ? 'المساحة أوشكت على الامتلاء.'
+      : 'احذف أي ملف لتحرير مساحته فوراً.';
+
+  return `<div class="storage-bar ${tone}">
+  <div class="storage-head">
+    <b>${icon('paperclip', 'icon-sm')} مساحة ملفاتك</b>
+    <span>${escapeHtml(String(summary.usedMb))} MB من ${escapeHtml(String(summary.quotaMb))} MB</span>
+  </div>
+  <div class="meter"><i style="width:${summary.percent}%"></i></div>
+  <p class="muted">المتاح: ${escapeHtml(String(summary.remainingMb))} MB · ${escapeHtml(hint)}</p>
+</div>`;
+}
+
 /** صفحة الملفات: نموذج رفع (multipart) + جدول الملفات مع فلترة بخطوة. */
-export function renderFilesPage({ account, unread = 0, files = [], summary = { total: 0, bytes: 0 }, stepKey = '', stepOptions = [], stepTitles = {}, maxMb = 10, allowedTypes = '', flash = null }) {
+export function renderFilesPage({ account, unread = 0, files = [], summary = { total: 0, bytes: 0, usedMb: 0, quotaMb: 0, remainingMb: 0, percent: 0 }, stepKey = '', stepOptions = [], stepTitles = {}, maxMb = 100, allowedTypes = '', flash = null }) {
   const rows = files.length
     ? `<table class="file-table">
   <thead><tr><th>الملف</th><th>النوع والحجم</th><th>الخطوة</th><th>التاريخ</th><th>إجراءات</th></tr></thead>
@@ -343,11 +362,8 @@ export function renderFilesPage({ account, unread = 0, files = [], summary = { t
   </section>
 
   <section class="card">
-    <h2>ملفاتي (${summary.total})</h2>
-    <dl class="kv">
-      <div><dt>الحجم الكلي</dt><dd>${escapeHtml(formatFileSize(summary.bytes))}</dd></div>
-      <div><dt>المساحة المحمية</dt><dd>${escapeHtml(summary.total + ' ملف')} داخل مجلدك الخاص</dd></div>
-    </dl>
+    <h2>مساحتك</h2>
+    ${renderStorageBar(summary)}
     <form class="toolbar" method="get" action="/files">
       ${stepKey ? `<select name="step" aria-label="فلترة بالخطوة">
         <option value="">كل الخطوات</option>
