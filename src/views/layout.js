@@ -560,6 +560,28 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .file-picker-name:empty { display: none; }
 
 /* شريط مساحة المستخدم (صفحة «ملفاتى») */
+.file-viewer { display: grid; gap: 14px; grid-template-columns: 280px minmax(0, 1fr); align-items: start; }
+.file-viewer-info .file-meta { margin: 12px 0 16px; }
+.file-viewer-stage { min-width: 0; padding: 10px; }
+.file-preview { border-radius: 12px; overflow: hidden; }
+.file-preview--image { background: var(--mist-soft); text-align: center; padding: 10px; }
+.file-preview--image img {
+  max-width: 100%; max-height: 78vh; width: auto; border-radius: 8px; display: inline-block;
+  box-shadow: var(--shadow);
+}
+.file-preview--pdf { background: var(--ink-05); }
+.file-preview--pdf iframe { width: 100%; height: 78vh; border: 0; border-radius: 8px; background: #fff; display: block; }
+.file-preview--text {
+  margin: 0; max-height: 78vh; overflow: auto; padding: 16px; background: #fbfdfe;
+  border: 1px solid var(--mist); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere;
+  font-size: 12.5px; line-height: 1.9; color: var(--ink);
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+@media (max-width: 900px) {
+  .file-viewer { grid-template-columns: minmax(0, 1fr); }
+  .file-preview--pdf iframe { height: 62vh; }
+}
+
 .storage-bar { display: grid; gap: 7px; }
 .storage-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .storage-head b { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink); }

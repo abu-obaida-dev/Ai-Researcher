@@ -209,6 +209,18 @@ async function testFiles(userId, cookie) {
   const bytes = Buffer.from(await download.arrayBuffer());
   check('1E تحميل الملف بنفس البايتات', download.status === 200 && bytes.toString().includes('%PDF-1.4'), `status=${download.status}`);
 
+  // المعاينة: PDF داخل iframe عبر ?inline=1
+  const viewPage = await call(`/files/${file.id}/view`, { cookie });
+  check('1E صفحة معاينة PDF تفتح', viewPage.ok && viewPage.text.includes('file-preview--pdf'), `status=${viewPage.status}`);
+  const inline = await fetch(`${BASE}/files/${file.id}/raw?inline=1`, { headers: { cookie } });
+  check(
+    '1E العرض داخل المتصفح: نوع صحيح + nosniff + CSP معزولة',
+    inline.headers.get('content-type') === 'application/pdf' &&
+      inline.headers.get('x-content-type-options') === 'nosniff' &&
+      (inline.headers.get('content-security-policy') || '').includes('sandbox')
+  );
+  check('1E زر التحميل ينزّل (attachment) لا يعرض', (await fetch(`${BASE}/files/${file.id}/raw`, { headers: { cookie } })).headers.get('content-disposition')?.startsWith('attachment'));
+
   const shown = await call('/files', { cookie });
   check('1E الملف يظهر في الصفحة', shown.text.includes('مقترح البحث'));
 
@@ -234,7 +246,40 @@ async function testFiles(userId, cookie) {
   const otherCookie = `${SESSION_COOKIE_NAME}=${encodeURIComponent(createSessionCookie(other.rows[0]))}`;
   const steal = await fetch(`${BASE}/files/${file.id}/raw`, { headers: { cookie: otherCookie } });
   check('الحماية: مستخدم آخر لا يحمّل الملف (404)', steal.status === 404, `status=${steal.status}`);
+  const stealView = await fetch(`${BASE}/files/${file.id}/view`, { headers: { cookie: otherCookie } });
+  check('الحماية: مستخدم آخر لا يعرض الملف (404)', stealView.status === 404, `status=${stealView.status}`);
   await pool.query('DELETE FROM users WHERE id = $1', [other.rows[0].id]);
+
+  // معاينة النص: يُعرض داخل <pre> مُهرَّب، ويُقدَّم text/plain (لا HTML)
+  const textUpload = new FormData();
+  textUpload.append('title', 'ملف نصي');
+  textUpload.append('file', new Blob(['<script>alert(1)</script>\nنص البحث'], { type: 'text/plain' }), 'notes.txt');
+  const textRes = await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: textUpload, redirect: 'manual' });
+  const textRow = await pool.query(
+    "SELECT id FROM files WHERE user_id = $1 AND title = 'ملف نصي' ORDER BY created_at DESC LIMIT 1",
+    [userId]
+  );
+  const textId = textRow.rows[0]?.id;
+  check('1E رفع ملف نصي', textRes.status === 303 && Boolean(textId));
+
+  const textView = await call(`/files/${textId}/view`, { cookie });
+  check('1E معاينة النص داخل <pre> مع تهريب HTML', textView.ok && textView.text.includes('file-preview--text') && textView.text.includes('&lt;script&gt;'));
+  const textRaw = await fetch(`${BASE}/files/${textId}/raw?inline=1`, { headers: { cookie } });
+  check('1E النص يُقدَّم text/plain لا text/html', (textRaw.headers.get('content-type') || '').startsWith('text/plain'));
+
+  // ملف غير معروض (xlsx) ⇒ لا زر «عرض» بل تحميل فقط
+  const xlsxUpload = new FormData();
+  xlsxUpload.append('title', 'جدول بيانات');
+  xlsxUpload.append(
+    'file',
+    new Blob(['PK'], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+    'sheet.xlsx'
+  );
+  await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: xlsxUpload, redirect: 'manual' });
+  const listNow = await call('/files', { cookie });
+  const xlsxView = await call(`/files/${(await pool.query("SELECT id FROM files WHERE user_id = $1 AND title = 'جدول بيانات' ORDER BY created_at DESC LIMIT 1", [userId])).rows[0].id}/view`, { cookie });
+  check('1E ملف Excel: صفحة بلا معاينة + إرشاد للتحميل', xlsxView.ok && xlsxView.text.includes('لا يعرض المتصفح هذا النوع'));
+  check('1E زر «عرض» لا يظهر لغير المعروض', !listNow.text.includes('لا يعرض المتصفح'));
 
   const del = await call(`/files/${file.id}/delete`, { method: 'POST', cookie, expect: [303] });
   check('1E حذف الملف (303)', del.ok && del.location.includes('ok=file_deleted'), del.location);

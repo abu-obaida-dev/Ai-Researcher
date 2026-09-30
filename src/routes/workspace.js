@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 import express from 'express';
 import { requireAccount } from '../middleware/auth.js';
-import { degreeOfUser, resolvePathForDegree, stepOptionsForDegree } from '../services/journey.js';
+import { degreeOfUser, resolvePathForDegree, stepOptionsForDegree, stepTitle } from '../services/journey.js';
 import { unreadCount } from '../services/notifications.js';
 import {
   addCustomReference,
@@ -23,11 +23,14 @@ import {
   filesSummary,
   listFiles,
   maxUploadBytes,
+  normalizeFile,
+  previewKind,
   readOwnedFile,
-  saveUpload
+  saveUpload,
+  textPreview
 } from '../services/files.js';
 import { renderNotice } from '../views/layout.js';
-import { renderFilesPage, renderNotesPage, renderReferencesPage } from '../views/workspace.js';
+import { renderFileViewerPage, renderFilesPage, renderNotesPage, renderReferencesPage } from '../views/workspace.js';
 
 /**
  * مسارات مساحة عمل الباحث (1E): المراجع والمفكرة والملفات.
@@ -324,7 +327,12 @@ router.post('/files', requireAccount, async (req, res) => {
   }
 });
 
-/** تحميل ملف (مملوك للباحث فقط) — بايتات + Content-Disposition. */
+/**
+ * تحميل/عرض ملف (مملوك للباحث فقط).
+ *  - الافتراضي: تحميل (Content-Disposition: attachment).
+ *  - ?inline=1 : عرض داخل المتصفح — لنوع «النص» نُجبر text/plain مع nosniff
+ *    حتى لا يُفسَّر محتوى مرفوع كـ HTML (منع XSS مخزّن).
+ */
 router.get('/files/:id/raw', requireAccount, async (req, res) => {
   const found = await readOwnedFile(req.account.id, String(req.params.id));
 
@@ -337,11 +345,64 @@ router.get('/files/:id/raw', requireAccount, async (req, res) => {
     return;
   }
 
+  const inline = req.query.inline === '1';
+  const kind = previewKind(found.row.file_name, found.row.mime);
   const name = encodeURIComponent(found.row.file_name);
-  res.setHeader('content-type', found.row.mime || 'application/octet-stream');
+  const safeMime = inline ? safeInlineMime(kind, found.row.mime) : null;
+
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('content-type', safeMime || found.row.mime || 'application/octet-stream');
   res.setHeader('content-length', found.buffer.length);
-  res.setHeader('content-disposition', `attachment; filename*=UTF-8''${name}`);
+  res.setHeader('content-disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${name}`);
+
+  // حماية إضافية: نمنع أي محتوى مرفوع من تنفيذ سكربت داخل أصل الموقع
+  res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
+
   res.send(found.buffer);
+});
+
+/** نوع محتوى آمن للعرض داخل المتصفح حسب نوع الملف. */
+function safeInlineMime(kind, mime) {
+  if (kind === 'image') {
+    return ['image/jpeg', 'image/png', 'image/webp'].includes(mime) ? mime : 'application/octet-stream';
+  }
+  if (kind === 'pdf') return 'application/pdf';
+  // النص دائماً text/plain — لا text/html أبداً حتى لو ملف مرفوع يحتوي وسم script
+  if (kind === 'text') return 'text/plain; charset=utf-8';
+  return 'application/octet-stream';
+}
+
+/** صفحة معاينة ملف: صورة/PDF/نص داخل الموقع. */
+router.get('/files/:id/view', requireAccount, async (req, res) => {
+  const fileId = String(req.params.id);
+  const found = await readOwnedFile(req.account.id, fileId);
+
+  if (!found) {
+    const { html } = renderNotice({
+      title: 'الملف غير موجود',
+      message: 'هذا الملف غير موجود في حسابك — ربما حُذف.',
+      extraHtml: '<div class="links"><a class="btn btn-primary" href="/files">ملفاتي</a></div>'
+    });
+    res.status(404).type('html').send(html);
+    return;
+  }
+
+  const file = normalizeFile(found.row);
+  const kind = previewKind(found.row.file_name, found.row.mime);
+  const textContent = kind === 'text' ? textPreview(found.buffer) : null;
+  const stepName = file.stepKey ? await stepTitle(file.stepKey) : '';
+
+  res.type('html').send(
+    renderFileViewerPage({
+      account: req.account,
+      unread: await unreadCount(req.account.id),
+      file,
+      kind,
+      textContent,
+      stepTitle: stepName || '',
+      missing: !found.buffer
+    })
+  );
 });
 
 /** حذف ملف (مملوك للباحث فقط). */

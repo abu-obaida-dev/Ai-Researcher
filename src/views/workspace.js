@@ -286,8 +286,12 @@ ${flashBox(flash)}`;
   });
 }
 
-/** صف ملف: النوع والحجم والخطوة وزر التحميل وزر الحذف. */
+/** صف ملف: النوع والحجم والخطوة + أزرار العرض والتحميل والحذف. */
 function renderFileRow(file, stepTitles) {
+  const viewBtn = file.previewable
+    ? `<a class="btn btn-quiet" href="/files/${escapeHtml(file.id)}/view">${icon('searchCheck', 'icon-sm')} عرض</a>`
+    : '';
+
   return `<tr>
   <td>
     <b>${escapeHtml(file.title)}</b>
@@ -297,6 +301,7 @@ function renderFileRow(file, stepTitles) {
   <td>${escapeHtml(stepTitles[file.stepKey] || (file.stepKey ? file.stepKey : '—'))}</td>
   <td>${escapeHtml(formatDate(file.createdAt))}</td>
   <td>
+    ${viewBtn}
     <a class="btn btn-quiet" href="/files/${escapeHtml(file.id)}/raw">${icon('download', 'icon-sm')} تحميل</a>
     <form method="post" action="/files/${escapeHtml(file.id)}/delete" class="inline-form">
       <button class="btn btn-danger" type="submit">${icon('trash', 'icon-sm')} حذف</button>
@@ -329,6 +334,74 @@ function renderStorageBar(summary) {
   <div class="meter"><i style="width:${width}%"></i></div>
   <p class="muted">المتاح: ${escapeHtml(remainingLabel)} · ${escapeHtml(hint)}</p>
 </div>`;
+}
+
+/**
+ * صفحة معاينة ملف (1E): تعرض الملف داخل الموقع حسب نوعه — صورة أو PDF أو نص.
+ * المحتوى النصّي يُطبع مُهرَّباً (escapeHtml) في <pre> — لا HTML من محتوى الملف إطلاقاً،
+ * والملفات غير المعروضة (doc/xlsx/zip) تحثّ على التحميل.
+ */
+export function renderFileViewerPage({ account, unread = 0, file, kind, textContent = null, stepTitle = '', missing = false }) {
+  const actions = `<div class="links">
+  <a class="btn btn-quiet" href="/files">${icon('file', 'icon-sm')} كل ملفياتي</a>
+  <a class="btn btn-primary" href="/files/${escapeHtml(file.id)}/raw">${icon('download', 'icon-sm')} تحميل</a>
+  <form method="post" action="/files/${escapeHtml(file.id)}/delete" class="inline-form">
+    <button class="btn btn-danger" type="submit">${icon('trash', 'icon-sm')} حذف</button>
+  </form>
+</div>`;
+
+  const meta = `<dl class="kv file-meta">
+  <div><dt>الاسم</dt><dd>${escapeHtml(file.fileName)}</dd></div>
+  <div><dt>النوع</dt><dd>${escapeHtml(file.kind)}</dd></div>
+  <div><dt>الحجم</dt><dd>${escapeHtml(formatFileSize(file.sizeBytes))}</dd></div>
+  <div><dt>تاريخ الرفع</dt><dd>${escapeHtml(formatDateTime(file.createdAt))}</dd></div>
+  ${stepTitle ? `<div><dt>الخطوة</dt><dd>${escapeHtml(stepTitle)}</dd></div>` : ''}
+</dl>`;
+
+  let preview = '';
+  if (missing) {
+    preview = '<div class="alert">ملف البايتات مفقود على القرص — يمكنك حذفه ورفعه من جديد.</div>';
+  } else if (kind === 'image') {
+    preview = `<div class="file-preview file-preview--image">
+    <img src="/files/${escapeHtml(file.id)}/raw?inline=1" alt="${escapeHtml(file.title)}" loading="lazy" />
+  </div>`;
+  } else if (kind === 'pdf') {
+    preview = `<div class="file-preview file-preview--pdf">
+    <iframe src="/files/${escapeHtml(file.id)}/raw?inline=1" title="${escapeHtml(file.title)}"></iframe>
+  </div>
+  <p class="muted">إن لم تظهر المعاينة، افتح الملف في تبويب جديد أو حمّله.</p>`;
+  } else if (kind === 'text' && textContent !== null) {
+    preview = `<pre class="file-preview file-preview--text" dir="auto">${escapeHtml(textContent)}</pre>`;
+  } else if (kind === 'text') {
+    preview = '<div class="alert">الملف نصي لكنه أكبر من حد المعاينة — حمّله لعرضه كاملاً.</div>';
+  } else {
+    preview = `<div class="notice">
+  <b>لا يعرض المتصفح هذا النوع داخل الصفحة.</b>
+  <p>حمّل الملف وافتحه في برنامجه (Word / Excel / PowerPoint).</p>
+</div>`;
+  }
+
+  const body = `<div class="file-viewer">
+  <div class="card file-viewer-info">
+    <h2>${escapeHtml(file.title)}</h2>
+    ${meta}
+    ${actions}
+  </div>
+  <div class="card file-viewer-stage">
+    ${preview}
+  </div>
+</div>`;
+
+  return renderLayout({
+    title: file.title,
+    subtitle: `معاينة ${file.kind} · ${formatFileSize(file.sizeBytes)}`,
+    area: 'app',
+    activeKey: 'files',
+    account,
+    unread,
+    scripts: ['/js/app-shell.js'],
+    body
+  });
 }
 
 /** صفحة الملفات: نموذج رفع (multipart) + جدول الملفات مع فلترة بخطوة. */

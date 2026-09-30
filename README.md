@@ -211,8 +211,10 @@ usage_logs (
 | `POST /references` · `/:id/status` · `/:id/delete` | إدارة المراجع |
 | `GET /notes` | المفكرة: إنشاء/تعديل/تثبيت/بحث/ربط بخطوة |
 | `POST /notes` · `/:id` · `/:id/pin` · `/:id/delete` | إدارة الملاحظات |
-| `GET /files` | ملفات الباحث: رفع (multipart) + تحميل + حذف |
-| `POST /files` · `GET /files/:id/raw` · `POST /files/:id/delete` | إدارة الملفات (بملكية الجلسة فقط) |
+| `GET /files` | ملفات الباحث: رفع (multipart) + تحميل + حذف + معاينة |
+| `GET /files/:id/view` | صفحة معاينة: صورة / PDF / نص داخل الموقع (doc·xlsx·zip ⇒ تحميل فقط) |
+| `GET /files/:id/raw` | البايتات: تحميل (`attachment`) أو عرض (`?inline=1`) مع `nosniff` + CSP معزولة |
+| `POST /files` · `POST /files/:id/delete` | إدارة الملفات (بملكية الجلسة فقط) |
 | `GET /chat` | المشرف الذكي: كارت دردشة بملء الشاشة + قائمة المحادثات في السايدبار (`?c=` لمحادثة، `?step=` للسياق) |
 | `POST /chat` · `POST /chat/:id/delete` | إرسال رسالة (30 توكن) وحذف محادثة — **الحذف لا يُرجِع التوكنز** |
 

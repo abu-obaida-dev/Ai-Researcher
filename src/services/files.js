@@ -18,6 +18,9 @@ import { maxStorageBytes, maxUploadBytes } from './settings.js';
 
 const STORAGE_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'storage');
 
+/** أقصى حجم نعرضه كنص داخل صفحة المعاينة (كبير كفاية، صغير يحمي المتصفح). */
+const TEXT_PREVIEW_LIMIT = 400 * 1024;
+
 export { maxUploadBytes, maxStorageBytes };
 
 /** نص الأنواع المسموحة للعرض في الصفحة. */
@@ -54,8 +57,8 @@ function kindOf(extension) {
   return 'مستند';
 }
 
-/** صف ملف جاهز للعرض. */
-function normalizeFile(row) {
+/** صف ملف جاهز للعرض (يُستخدم في القائمة وصفحة المعاينة). */
+export function normalizeFile(row) {
   const extension = extensionOf(row.file_name);
 
   return {
@@ -68,7 +71,8 @@ function normalizeFile(row) {
     sizeBytes: Number(row.size_bytes || 0),
     stepKey: row.step_key || '',
     source: row.source || 'upload',
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    previewable: previewKind(row.file_name, row.mime) !== 'none'
   };
 }
 
@@ -157,6 +161,42 @@ export async function filesSummary(userId) {
     quotaMb: Math.round(quotaBytes / (1024 * 1024)),
     remainingMb: Math.round((remainingBytes / (1024 * 1024)) * 10) / 10
   };
+}
+
+/**
+ * نوع المعاينة المدعومة للمتصفح لهذا الملف:
+ * - 'image' → صور (img)
+ * - 'pdf'   → PDF (iframe)
+ * - 'text'  → نصوص وCSV وMarkdown (نعرضها كنصّ داخل <pre>)
+ * - 'none'  → doc/xlsx/pptx/zip … لا عارض في المتصفح ⇒ تحميل فقط
+ * ملاحظة أمنية: 'text' تُقدَّم دائماً كنص عادي مع nosniff — لا HTML مطلقاً.
+ */
+export function previewKind(fileName = '', mime = '') {
+  const ext = extensionOf(fileName);
+  if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) return 'image';
+  if (ext === 'pdf') return 'pdf';
+  if (['txt', 'md', 'csv'].includes(ext)) return 'text';
+  if (mime === 'text/plain' || mime === 'text/csv' || mime === 'text/markdown') return 'text';
+  return 'none';
+}
+
+/** هل لهذا الملف معاينة في المتصفح؟ (لعرض زر «عرض» في الجدول) */
+export function isPreviewable(file) {
+  return previewKind(file?.file_name, file?.mime) !== 'none';
+}
+
+/**
+ * محتوى نصّي للمعاينة (بحد أقصى TEXT_PREVIEW_LIMIT بايت لتفادي الصفحات الثقيلة).
+ * يعيد string أو null إن لم يكن الملف نصياً أو تجاوز الحد.
+ */
+export function textPreview(buffer, maxBytes = TEXT_PREVIEW_LIMIT) {
+  if (!buffer || buffer.length > maxBytes) return null;
+
+  // نتجنّب بايتات NUL (تشيّر على ملف ثنائي حتى لو امتداده نصي)
+  const slice = buffer.subarray(0, 2048);
+  if (slice.includes(0)) return null;
+
+  return buffer.toString('utf8');
 }
 
 /** صف واحد بملكيته (null إن لم يكن له) — يُستخدم للتحميل والحذف. */
