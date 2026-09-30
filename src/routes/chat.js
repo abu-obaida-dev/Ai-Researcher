@@ -5,11 +5,13 @@ import {
   askSupervisor,
   deleteConversation,
   getConversation,
-  listConversations
+  listConversations,
+  setConversationMode
 } from '../services/chat.js';
 import { isValidStepKeyForUser, stepTitle } from '../services/journey.js';
 import { unreadCount } from '../services/notifications.js';
 import { getProfile } from '../services/users.js';
+import { listFiles } from '../services/files.js';
 import { renderNotice } from '../views/layout.js';
 import { renderChatPage } from '../views/chat.js';
 
@@ -26,16 +28,23 @@ const router = express.Router();
 const FLASH = {
   sent: { type: 'ok', message: 'وصل رد المشرف الذكي.' },
   empty: { type: 'error', message: 'اكتب رسالتك أولاً.' },
-  no_tokens: { type: 'error', message: 'رصيد التوكنز غير كافٍ — اشترِ باقة أو انتظر التجديد الشهري.' },
+  no_tokens: { type: 'error', message: 'رصيدك لا يكفي لهذه الرسالة — اشترِ باقة أو ابدأ محادثة جديدة أقصر.' },
   no_provider: { type: 'error', message: 'لم يُضبط أي مزوّد ذكاء اصطناعي بعد — راجع ملف .env.' },
   failed: { type: 'error', message: 'تعذّر الوصول للمشرف الذكي الآن — توكناتك أُعيدت لرصيدك، أعد المحاولة.' },
   bad_step: { type: 'error', message: 'الخطوة المحددة غير موجودة في مسارك.' },
-  missing_conversation: { type: 'error', message: 'المحادثة غير موجودة.' }
+  missing_conversation: { type: 'error', message: 'المحادثة غير موجودة.' },
+  mode_normal: { type: 'ok', message: 'رجعت المحادثة إلى وضع الإرشاد.' },
+  mode_defense: { type: 'ok', message: 'وضع المناقشة: سؤال واحد في كل مرة، ثم تقييم الإجابة.' }
 };
 
 /** تنبيه النتيجة من باراميترات الرابط. */
 function flashFromQuery(query) {
-  return FLASH[String(query.ok || query.err || '')] || null;
+  const base = FLASH[String(query.ok || query.err || '')];
+  if (!base) return null;
+
+  // رسالة نقص الرصيد تحمل معناها من services/chat.js (كم نحتاج وكم لديه)
+  const custom = String(query.msg || '').trim();
+  return custom ? { ...base, message: custom.slice(0, 300) } : base;
 }
 
 /** كود خطأ من askSupervisor → مفتاح رسالةFLASH. */
@@ -79,6 +88,8 @@ router.get('/chat', requireAccount, async (req, res) => {
         stepName: stepKey ? await stepTitle(stepKey) : '',
         // ?prompt= يملأ مربع الرسالة مسبقاً (يصل من روابط الخطوات/الملاحظات)
         prefill: seedPrompt,
+        // ملفات الباحث لاختيارها وإرفاقها بالرسالة (بحد أقصى ٣ في الرسالة)
+        attachableFiles: await listFiles(userId, { limit: 12 }),
         providers: availableProviders(),
         flash: flashFromQuery(req.query)
       })
@@ -106,14 +117,31 @@ router.post('/chat', requireAccount, async (req, res) => {
       prompt: body.message,
       conversationId: conversationId || null,
       stepKey: stepKey || null,
-      profile
+      profile,
+      // ملفات يرفقها الباحث بهذه الرسالة (من ملفاته المرفوعة فقط — يُتحقق من الملكية)
+      fileIds: body.file_ids
     });
 
     res.redirect(303, `/chat?c=${result.conversationId}&step=${encodeURIComponent(stepKey)}&ok=sent`);
   } catch (error) {
     console.warn(`فشل الشات (${error?.code || 'UNKNOWN'}): ${error?.message}`);
-    res.redirect(303, `/chat?c=${encodeURIComponent(conversationId)}&step=${encodeURIComponent(stepKey)}&err=${flashKeyForError(error)}`);
+    // نقص الرصيد ورصيده وكم نحتاج: رسالة الكود أوضح من نص ثابت
+    const message = error?.code === 'NO_TOKENS' ? error.message : '';
+    res.redirect(
+      303,
+      `/chat?c=${encodeURIComponent(conversationId)}&step=${encodeURIComponent(stepKey)}` +
+        `&err=${flashKeyForError(error)}${message ? `&msg=${encodeURIComponent(message)}` : ''}`
+    );
   }
+});
+
+/** تبديل وضع المحادثة: إرشاد عادي ⇄ مناقشة تدريبية. */
+router.post('/chat/:id/mode', requireAccount, async (req, res) => {
+  const conversationId = String(req.params.id);
+  const mode = String(req.body?.mode || 'normal') === 'defense' ? 'defense' : 'normal';
+  const ok = await setConversationMode(req.account.id, conversationId, mode);
+
+  res.redirect(303, `/chat?c=${encodeURIComponent(conversationId)}&${ok ? 'ok' : 'err'}=${ok ? `mode_${mode}` : 'missing_conversation'}`);
 });
 
 /** حذف محادثة كاملة. */

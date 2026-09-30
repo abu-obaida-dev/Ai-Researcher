@@ -470,6 +470,47 @@ const STEP_KEY_UPGRADE = `
   END $$;
 `;
 
+/**
+ * ذاكرة المشرف الذكي لكل باحث (صف واحد لكل مستخدم).
+ * ما تُخزَّن هنا لا يحسبه البرومبت بل الكود فقط:
+ *   memory         → {{memory_summary}} ملخّص ما استقرّ في جلسات سابقة
+ *   open_task      → {{open_task}} المهمة المتفق عليها للمرة القادمة
+ *   strikes        → {{strikes}} عدّاد التنبيهات على الخروج عن النطاق/الاستهجار
+ *   strikes_updated_at → لتصفير العدّاد بعد فترة هدوء
+ */
+const SUPERVISOR_MEMORY_TABLE = `
+  CREATE TABLE IF NOT EXISTS supervisor_memory (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    memory TEXT NOT NULL DEFAULT '',
+    open_task TEXT NOT NULL DEFAULT '',
+    strikes INTEGER NOT NULL DEFAULT 0,
+    strikes_updated_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`;
+
+/**
+ * ترقية المشرف الذكي:
+ * - usage_logs: تفصيل الاستهلاك الحقيقي (إدخال/إخراج/مزوّد/نموذج/معامل السعر)
+ *   لأن السعر صار متغيّراً حسب الاستهلاك الفعلي لا سعراً ثابتاً لكل رسالة.
+ * - conversations: وضع الجلسة (normal/defense) + حالة المناقشة (عدّاد الأسئلة).
+ */
+const SUPERVISOR_UPGRADE = `
+  ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS input_tokens INTEGER;
+  ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS output_tokens INTEGER;
+  ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS provider VARCHAR(100);
+  ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS model VARCHAR(255);
+  ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS price_multiplier NUMERIC(6,2);
+  ALTER TABLE conversations ADD COLUMN IF NOT EXISTS mode VARCHAR(20) NOT NULL DEFAULT 'normal';
+  ALTER TABLE conversations ADD COLUMN IF NOT EXISTS defense_state JSONB NOT NULL DEFAULT '{}'::jsonb;
+`;
+
+/** فهارس المشرف الذكي (استعلامات الذاكرة تكرّر مع كل رسالة). */
+const SUPERVISOR_INDEXES = `
+  CREATE INDEX IF NOT EXISTS idx_usage_logs_user_created ON usage_logs(user_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at DESC);
+`;
+
 /** فهارس المرحلة الأولى على المفاتيح الجديدة. */
 const STEP_KEY_INDEXES = `
   CREATE UNIQUE INDEX IF NOT EXISTS uq_path_steps_key ON research_path_steps(path_id, step_key) WHERE step_key IS NOT NULL;
@@ -542,6 +583,7 @@ async function initializeDatabase() {
     await pool.query(NOTIFICATIONS_TABLE);
     await pool.query(DEVICE_TOKENS_TABLE);
     await pool.query(ADMINS_TABLE);
+    await pool.query(SUPERVISOR_MEMORY_TABLE);
     // ترقيات آمنة لقواعد البيانات القائمة (كل عبارة idempotent)
     await pool.query(USERS_EXTRA_COLUMNS);
     await pool.query(USERS_NOTIFICATIONS_COLUMN);
@@ -550,9 +592,11 @@ async function initializeDatabase() {
     await pool.query(USERS_GOOGLE_SUB_UNIQUE);
     await pool.query(USERS_PLAN_FOREIGN_KEY);
     await pool.query(STEP_KEY_UPGRADE);
+    await pool.query(SUPERVISOR_UPGRADE);
     await pool.query(INDEXES);
     await pool.query(STEP_KEY_INDEXES);
     await pool.query(NOTIFICATION_INDEXES);
+    await pool.query(SUPERVISOR_INDEXES);
 
     console.log(`Database initialized successfully on ${target.host}:${target.port}/${target.database}.`);
     console.log('الخطوة التالية (اختيارية): npm run db:seed لإضافة الباقات الافتراضية.');

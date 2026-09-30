@@ -609,6 +609,31 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   .sheet-wrap { max-height: 62vh; }
 }
 
+/* ---- شريط الوضع + إرفاق الملفات في صفحة الشات ---- */
+.chat-modebar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 7px 12px; margin: 0 0 8px; border-radius: 10px;
+  background: var(--mist-soft); color: var(--slate); font-size: 12px; font-weight: 600;
+}
+.chat-modebar span { display: inline-flex; align-items: center; gap: 6px; }
+.chat-modebar.is-defense { background: rgba(15, 40, 62, 0.08); color: var(--ink); }
+
+.chat-attach {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 8px 12px; border-top: 1px solid var(--mist); background: var(--mist-soft);
+}
+.chat-attach-label { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--slate); font-weight: 600; }
+.chat-attach-chip {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 190px;
+  padding: 3px 9px; border-radius: 999px; cursor: pointer;
+  background: var(--paper); border: 1px solid var(--mist);
+  font-size: 11.5px; color: var(--ink-70);
+}
+.chat-attach-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-attach-chip input { margin: 0; accent-color: var(--sea); }
+.chat-attach-chip:has(input:checked) { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.chat-attach-hint { font-size: 11px; color: var(--slate); margin-inline-start: auto; }
+
 .storage-bar { display: grid; gap: 7px; }
 .storage-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .storage-head b { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink); }

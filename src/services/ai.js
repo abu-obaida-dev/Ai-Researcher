@@ -39,7 +39,7 @@ async function fetchWithRetry(url, options, providerLabel = '') {
 }
 
 /** نداء Gemini (generateContent) — يُستخدم للمفتاح الأساسي والاحتياطي معاً. */
-async function geminiCall({ apiKey, model, system, messages, temperature }) {
+async function geminiCall({ apiKey, model, system, messages, temperature, maxTokens = MAX_TOKENS }) {
   const response = await fetchWithRetry(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
     {
@@ -51,7 +51,7 @@ async function geminiCall({ apiKey, model, system, messages, temperature }) {
           role: message.role === 'assistant' ? 'model' : 'user',
           parts: [{ text: message.content }]
         })),
-        generationConfig: { temperature, maxOutputTokens: MAX_TOKENS }
+        generationConfig: { temperature, maxOutputTokens: maxTokens }
       }),
       signal: AbortSignal.timeout(TIMEOUT_MS)
     },
@@ -63,7 +63,8 @@ async function geminiCall({ apiKey, model, system, messages, temperature }) {
   const data = await response.json();
   const text = data?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('\n');
   if (!text) throw new Error('Gemini أعاد رداً فارغاً.');
-  return { text, model };
+  // usageMetadata توحيده في services/tokens.js (promptTokenCount/candidatesTokenCount)
+  return { text, model, usage: data?.usageMetadata || null };
 }
 
 /** المزوّدون بالترتيب مع دالة نداء لكل واحد. */
@@ -72,7 +73,7 @@ const PROVIDERS = [
     key: 'openrouter',
     envKey: 'OPENROUTER_API_KEY',
     model: process.env.AI_MODEL_OPENROUTER || 'openai/gpt-4o-mini',
-    async call({ apiKey, model, system, messages, temperature }) {
+    async call({ apiKey, model, system, messages, temperature, maxTokens = MAX_TOKENS }) {
       const response = await fetchWithRetry('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -85,7 +86,7 @@ const PROVIDERS = [
           model,
           messages: [{ role: 'system', content: system }, ...messages],
           temperature,
-          max_tokens: MAX_TOKENS
+          max_tokens: maxTokens
         }),
         signal: AbortSignal.timeout(TIMEOUT_MS)
       },
@@ -97,7 +98,7 @@ const PROVIDERS = [
       const data = await response.json();
       const text = data?.choices?.[0]?.message?.content;
       if (!text) throw new Error('OpenRouter أعاد رداً فارغاً.');
-      return { text, model: data?.model || model };
+      return { text, model: data?.model || model, usage: data?.usage || null };
     }
   },
   {
@@ -116,11 +117,11 @@ const PROVIDERS = [
     key: 'grok',
     envKey: 'GROK_API_KEY',
     model: process.env.AI_MODEL_GROK || 'grok-3-mini',
-    async call({ apiKey, model, system, messages, temperature }) {
+    async call({ apiKey, model, system, messages, temperature, maxTokens = MAX_TOKENS }) {
       const response = await fetchWithRetry('https://api.x.ai/v1/chat/completions', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, ...messages], temperature, max_tokens: MAX_TOKENS }),
+        body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, ...messages], temperature, max_tokens: maxTokens }),
         signal: AbortSignal.timeout(TIMEOUT_MS)
       },
       'grok'
@@ -131,7 +132,7 @@ const PROVIDERS = [
       const data = await response.json();
       const text = data?.choices?.[0]?.message?.content;
       if (!text) throw new Error('Grok أعاد رداً فارغاً.');
-      return { text, model: data?.model || model };
+      return { text, model: data?.model || model, usage: data?.usage || null };
     }
   }
 ];
@@ -166,9 +167,11 @@ async function logRequest({ userId, provider, model, latencyMs, status, error })
 /**
  * تنفيذ طلب للمشرف الذكي مع تبديل تلقائي بين المزوّدين.
  * messages: [{ role: 'user' | 'assistant', content }] بترتيب زمني.
+ * maxTokens: سقف طول الردّ (يقلّص الاستهلاك ويفرض قصر الرسالة).
+ * يرجع { text, model, provider, usage } — و usage هو الاستهلاك الحقيقي للتسعير.
  * يرمي خطأً يحمل code = NO_PROVIDER إذا لم يعمل أي مزوّد.
  */
-export async function runSupervisor({ userId = null, messages, system, temperature = 0.4 } = {}) {
+export async function runSupervisor({ userId = null, messages, system, temperature = 0.4, maxTokens = MAX_TOKENS } = {}) {
   const configured = PROVIDERS.filter((provider) => Boolean(process.env[provider.envKey]));
 
   if (!configured.length) {
@@ -190,7 +193,8 @@ export async function runSupervisor({ userId = null, messages, system, temperatu
         model: provider.model,
         system,
         messages,
-        temperature
+        temperature,
+        maxTokens
       });
 
       await logRequest({

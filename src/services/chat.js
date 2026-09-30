@@ -1,12 +1,21 @@
 import { pool } from '../db/client.js';
-import { DEGREE_LEVELS, PREFERRED_LANGUAGES, RESEARCH_STAGES, TOKEN_COSTS } from '../constants.js';
+import { CHAT_REPLY_CAPS, TOKEN_COSTS } from '../constants.js';
 import { runSupervisor } from './ai.js';
-import { isValidStepKeyForUser, stepTitle } from './journey.js';
+import { isValidStepKeyForUser } from './journey.js';
+import { buildSupervisorContext } from './supervisor-context.js';
+import { buildSystemPrompt } from './supervisor-prompt.js';
+import { addStrike, summarizeConversation } from './supervisor-memory.js';
+import { balanceOf, chargeUsage, deductCredits, estimateReservation, logUsage, normalizeUsage, refundCredits } from './tokens.js';
 
 /**
- * شات المشرف الذكي (1F): المحادثات ورسائلها في conversations/messages،
- * وخصم التوكنز من رصيد الباحث في نفس جملة SQL (شرط الرصيد الكافي)،
- * وتسجيل كل استهلاك في usage_logs. المزوّدون يتبدّلون تلقائياً في services/ai.js.
+ * شات المشرف الذكي (1F): المحادثات ورسائلها في conversations/messages.
+ *
+ * التسعير صار متغيّراً بحسب الاستهلاك الفعلي (services/tokens.js):
+ *   حجز قبل الإرسال ← نداء ← تسوية وردّ الفرق، وردّ كامل عند الفشل.
+ *
+ * ما يحسبه الكود لا البرومبت (services/supervisor-context.js):
+ * أول رسالة في تاريخه، حالة خطواته، ملخّص ذاكرته، مهمته القادمة، عدد أيام
+ * انقطاعه، عدّاد التنبيهات، وملفاته المرفقة.
  */
 
 const CHAT_COST = TOKEN_COSTS.find((item) => item.type === 'chat')?.tokens || 30;
@@ -14,10 +23,30 @@ const HISTORY_LIMIT = 20;
 const PROMPT_LIMIT = 8000;
 const TITLE_LIMIT = 120;
 
+/** وسم التنبيه الداخلي: المشرفة تكتبه، والكود يحذفه قبل العرض والعدّ. */
+const STRIKE_TAG = /\[\[\s*strike\s*\]\]|\[\s*strike\s*\]/gi;
+
+/**
+ * ينظّف ردّ المشرفة: يحذف وسم التنبيه ويخبرك هل وُجد.
+ * الوسم يوضع في آخر الرد فقط، ونتأكد أنه لم يُصِب ردودنا المخزّنة سابقاً.
+ */
+function stripStrikeTag(text) {
+  const raw = String(text || '');
+  const hadStrike = STRIKE_TAG.test(raw);
+  STRIKE_TAG.lastIndex = 0;
+
+  return { text: raw.replace(STRIKE_TAG, '').replace(/\s+$/, ''), hadStrike };
+}
+
+/** لا يُسمح للباحث بأن يحقن وسماً داخلياً فيردّ المشرفة تكرّره وتُحتسب له ضربة. */
+function sanitizeUserText(text) {
+  return String(text || '').replace(STRIKE_TAG, '').replace(/\s+$/, '');
+}
+
 /** تاريخ محادثات الباحث (الأحدث أولاً) مع عدد الرسائل. */
 export async function listConversations(userId, { limit = 12 } = {}) {
   const { rows } = await pool.query(
-    `SELECT c.id, c.title, c.step_key, c.provider, c.created_at, c.updated_at,
+    `SELECT c.id, c.title, c.step_key, c.mode, c.provider, c.created_at, c.updated_at,
             (SELECT count(*)::int FROM messages m WHERE m.conversation_id = c.id) AS messages_count
        FROM conversations c
       WHERE c.user_id = $1
@@ -29,7 +58,7 @@ export async function listConversations(userId, { limit = 12 } = {}) {
   return rows;
 }
 
-/** محادثة واحدة بملكيتها + رسائلها بالترتيب الزمني. */
+/** محادثة واحدة بملكيتها + رسائلها بالترتيب الزمني + حالة المناقشة. */
 export async function getConversation(userId, conversationId) {
   const { rows } = await pool.query('SELECT * FROM conversations WHERE id = $2 AND user_id = $1', [
     userId,
@@ -42,7 +71,7 @@ export async function getConversation(userId, conversationId) {
     [conversationId]
   );
 
-  return { ...rows[0], messages };
+  return { ...rows[0], messages, defense_state: rows[0].defense_state || {} };
 }
 
 /** إنشاء محادثة جديدة باسم مختصر من أول سؤال. */
@@ -79,88 +108,59 @@ export async function deleteConversation(userId, conversationId) {
   return rowCount > 0;
 }
 
-/**
- * خصم التوكنز بشرط توفّر الرصيد: ذرّي بالكامل في جملة واحدة
- * (أمان ضد الطلبات المتزامنة) — يرجع false إذا كان الرصيد غير كافٍ.
- */
-export async function deductTokens(userId, tokens) {
-  const { rows } = await pool.query(
-    `UPDATE users SET tokens_balance = tokens_balance - $2, tokens_used = tokens_used + $2
-      WHERE id = $1 AND tokens_balance >= $2
-      RETURNING tokens_balance`,
-    [userId, tokens]
-  );
-
-  return rows.length > 0;
-}
-
-/** تسجيل الاستهلاك في usage_logs (نوع الإجراء + التوكنز + ملخص ما طُلب). */
-async function logUsage(userId, { type, tokens, model, provider, summary = '' }) {
-  try {
-    await pool.query(
-      'INSERT INTO usage_logs (user_id, type, tokens_used, summary) VALUES ($1, $2, $3, $4)',
-      [
-        userId,
-        type,
-        tokens,
-        [summary, `model=${model || '-'}`, `provider=${provider || '-'}`].filter(Boolean).join(' · ').slice(0, 500)
-      ]
-    );
-  } catch (error) {
-    console.warn(`تعذّر تسجيل الاستهلاك: ${error.code || error.message}`);
-  }
-}
-
 /** عنوان مختصر للمحادثة من أول سؤال (أول ٦٠ حرفاً). */
 function titleFromPrompt(prompt) {
   const line = String(prompt).split('\n').find((item) => item.trim()) || 'محادثة جديدة';
   return line.trim().slice(0, 60);
 }
 
-/**
- * موجّه النظام: شخصية مشرف بحثي + سياق ملف الباحث + قواعد مهنية أساسية
- * (صدق علمي، عدم اختلاق مراجع، توثيق APA، لغة المستخدم).
- */
-export function buildSystemPrompt({ profile = {}, stepTitle: currentStep = '' } = {}) {
-  const degree = DEGREE_LEVELS.find((item) => item.value === profile.degree_level)?.label || 'غير محددة';
-  const stage = RESEARCH_STAGES.find((item) => item.value === profile.research_stage)?.label || 'غير محددة';
-  const language = PREFERRED_LANGUAGES.find((item) => item.value === profile.preferred_language)?.label || 'العربية';
-  const style = profile.citation_style === 'mla9' ? 'MLA 9' : 'APA 7';
+/** آخر محادثة سابقة لها رسائل، لاستخدامها في تلخيص الذاكرة عند بدء جلسة جديدة. */
+async function lastRichConversation(userId, excludeId = null) {
+  const { rows } = await pool.query(
+    `SELECT c.id FROM conversations c
+      WHERE c.user_id = $1 AND c.id IS DISTINCT FROM $2
+        AND (SELECT count(*) FROM messages m WHERE m.conversation_id = c.id) >= 4
+      ORDER BY c.updated_at DESC LIMIT 1`,
+    [userId, excludeId || null]
+  );
 
-  return [
-    'أنت مشرف بحثي أكاديمي داخل منصة Zena AI. مهمتك مساعدة الباحث العربي في بحث التخرج أو الرسالة أو أطروحة الدكتوراه.',
-    '',
-    'قواعد إلزامية:',
-    '1) لا تختلق مراجع أو أرقاماً أو إحصاءات أو أسماء باحثين. إن لم تكن متأكداً فقل ذلك صراحة ووضّح ما يحتاج الباحث للتحقق منه.',
-    '2) اقترح عناوين مراجع بصيغة قابلة للتحقق واذكر أنها «اقتراحات للبحث في قواعد البيانات» لا مراجع مؤكدة إن لم تكن مؤكدة.',
-    '3) أجب بلغة المستخدم (العربية افتراضياً) وبأسلوب أكاديمي واضح، منظّم بعناوين ونقاط وقوائم عند الحاجة.',
-    `4) استخدم أسلوب التوثيق ${style} في الصياغات والتوثيق، واذكر كيف يتحقق الباحث من كل ادعاء.`,
-    '5) كن عملياً: خطوات تنفيذية، قوالب جاهزة (مقترح/منهج/تحليل)، وملاحظات على ما قد يخطئ فيه الباحث.',
-    '6) عند المراجعة: افصل بين (أ) خطأ منهجي، (ب) ضعف في الأدلة، (ج) صياغة لغوية، واقترح صياغة بديلة جاهزة.',
-    '7) لا تكرر السؤال ولا تحشو كلاماً — ابدأ مباشرة بالمفيد.',
-    '',
-    'سياق الباحث:',
-    `- الدرجة: ${degree}`,
-    `- التخصص: ${profile.research_field || 'غير محدد'}`,
-    `- عنوان البحث: ${profile.research_title || 'لم يُحدَّد بعد'}`,
-    `- المرحلة البحثية: ${stage}`,
-    `- الجامعة/الكلية: ${[profile.university, profile.faculty].filter(Boolean).join(' — ') || 'غير محددة'}`,
-    `- اللغة المفضلة: ${language}`,
-    currentStep ? `- الخطوة الحالية في مسار البحث: ${currentStep}` : ''
-  ]
-    .filter(Boolean)
-    .join('\n');
+  return rows[0]?.id || null;
+}
+
+/** حالة المناقشة: عدّاد الأسئلة والمحاور (تُحفظ في conversations.defense_state). */
+function readDefenseState(conversation) {
+  const state = conversation?.defense_state;
+  if (!state || typeof state !== 'object') return { asked: 0, startedAt: null };
+
+  return {
+    asked: Number(state.asked) || 0,
+    startedAt: state.startedAt || null
+  };
+}
+
+async function writeDefenseState(conversationId, state) {
+  await pool.query('UPDATE conversations SET defense_state = $2 WHERE id = $1', [
+    conversationId,
+    JSON.stringify(state)
+  ]);
 }
 
 /**
- * إرسال سؤال للمشرف الذكي:
- * يتحقق من الرصيد، يخصم التوكنز ذرّياً، يبني السياق (آخر الرسائل + موجّه النظام)،
- * ينفّذ الطلب عبر سلسلة المزوّدين، يحفظ الرسائل، ويسجّل الاستهلاك.
- * عند فشل كل المزوّدين تُعاد التوكنات للباحث (لم يُكتب له رد).
- * الأكواد: NO_TOKENS / NO_PROVIDER / PROVIDERS_FAILED / EMPTY_PROMPT / NOT_FOUND.
+ * إرسال سؤال للمشرف الذكي.
+ *
+ * الترتيب مقصود وكل خطوة المالية ذرّية:
+ *   1) تحقق من المدخلات والمحفظة (لا خصم بعد).
+ *   2) بناء السياق من قاعدة البيانات ثم موجّه النظام.
+ *   3) حجز الرصيد بسقف تقديري — إن لم يكن كافياً نرفض قبل الإرسال.
+ *   4) النداء؛ عند الفشل: ردّ الحجز كاملاً بلا تسجيل استهلاك.
+ *   5) التسوية: الفارق بين الحجز والاستهلاك الفعلي يُردّ فوراً.
+ *   6) حذف وسم التنبيه قبل الحفظ، وزيادة العدّاد إن وُجد.
+ *   7) عند بدء جلسة جديدة: تلخيص الجلسة السابقة لتحديث الذاكرة.
+ *
+ * الأكواد: NO_TOKENS / NO_PROVIDER / PROVIDERS_FAILED / EMPTY_PROMPT / NOT_FOUND / BAD_STEP.
  */
-export async function askSupervisor({ userId, prompt, conversationId = null, stepKey = null, profile = {} }) {
-  const question = String(prompt || '').trim().slice(0, PROMPT_LIMIT);
+export async function askSupervisor({ userId, prompt, conversationId = null, stepKey = null, profile = {}, fileIds = [] }) {
+  const question = sanitizeUserText(String(prompt || '').trim().slice(0, PROMPT_LIMIT));
   if (!question) {
     const error = new Error('اكتب سؤالك أولاً.');
     error.code = 'EMPTY_PROMPT';
@@ -173,12 +173,6 @@ export async function askSupervisor({ userId, prompt, conversationId = null, ste
     throw error;
   }
 
-  if (!(await deductTokens(userId, CHAT_COST))) {
-    const error = new Error('رصيد التوكنز غير كافٍ — اشترِ باقة أو انتظر التجديد الشهري.');
-    error.code = 'NO_TOKENS';
-    throw error;
-  }
-
   let conversation = conversationId ? await getConversation(userId, conversationId) : null;
   if (conversationId && !conversation) {
     const error = new Error('المحادثة غير موجودة.');
@@ -186,69 +180,117 @@ export async function askSupervisor({ userId, prompt, conversationId = null, ste
     throw error;
   }
 
+  // محادثة جديدة: ننشئها أولاً لنعرف وضعها، ونتذكّر السابقة لتلخيص ذاكرتها
+  const previousId = conversation ? null : await lastRichConversation(userId);
   if (!conversation) {
-    // المحادثة الجديدة لا تحمل رسائل بعد — نُهيّئ المصفوفة حتى يمرّ بناء السياق بأمان
     const created = await createConversation(userId, { title: titleFromPrompt(question), stepKey });
-    conversation = { ...created, messages: [] };
+    conversation = { ...created, messages: [], mode: 'normal', defense_state: {} };
   }
+
+  const context = await buildSupervisorContext({ userId, profile, conversation, fileIds });
+  const system = buildSystemPrompt(context);
 
   const history = conversation.messages
     .slice(-HISTORY_LIMIT)
-    .map((message) => ({ role: message.role === 'assistant' ? 'assistant' : 'user', content: message.content }));
+    .map((message) => ({
+      role: message.role === 'assistant' ? 'assistant' : 'user',
+      content: message.content
+    }));
 
-  const activeStep = stepKey || conversation.step_key;
-  const currentStep = activeStep ? await stepTitle(activeStep) : '';
-  const system = buildSystemPrompt({ profile, stepTitle: currentStep });
+  const messages = [...history, { role: 'user', content: question }];
+  const replyCap = context.replyCap || CHAT_REPLY_CAPS.normal;
 
-  let reply;
-  try {
-    reply = await runSupervisor({
-      userId,
-      system,
-      messages: [...history, { role: 'user', content: question }]
-    });
-  } catch (error) {
-    await refundTokens(userId, CHAT_COST);
-    await logUsage(userId, { type: 'chat_failed', tokens: 0, model: null, provider: null, summary: error.message });
+  // ٣) الحجز المسبق — أعلى تكلفة ممكنة لهذه الرسالة، يُردّ الفرق بعد الرد
+  const reservation = estimateReservation({ system, messages, replyCap });
+  if (!(await deductCredits(userId, reservation.credits))) {
+    const balance = await balanceOf(userId);
+    const error = new Error(
+      `رصيدك (${balance}) لا يكفي لهذه الرسالة: نحتاج ${reservation.credits} توكن كحدٍّ أقصى قبل الإرسال. اشترِ باقة أو ابدأ محادثة جديدة أقصر.`
+    );
+    error.code = 'NO_TOKENS';
     throw error;
   }
 
-  await appendMessage(conversation.id, { role: 'user', content: question, tokensUsed: CHAT_COST });
-  await appendMessage(conversation.id, { role: 'assistant', content: reply.text, model: reply.model });
+  let reply;
+  try {
+    reply = await runSupervisor({ userId, system, messages, maxTokens: replyCap });
+  } catch (error) {
+    await refundCredits(userId, reservation.credits);
+    await logUsage(userId, { type: 'chat_failed', tokens: 0, summary: error.message });
+    throw error;
+  }
+
+  // ٥) التسوية على الاستهلاك الحقيقي الذي أرجعه المزوّد
+  const usage = normalizeUsage(reply.usage);
+  const charge = usage.inputTokens || usage.outputTokens
+    ? chargeUsage(usage)
+    : { credits: reservation.credits, inputTokens: 0, outputTokens: 0, multiplier: chargeUsage(usage).multiplier };
+
+  const charged = Math.min(charge.credits, reservation.credits);
+  if (reservation.credits > charged) await refundCredits(userId, reservation.credits - charged);
+
+  // ٦) وسم التنبيه: يُحذف قبل الحفظ والعرض، ويُحتسب في العدّاد
+  const cleaned = stripStrikeTag(reply.text);
+  let strikes = context.strikes;
+  if (cleaned.hadStrike) strikes = await addStrike(userId);
+
+  await appendMessage(conversation.id, { role: 'user', content: question, tokensUsed: charged });
+  await appendMessage(conversation.id, { role: 'assistant', content: cleaned.text, model: reply.model });
   await pool.query('UPDATE conversations SET provider = $2 WHERE id = $1', [conversation.id, reply.provider]);
+
   await logUsage(userId, {
     type: 'chat',
-    tokens: CHAT_COST,
-    model: reply.model,
+    tokens: charged,
+    inputTokens: charge.inputTokens,
+    outputTokens: charge.outputTokens,
     provider: reply.provider,
+    model: reply.model,
+    multiplier: charge.multiplier,
     summary: titleFromPrompt(question)
   });
+
+  // ٧) بدء جلسة جديدة ⇒ تلخيص الجلسة السابقة (على حساب المنصة، لا الباحث)
+  if (previousId) {
+    const previous = await getConversation(userId, previousId);
+    if (previous) {
+      const memory = await summarizeConversation(userId, { messages: previous.messages, profile });
+      if (memory) {
+        await logUsage(userId, { type: 'chat_summary', tokens: 0, summary: 'تلخيص جلسة سابقة لتحديث ذاكرة المشرف' });
+      }
+    }
+  }
+
+  // عدّاد أسئلة المناقشة (8–12 سؤالاً ⇒ تلخيص)
+  if (conversation.mode === 'defense') {
+    const state = readDefenseState(conversation);
+    await writeDefenseState(conversation.id, { ...state, asked: state.asked + 1, startedAt: state.startedAt || new Date().toISOString() });
+  }
 
   return {
     conversationId: conversation.id,
     title: conversation.title,
-    answer: reply.text,
+    answer: cleaned.text,
     provider: reply.provider,
     model: reply.model,
-    tokensCharged: CHAT_COST
+    tokensCharged: charged,
+    reserved: reservation.credits,
+    strikes,
+    mode: conversation.mode
   };
 }
 
-/** إعادة التوكنات للباحث عند فشل المزوّدين (يبقى الاستهلاك صفراً في السجل). */
-async function refundTokens(userId, tokens) {
-  try {
-    await pool.query(
-      'UPDATE users SET tokens_balance = tokens_balance + $2, tokens_used = GREATEST(tokens_used - $2, 0) WHERE id = $1',
-      [userId, tokens]
-    );
-  } catch (error) {
-    console.warn(`تعذّرت إعادة التوكنات للباحث ${userId}: ${error.code || error.message}`);
-  }
+/** تبديل وضع المحادثة بين الإرشاد العادي ووضع المناقشة. */
+export async function setConversationMode(userId, conversationId, mode) {
+  const next = mode === 'defense' ? 'defense' : 'normal';
+  const { rowCount } = await pool.query(
+    "UPDATE conversations SET mode = $3, defense_state = '{}'::jsonb WHERE id = $2 AND user_id = $1",
+    [userId, conversationId, next]
+  );
+
+  return rowCount > 0;
 }
 
-/** تكلفة رسالة الشات (تُعرض في الواجهة قبل الإرسال). */
+/** تكلفة رسالة الشات التقديرية المعروضة في الواجهة قبل الإرسال. */
 export function chatCost() {
   return CHAT_COST;
 }
-
-

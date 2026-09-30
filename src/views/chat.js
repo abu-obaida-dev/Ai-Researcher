@@ -65,6 +65,49 @@ function renderConversations(conversations, activeId) {
 </div>`;
 }
 
+/** شريط الوضع: إرشاد عادي ⇄ مناقشة تدريبية، مع عدّاد أسئلة المناقشة. */
+function renderModeBar(conversation) {
+  if (!conversation?.id) return '';
+
+  const isDefense = conversation.mode === 'defense';
+  const state = conversation.defense_state || {};
+  const asked = Number(state.asked) || 0;
+
+  const toggle = isDefense
+    ? `<form method="post" action="/chat/${escapeHtml(conversation.id)}/mode" class="inline-form">
+    <input type="hidden" name="mode" value="normal" />
+    <button class="btn btn-quiet btn-sm" type="submit">${icon('message', 'icon-sm')} إنهاء المناقشة</button>
+  </form>`
+    : `<form method="post" action="/chat/${escapeHtml(conversation.id)}/mode" class="inline-form">
+    <input type="hidden" name="mode" value="defense" />
+    <button class="btn btn-quiet btn-sm" type="submit">${icon('clipboard', 'icon-sm')} ابدأ مناقشة</button>
+  </form>`;
+
+  return `<div class="chat-modebar${isDefense ? ' is-defense' : ''}">
+  <span>${isDefense ? `${icon('clipboard', 'icon-sm')} وضع المناقشة${asked ? ` — ${asked} سؤال` : ''}` : `${icon('sparkles', 'icon-sm')} وضع الإرشاد`}</span>
+  ${toggle}
+</div>`;
+}
+
+/** أسهل طريقة لإرفاق ملف: أزرار اختيار من ملفاته، والاختيار يُرسل مع الرسالة. */
+function renderAttachRow(files = []) {
+  if (!files.length) return '';
+
+  return `<div class="chat-attach" id="chat-attach">
+  <span class="chat-attach-label">${icon('file', 'icon-sm')} إرفاق:</span>
+  ${files
+    .map(
+      (file) =>
+        `<label class="chat-attach-chip" title="${escapeHtml(file.fileName)}">
+    <input type="checkbox" name="file_ids" value="${escapeHtml(file.id)}" />
+    <span>${escapeHtml(file.fileName)}</span>
+  </label>`
+    )
+    .join('\n  ')}
+  <span class="chat-attach-hint">حتى ٣ ملفات · نصّ و Excel فقط</span>
+</div>`;
+}
+
 /** صفحة الشات كاملة. */
 export function renderChatPage({
   account,
@@ -74,6 +117,7 @@ export function renderChatPage({
   stepKey = '',
   stepName = '',
   prefill = '',
+  attachableFiles = [],
   providers = [],
   flash = null
 }) {
@@ -104,13 +148,15 @@ export function renderChatPage({
   ${providerWarning}
   ${flashHtml}
   ${stepContext}
+  ${renderModeBar(conversation)}
   <div class="chat-body" id="messages">${messagesHtml}</div>
 
+  ${renderAttachRow(attachableFiles)}
   <form class="chat-composer" method="post" action="/chat">
     <input type="hidden" name="conversation_id" value="${escapeHtml(conversation?.id || '')}" />
     <input type="hidden" name="step" value="${escapeHtml(stepKey)}" />
     <textarea id="message" name="message" rows="1" required maxlength="8000"
-      placeholder="اكتب رسالتك إلى المشرف الذكي…"
+      placeholder="${conversation?.mode === 'defense' ? 'اكتب إجابتك…' : 'اكتب رسالتك إلى المشرف الذكي…'}"
       aria-label="رسالتك إلى المشرف الذكي">${escapeHtml(prefill)}</textarea>
     <button class="btn btn-primary chat-send" type="submit" title="إرسال" aria-label="إرسال">${icon('send')}</button>
   </form>
