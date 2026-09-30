@@ -116,6 +116,7 @@ DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require
 | الأمر | الوظيفة |
 | --- | --- |
 | `npm run dev` | تشغيل الخادم مع `node --watch` (إعادة تشغيل تلقائية عند تعديل الملفات) |
+| `npm run dev:free` | تحرير المنفذ 3000 من أي عملية عالقة (ينفّذها تلقائياً عند EADDRINUSE) |
 | `npm start` | تشغيل الإنتاج |
 | `npm run db:setup` | تثبيت وتشغيل PostgreSQL وضبط كلمة المرور (يحتاج sudo مرة واحدة) |
 | `npm run db:init` | إنشاء قاعدة البيانات (إن لزم) + `users` و`profiles` و`plans` و`usage_logs` |
@@ -252,6 +253,17 @@ usage_logs (
 > عند فشل قاعدة البيانات تعرض الصفحات رسالة عربية واضحة بخطوات الحل (بدل صفحة بيضاء أو خطأ خام).
 
 ## حل المشاكل الشائعة
+
+### `Error: listen EADDRINUSE: address already in use :::3000`
+
+المنفذ 3000 محجوز من عملية أخرى (غالباً نسخة سابقة من الخادم ما زالت تعمل). الحل:
+
+```bash
+npm run dev:free     # يوقف العملية التي تحتجز المنفذ
+npm run dev
+```
+
+أو يدوياً: `lsof -ti tcp:3000 | xargs -r kill` — أو شغّل على منفذ آخر: `PORT=3001 npm run dev`.
 
 ### `{"message":"Route not found: /admin/users"}`
 

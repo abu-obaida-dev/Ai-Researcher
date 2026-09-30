@@ -158,6 +158,32 @@ const server = app.listen(PORT, () => {
   console.log(`AI Researcher API is running on http://localhost:${PORT}`);
 });
 
+/**
+ * المنفذ مشغول: نعطي رسالة عربية تشرح الحل بدل انهيار بطباعة أثر المكدس.
+ * غالباً السبب تشغيل نسختين (مثلاً `npm run dev` وخادم قديم في الخلفية).
+ */
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(
+      [
+        '',
+        `✖ المنفذ ${PORT} مشغول من عملية أخرى — تعذّر تشغيل الخادم.`,
+        '',
+        'لإيقاف العملية التي تحتجز المنفذ ثم أعد التشغيل:',
+        `  lsof -ti tcp:${PORT} | xargs -r kill    # أو:  fuser -k ${PORT}/tcp`,
+        '',
+        'أو شغّل الخادم على منفذ آخر:',
+        `  PORT=3001 npm run dev`,
+        ''
+      ].join('\n')
+    );
+    process.exit(1);
+  }
+
+  console.error('خطأ غير متوقع أثناء تشغيل الخادم:', error);
+  process.exit(1);
+});
+
 /** إغلاق نظيف: يوقف استقبال الطلبات الجديدة ثم يغلق اتصالات قاعدة البيانات. */
 async function shutdown(signal) {
   console.log(`\n${signal}: إيقاف الخادم...`);

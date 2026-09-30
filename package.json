@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "node --watch server.js",
     "start": "node server.js",
+    "dev:free": "bash scripts/free-port.sh",
     "db:init": "node src/db/init.js",
     "db:seed": "node src/db/seed.js",
     "db:reset": "npm run db:init && npm run db:seed",
