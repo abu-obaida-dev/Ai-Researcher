@@ -80,6 +80,8 @@ router.get('/chat', requireAccount, async (req, res) => {
         conversations,
         stepKey,
         stepName: stepKey ? await stepTitle(stepKey) : '',
+        // اقتراحات البداية (?prompt=…) تُملأ بها مربع الرسالة مسبقاً
+        prefill: seedPrompt,
         balance: Number(req.account.tokens_balance || 0),
         providers: availableProviders(),
         flash: flashFromQuery(req.query)

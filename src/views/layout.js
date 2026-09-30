@@ -634,16 +634,20 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .bell-empty[hidden] { display: none; }
 .bell-foot { padding: 9px 13px; border-top: 1px solid var(--mist); text-align: center; font-size: 11.5px; font-weight: 600; }
 
-/* ==== هيكل الصفحة: محتوى يمين + شريط جانبي يسار ==== */
+/* ==== هيكل الصفحة: شريط جانبي يمين (لأن الواجهة RTL) + محتوى ==== */
 .app-page { padding: 0; }
 .app-shell {
   max-width: 1400px; margin: 0 auto; padding: 14px 16px 34px;
-  display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 230px; align-items: start;
+  display: grid; gap: 16px; grid-template-columns: 230px minmax(0, 1fr); align-items: start;
 }
-.app-main { grid-column: 1; min-width: 0; }
+.app-main { grid-column: 2; min-width: 0; }
 .app-main .page-head h1 { font-size: 20px; }
-.app-side { grid-column: 2; position: sticky; top: 60px; }
-.app-nav { background: #fff; border: 1px solid var(--mist); border-radius: 18px; padding: 7px; box-shadow: var(--shadow); display: grid; gap: 2px; }
+.app-side { grid-column: 1; grid-row: 1; position: sticky; top: 60px; }
+.app-nav {
+  background: #fff; border: 1px solid var(--mist); border-radius: 18px; padding: 7px;
+  box-shadow: var(--shadow); display: grid; gap: 2px; align-content: start;
+  min-height: calc(100vh - 110px);
+}
 .app-nav a { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 12px; color: var(--slate); font-size: 12.5px; font-weight: 600; }
 .app-nav a:hover { background: var(--mist-soft); color: var(--sea-deep); }
 .app-nav a.active { background: var(--ink); color: #fff; font-weight: 700; }
@@ -653,6 +657,32 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .app-nav a.danger:hover { background: var(--apricot-soft); color: var(--ink); }
 
 /* ============ مساحة عمل الباحث: مسار البحث والمراجع والمفكرة والملفات والشات ============ */
+/* ترويسة بطاقة: العنوان يمين وزر إجراء يسار (مثل «إضافة توكنز» في الإحصائية) */
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.card-head h2 { margin: 0; }
+.btn-sm { padding: 7px 12px; font-size: 12.5px; }
+
+/* سجل الاستهلاك: قائمة مضغوطة بدل جدول */
+.usage-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.usage-item { display: flex; align-items: center; gap: 11px; padding: 10px 8px; border-radius: 12px; }
+.usage-item + .usage-item { border-top: 1px solid var(--mist); }
+.usage-item:hover { background: var(--mist-soft); }
+.usage-icon {
+  flex: 0 0 auto; width: 30px; height: 30px; border-radius: 9px; background: var(--mist-soft);
+  color: var(--sea-deep); display: grid; place-items: center;
+}
+.usage-main { flex: 1 1 auto; min-width: 0; }
+.usage-main b { font-size: 13px; }
+.usage-summary {
+  font-size: 12px; color: var(--slate); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.usage-side { flex: 0 0 auto; display: grid; justify-items: end; gap: 2px; }
+.usage-tokens { font-size: 12.5px; font-weight: 800; color: var(--ink); }
+.usage-time { font-size: 10.5px; color: var(--slate); }
+.usage-item.is-failed .usage-icon { background: var(--apricot-soft); color: #8a4b1f; }
+.usage-item.is-failed .usage-tokens { color: var(--slate); font-weight: 600; }
+
 .btn-quiet { background: #fff; color: var(--slate); border: 1px solid var(--mist); }
 .btn-quiet:hover { background: var(--mist-soft); color: var(--ink); }
 .btn-danger { background: #fff; color: #a13a2c; border: 1px solid #e9c9c0; }
@@ -753,9 +783,9 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 
 @media (max-width: 900px) {
   .app-shell { grid-template-columns: minmax(0, 1fr); padding: 12px 14px 30px; }
-  .app-main { grid-column: 1; }
-  .app-side { grid-column: 1; position: static; order: -1; }
-  .app-nav { display: flex; overflow-x: auto; gap: 6px; padding: 6px; }
+  .app-main { grid-column: 1; grid-row: 2; }
+  .app-side { grid-column: 1; grid-row: 1; position: static; }
+  .app-nav { display: flex; overflow-x: auto; gap: 6px; padding: 6px; min-height: 0; }
   .app-nav a { white-space: nowrap; padding: 8px 12px; border-radius: 999px; }
   .app-nav-label, .app-nav-sep { display: none; }
   .app-top .brand-text { display: none; }

@@ -11,7 +11,7 @@ import {
 } from '../constants.js';
 import { formatDate, formatDateTime, formatNumber } from './format.js';
 import { googleIcon, icon } from './icons.js';
-import { BRAND, escapeHtml, renderLayout, renderTable } from './layout.js';
+import { BRAND, escapeHtml, renderLayout } from './layout.js';
 
 /**
  * صفحات المصادقة والحساب: الدخول بحساب جوجل، إكمال الملف البحثي (onboarding)،
@@ -36,9 +36,67 @@ function renderAvatar(account) {
   return `<span class="avatar">${escapeHtml(initial)}</span>`;
 }
 
-/** تسمية عربية لنوع عملية الاستهلاك. */
+/**
+ * وصف كل نوع من أنواع الاستهلاك: تسمية عربية + أيقونة.
+ * الأنواع الخمسة تأتي من TOKEN_COSTS (تسعير الخدمات)، ونوعٌ إضافي واحد
+ * يسجّله services/chat.js عند فشل المزوّدين (لا يُخصم منه شيء).
+ */
+const USAGE_META = {
+  chat: { label: 'رسالة للمشرف الذكي', icon: 'message' },
+  translate: { label: 'ترجمة وصياغة أكاديمية', icon: 'language' },
+  outline: { label: 'خطة وهيكل بحث', icon: 'list' },
+  sources: { label: 'اقتراح مصادر ومراجع', icon: 'book' },
+  review: { label: 'مراجعة فصل أو مقطع', icon: 'searchCheck' },
+  chat_failed: { label: 'رسالة فشلت (لم يُخصم رصيد)', icon: 'refresh' }
+};
+
+/** تسمية عربية لنوع عملية الاستهلاك (مع اسم مزوّد الذكاء الاصطناعي للأنواع التقنية). */
 function usageLabel(type) {
-  return TOKEN_COSTS.find((item) => item.type === type)?.label || type;
+  const known = TOKEN_COSTS.find((item) => item.type === type);
+  if (known) return known.label;
+  return USAGE_META[type]?.label || 'عملية أخرى';
+}
+
+/**
+ * تنظيف الملخص المخزَّن: هو يخلط نص المستخدم بتفاصيل تقنية للمزوّد
+ * («سؤالي · model=gemini-3.8-flash · provider=gemini») — نُبقي على النص المفيد فقط.
+ */
+function cleanUsageSummary(summary) {
+  return String(summary || '')
+    .split('·')
+    .map((part) => part.trim())
+    .filter((part) => part && !/^(model|provider)\s*=/i.test(part))
+    .join(' — ');
+}
+
+/**
+ * سجل الاستهلاك في صورة قائمة بطاقات مضغوطة بدل جدول عريض:
+ * كل عملية = سطر واحد (النوع + الملخص) مع التوكنز والتاريخ على الطرف الآخر.
+ */
+function renderUsageList(rows) {
+  if (!rows.length) {
+    return '<div class="empty">لا توجد عمليات استهلاك بعد — ابدأ محادثة مع المشرف الذكي.</div>';
+  }
+
+  return `<ul class="usage-list">${rows
+    .map((row) => {
+      const meta = USAGE_META[row.type] || { label: usageLabel(row.type), icon: 'coin' };
+      const summary = cleanUsageSummary(row.summary);
+      const failed = row.type === 'chat_failed';
+
+      return `<li class="usage-item${failed ? ' is-failed' : ''}">
+  <span class="usage-icon">${icon(meta.icon, 'icon-sm')}</span>
+  <div class="usage-main">
+    <b>${escapeHtml(meta.label)}</b>
+    ${summary ? `<p class="usage-summary">${escapeHtml(summary)}</p>` : ''}
+  </div>
+  <div class="usage-side">
+    <span class="usage-tokens">${failed ? '—' : `−${escapeHtml(formatNumber(row.tokens_used))}`}</span>
+    <span class="usage-time">${escapeHtml(formatDateTime(row.created_at))}</span>
+  </div>
+</li>`;
+    })
+    .join('')}</ul>`;
 }
 
 /** صفحة الدخول: لوحة تعريفية كحلية + زر «المتابعة بحساب جوجل». */
@@ -247,14 +305,6 @@ export function renderAccountPage({
   </dl>`
     : `<div class="empty">لم تُكمل ملفك البحثي بعد — إكماله يجعل ردود المشرف الذكي مبنية على مجالك ومرحلتك.</div>`;
 
-  const usageRows = usage.recent.map(
-    (row) => `
-    <td>${escapeHtml(formatDateTime(row.created_at))}</td>
-    <td>${escapeHtml(usageLabel(row.type))}</td>
-    <td class="strong">${escapeHtml(formatNumber(row.tokens_used))}</td>
-    <td class="muted">${escapeHtml(row.summary || '—')}</td>`
-  );
-
   const body = `<div class="account-grid">
   <div class="card">
     <div class="id-card">
@@ -308,11 +358,7 @@ export function renderAccountPage({
 
   <div class="card">
     <h2>آخر عمليات الاستهلاك</h2>
-    ${renderTable({
-      columns: ['التاريخ', 'النوع', 'التوكنز', 'الملخص'],
-      rows: usageRows,
-      emptyMessage: 'لا توجد عمليات استهلاك مسجّلة بعد — ابدأ محادثة مع المشرف الذكي.'
-    })}
+    ${renderUsageList(usage.recent)}
   </div>
 </div>`;
 
@@ -334,18 +380,6 @@ export function renderDashboardPage({ account, profile, plan, usage, journey = n
   const granted = balance + used;
   const percent = granted > 0 ? Math.min(100, Math.round((used / granted) * 100)) : 0;
 
-  const usageRows =
-    usage.recent.length === 0
-      ? []
-      : usage.recent.map(
-          (row) => `<tr>
-      <td class="muted">${escapeHtml(formatDateTime(row.created_at))}</td>
-      <td>${escapeHtml(usageLabel(row.type))}</td>
-      <td class="strong">${escapeHtml(formatNumber(row.tokens_used))}</td>
-      <td class="muted">${escapeHtml(row.summary || '—')}</td>
-    </tr>`
-        );
-
   const firstName = String(account.full_name || 'باحث').trim().split(/\s+/)[0] || 'باحث';
 
   const body = `<div class="dash-grid">
@@ -359,7 +393,10 @@ export function renderDashboardPage({ account, profile, plan, usage, journey = n
   </div>
 
   <div class="card">
-    <h2>رصيد التوكنز</h2>
+    <div class="card-head">
+      <h2>رصيد التوكنز</h2>
+      <a class="btn btn-primary btn-sm" href="/#pricing">${icon('coin', 'icon-sm')} إضافة توكنز</a>
+    </div>
     <p class="balance">${escapeHtml(formatNumber(balance))} <span>توكن متاح</span></p>
     <div class="meter"><i style="width:${percent}%"></i></div>
     <p class="muted">استُهلك ${escapeHtml(formatNumber(used))} من إجمالي ${escapeHtml(
@@ -369,10 +406,6 @@ export function renderDashboardPage({ account, profile, plan, usage, journey = n
       ${kv('الباقة الحالية', plan?.title || account.plan_code || 'لا توجد باقة')}
       ${kv('عمليات مسجّلة', formatNumber(usage.events))}
     </dl>
-    <div class="links">
-      <a class="btn" href="/dashboard">لوحتي (الإحصائية)</a>
-      <a class="btn" href="/#pricing">الباقات</a>
-    </div>
   </div>
 
   <div class="card">
@@ -399,11 +432,7 @@ export function renderDashboardPage({ account, profile, plan, usage, journey = n
 
   <div class="card">
     <h2>آخر عمليات الاستهلاك</h2>
-    ${renderTable({
-      columns: ['التاريخ', 'النوع', 'التوكنز', 'الملخص'],
-      rows: usageRows,
-      emptyMessage: 'لا توجد عمليات استهلاك مسجّلة بعد — ابدأ محادثة مع المشرف الذكي.'
-    })}
+    ${renderUsageList(usage.recent)}
   </div>
 </div>`;
 

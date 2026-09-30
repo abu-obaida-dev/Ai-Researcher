@@ -62,6 +62,7 @@ export function renderChatPage({
   conversations = [],
   stepKey = '',
   stepName = '',
+  prefill = '',
   balance = 0,
   providers = [],
   flash = null
@@ -112,7 +113,7 @@ export function renderChatPage({
       <input type="hidden" name="step" value="${escapeHtml(stepKey)}" />
       <div class="field">
         <label for="message">رسالتك إلى المشرف الذكي</label>
-        <textarea id="message" name="message" rows="4" required maxlength="8000" placeholder="مثال: أراجع منهج الوصفي في دراستي — هل يناسب سؤال البحث؟"></textarea>
+        <textarea id="message" name="message" rows="4" required maxlength="8000" placeholder="مثال: أراجع منهج الوصفي في دراستي — هل يناسب سؤال البحث؟">${escapeHtml(prefill)}</textarea>
       </div>
       <div class="form-actions">
         <button class="btn btn-primary" type="submit">${icon('send', 'icon-sm')} إرسال</button>
