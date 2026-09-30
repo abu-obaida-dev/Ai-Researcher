@@ -27,6 +27,7 @@ src/views/layout.js     قالب HTML المشترك + هوية الألوان
 src/views/admin.js      صفحات الإدارة (نظرة عامة/باحثون/باقات/استهلاك)
 src/views/home.js       الصفحة الرئيسية وصفحة 404
 src/views/format.js     تنسيق الأرقام والتواريخ
+src/services/spreadsheet.js  قراءة جداول البيانات (xlsx/csv) لمعاينة Excel داخل الموقع
 public/                 ملفات الهوية: الشعارات (zena-ai-icon.svg + logo1.webp + logo2.webp) ودليل الهوية وخطوط Manrope وIBM Plex Sans Arabic
 public/fonts.css        تعريفات @font-face للخطوط المحلية (مولَّد آلياً)
 scripts/fetch-fonts.mjs تنزيل خطوط الهوية من Google Fonts إلى public/fonts (npm run fonts:fetch)
@@ -212,7 +213,7 @@ usage_logs (
 | `GET /notes` | المفكرة: إنشاء/تعديل/تثبيت/بحث/ربط بخطوة |
 | `POST /notes` · `/:id` · `/:id/pin` · `/:id/delete` | إدارة الملاحظات |
 | `GET /files` | ملفات الباحث: رفع (multipart) + تحميل + حذف + معاينة |
-| `GET /files/:id/view` | صفحة معاينة: صورة / PDF / نص داخل الموقع (doc·xlsx·zip ⇒ تحميل فقط) |
+| `GET /files/:id/view` | صفحة معاينة: صورة · PDF · نص · **جدول بيانات (xlsx/xls/csv)** داخل الموقع (doc·pptx·zip ⇒ تحميل فقط) |
 | `GET /files/:id/raw` | البايتات: تحميل (`attachment`) أو عرض (`?inline=1`) مع `nosniff` + CSP معزولة |
 | `POST /files` · `POST /files/:id/delete` | إدارة الملفات (بملكية الجلسة فقط) |
 | `GET /chat` | المشرف الذكي: كارت دردشة بملء الشاشة + قائمة المحادثات في السايدبار (`?c=` لمحادثة، `?step=` للسياق) |

@@ -31,6 +31,7 @@ import {
 } from '../services/files.js';
 import { renderNotice } from '../views/layout.js';
 import { renderFileViewerPage, renderFilesPage, renderNotesPage, renderReferencesPage } from '../views/workspace.js';
+import { readSpreadsheet, spreadsheetErrorMessage } from '../services/spreadsheet.js';
 
 /**
  * مسارات مساحة عمل الباحث (1E): المراجع والمفكرة والملفات.
@@ -390,6 +391,16 @@ router.get('/files/:id/view', requireAccount, async (req, res) => {
   const file = normalizeFile(found.row);
   const kind = previewKind(found.row.file_name, found.row.mime);
   const textContent = kind === 'text' ? textPreview(found.buffer) : null;
+
+  // الجداول تُحلَّل على الخادم ثم تُعرض كـ HTML مُهرَّب (لا نمرّر بايتات الملف للمتصفح)
+  let sheetData = null;
+  let sheetError = '';
+  if (kind === 'sheet' && found.buffer) {
+    const parsed = await readSpreadsheet(found.buffer, found.row.file_name);
+    sheetData = parsed.sheets.length ? parsed : null;
+    if (!sheetData) sheetError = spreadsheetErrorMessage(parsed.error);
+  }
+
   const stepName = file.stepKey ? await stepTitle(file.stepKey) : '';
 
   res.type('html').send(
@@ -399,6 +410,8 @@ router.get('/files/:id/view', requireAccount, async (req, res) => {
       file,
       kind,
       textContent,
+      sheetData,
+      sheetError,
       stepTitle: stepName || '',
       missing: !found.buffer
     })

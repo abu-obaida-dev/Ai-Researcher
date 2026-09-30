@@ -167,16 +167,20 @@ export async function filesSummary(userId) {
  * نوع المعاينة المدعومة للمتصفح لهذا الملف:
  * - 'image' → صور (img)
  * - 'pdf'   → PDF (iframe)
- * - 'text'  → نصوص وCSV وMarkdown (نعرضها كنصّ داخل <pre>)
- * - 'none'  → doc/xlsx/pptx/zip … لا عارض في المتصفح ⇒ تحميل فقط
+ * - 'sheet' → xlsx / xls / csv ⇒ جدول داخل الصفحة (services/spreadsheet.js)
+ * - 'text'  → txt و md (نعرضها كنصّ داخل <pre>)
+ * - 'none'  → doc / pptx / zip … لا عارض في المتصفح ⇒ تحميل فقط
  * ملاحظة أمنية: 'text' تُقدَّم دائماً كنص عادي مع nosniff — لا HTML مطلقاً.
  */
 export function previewKind(fileName = '', mime = '') {
   const ext = extensionOf(fileName);
   if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) return 'image';
   if (ext === 'pdf') return 'pdf';
-  if (['txt', 'md', 'csv'].includes(ext)) return 'text';
-  if (mime === 'text/plain' || mime === 'text/csv' || mime === 'text/markdown') return 'text';
+  // جداول البيانات: xlsx / xls / csv ⇒ معاينة كجدول (services/spreadsheet.js)
+  if (['xlsx', 'xls', 'csv'].includes(ext)) return 'sheet';
+  if (['txt', 'md'].includes(ext)) return 'text';
+  if (mime === 'text/plain' || mime === 'text/markdown') return 'text';
+  if (mime === 'text/csv' || mime === 'application/vnd.ms-excel' || (mime || '').includes('spreadsheetml')) return 'sheet';
   return 'none';
 }
 

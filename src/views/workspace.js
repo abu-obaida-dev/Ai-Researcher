@@ -337,11 +337,88 @@ function renderStorageBar(summary) {
 }
 
 /**
- * صفحة معاينة ملف (1E): تعرض الملف داخل الموقع حسب نوعه — صورة أو PDF أو نص.
- * المحتوى النصّي يُطبع مُهرَّباً (escapeHtml) في <pre> — لا HTML من محتوى الملف إطلاقاً،
- * والملفات غير المعروضة (doc/xlsx/zip) تحثّ على التحميل.
+ * معاينة جدول بيانات (xlsx/csv): أزرار للتنقّل بين الأوراق + جدول قابل للتمرير.
+ * كل قيمة خلية تُطبع بـ escapeHtml — لا HTML من محتوى الملف إطلاقاً،
+ * والصف الأول يُعامَل كعناوين أعمدة (مع إبقاء الصف نفسه موجوداً في tbody).
  */
-export function renderFileViewerPage({ account, unread = 0, file, kind, textContent = null, stepTitle = '', missing = false }) {
+function renderSheetPreview({ sheetData, sheetError = '' }) {
+  if (sheetError) return `<div class="alert">${escapeHtml(sheetError)}</div>`;
+  if (!sheetData?.sheets?.length) {
+    return '<div class="notice"><b>الملف فارغ.</b><p>لا توجد بيانات لعرضها في هذا الجدول.</p></div>';
+  }
+
+  const sheets = sheetData.sheets;
+  const sheetId = `sheet-${sheets.length}-${(sheets[0].name || '').replace(/[^\p{L}\p{N}]+/gu, '-').slice(0, 20)}`;
+
+  const tabs = sheets.length > 1
+    ? `<div class="sheet-tabs" role="tablist">
+    ${sheets
+      .map(
+        (sheet, index) =>
+          `<a class="sheet-tab${index === 0 ? ' is-active' : ''}" href="#${sheetId}-${index}">${escapeHtml(sheet.name)}</a>`
+      )
+      .join('\n    ')}
+  </div>`
+    : '';
+
+  const tables = sheets
+    .map((sheet, index) => {
+      const rows = sheet.rows || [];
+      if (!rows.length) {
+        return `<section id="${sheetId}-${index}" class="sheet-panel"><div class="alert">الورقة «${escapeHtml(sheet.name)}» فارغة.</div></section>`;
+      }
+
+      const width = rows.reduce((max, row) => Math.max(max, row.length), 0);
+      const head = `<tr>${Array.from({ length: width }, (_, col) => `<th>${escapeHtml(rows[0][col] ?? '')}</th>`).join('')}</tr>`;
+      const body = rows
+        .slice(1)
+        .map(
+          (row) =>
+            `<tr>${Array.from({ length: width }, (_, col) => {
+              const value = row[col] ?? '';
+              return `<td${value === '' ? ' class="is-empty"' : ''}>${escapeHtml(value)}</td>`;
+            }).join('')}</tr>`
+        )
+        .join('\n      ');
+
+      return `<section id="${sheetId}-${index}" class="sheet-panel">
+    <div class="sheet-wrap">
+      <table class="sheet-table">
+        <thead>${head}</thead>
+        <tbody>
+      ${body}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted">الورقة «${escapeHtml(sheet.name)}» · ${Math.max(rows.length - 1, 0)} صف${sheet.truncated ? ' (عُرض أول 200 صف فقط)' : ''}</p>
+  </section>`;
+    })
+    .join('\n  ');
+
+  const hiddenSheets = sheetData.truncated ? '<p class="muted">الملف يحتوي أوراقاً إضافية لم تُعرض.</p>' : '';
+
+  return `<div class="file-preview file-preview--sheet">${tabs}
+  ${tables}
+  ${hiddenSheets}
+</div>`;
+}
+
+/**
+ * صفحة معاينة ملف (1E): تعرض الملف داخل الموقع حسب نوعه — صورة أو PDF أو نص أو جدول.
+ * المحتوى النصّي يُطبع مُهرَّباً (escapeHtml) في <pre> — لا HTML من محتوى الملف إطلاقاً،
+ * والملفات غير المعروضة (doc/pptx/zip) تحثّ على التحميل.
+ */
+export function renderFileViewerPage({
+  account,
+  unread = 0,
+  file,
+  kind,
+  textContent = null,
+  sheetData = null,
+  sheetError = '',
+  stepTitle = '',
+  missing = false
+}) {
   const actions = `<div class="links">
   <a class="btn btn-quiet" href="/files">${icon('file', 'icon-sm')} كل ملفياتي</a>
   <a class="btn btn-primary" href="/files/${escapeHtml(file.id)}/raw">${icon('download', 'icon-sm')} تحميل</a>
@@ -374,10 +451,12 @@ export function renderFileViewerPage({ account, unread = 0, file, kind, textCont
     preview = `<pre class="file-preview file-preview--text" dir="auto">${escapeHtml(textContent)}</pre>`;
   } else if (kind === 'text') {
     preview = '<div class="alert">الملف نصي لكنه أكبر من حد المعاينة — حمّله لعرضه كاملاً.</div>';
+  } else if (kind === 'sheet') {
+    preview = renderSheetPreview({ sheetData, sheetError });
   } else {
     preview = `<div class="notice">
   <b>لا يعرض المتصفح هذا النوع داخل الصفحة.</b>
-  <p>حمّل الملف وافتحه في برنامجه (Word / Excel / PowerPoint).</p>
+  <p>حمّل الملف وافتحه في برنامجه (Word / PowerPoint).</p>
 </div>`;
   }
 

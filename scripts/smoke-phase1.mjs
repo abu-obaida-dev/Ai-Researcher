@@ -7,6 +7,7 @@ import { createSessionCookie, SESSION_COOKIE_NAME } from '../src/auth/google.js'
 import { pool } from '../src/db/client.js';
 import { deleteFile, filesSummary, saveUpload } from '../src/services/files.js';
 import { saveStorageLimits, storageLimits } from '../src/services/settings.js';
+import ExcelJS from 'exceljs';
 
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:3000';
 const results = [];
@@ -267,19 +268,72 @@ async function testFiles(userId, cookie) {
   const textRaw = await fetch(`${BASE}/files/${textId}/raw?inline=1`, { headers: { cookie } });
   check('1E النص يُقدَّم text/plain لا text/html', (textRaw.headers.get('content-type') || '').startsWith('text/plain'));
 
-  // ملف غير معروض (xlsx) ⇒ لا زر «عرض» بل تحميل فقط
-  const xlsxUpload = new FormData();
-  xlsxUpload.append('title', 'جدول بيانات');
-  xlsxUpload.append(
+  // جدول Excel حقيقي ⇒ معاينة كجدول داخل الصفحة
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('النتائج');
+  sheet.addRow(['الطالب', 'الدرجة', 'التقدير']);
+  sheet.addRow(['أحمد', 90, 'ممتاز']);
+  sheet.addRow(['<script>alert(1)</script>', 55, 'جيد']);
+  workbook.addWorksheet('ورقة ثانية').addRow(['صف واحد']);
+  const xlsxBuffer = await workbook.xlsx.writeBuffer();
+
+  const sheetForm = new FormData();
+  sheetForm.append('title', 'جدول الدرجات');
+  sheetForm.append(
     'file',
-    new Blob(['PK'], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
-    'sheet.xlsx'
+    new Blob([xlsxBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+    'grades.xlsx'
   );
-  await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: xlsxUpload, redirect: 'manual' });
-  const listNow = await call('/files', { cookie });
-  const xlsxView = await call(`/files/${(await pool.query("SELECT id FROM files WHERE user_id = $1 AND title = 'جدول بيانات' ORDER BY created_at DESC LIMIT 1", [userId])).rows[0].id}/view`, { cookie });
-  check('1E ملف Excel: صفحة بلا معاينة + إرشاد للتحميل', xlsxView.ok && xlsxView.text.includes('لا يعرض المتصفح هذا النوع'));
-  check('1E زر «عرض» لا يظهر لغير المعروض', !listNow.text.includes('لا يعرض المتصفح'));
+  const sheetRes = await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: sheetForm, redirect: 'manual' });
+  const sheetId = (
+    await pool.query("SELECT id FROM files WHERE user_id = $1 AND title = 'جدول الدرجات' ORDER BY created_at DESC LIMIT 1", [userId])
+  ).rows[0]?.id;
+  check('1E رفع ملف xlsx', sheetRes.status === 303 && Boolean(sheetId));
+
+  const sheetView = await call(`/files/${sheetId}/view`, { cookie });
+  check(
+    '1E معاينة Excel: جدول بأسماء الأعمدة',
+    sheetView.ok && sheetView.text.includes('sheet-table') && sheetView.text.includes('الطالب') && sheetView.text.includes('أحمد')
+  );
+  check('1E معاينة Excel: تنقّل بين الأوراق', sheetView.text.includes('النتائج') && sheetView.text.includes('ورقة ثانية'));
+  check('1E خلايا Excel مُهرَّبة (لا تنفيذ سكربت)', sheetView.text.includes('&lt;script&gt;') && !sheetView.text.includes('<script>alert'));
+  check('1E أرقام Excel تُعرض كنص', sheetView.text.includes('90') && sheetView.text.includes('ممتاز'));
+  check('1E زر «عرض» يظهر لملف Excel', (await call('/files', { cookie })).text.includes(`/files/${sheetId}/view`));
+
+  // xlsx تالف ⇒ رسالة عربية مفهومة بدل انهيار الخادم
+  const brokenForm = new FormData();
+  brokenForm.append('title', 'جدول تالف');
+  brokenForm.append(
+    'file',
+    new Blob(['ليس ملف excel'], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+    'broken.xlsx'
+  );
+  await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: brokenForm, redirect: 'manual' });
+  const brokenId = (
+    await pool.query("SELECT id FROM files WHERE user_id = $1 AND title = 'جدول تالف' ORDER BY created_at DESC LIMIT 1", [userId])
+  ).rows[0].id;
+  check('1E xlsx تالف: رسالة خطأ مفهومة', (await call(`/files/${brokenId}/view`, { cookie })).text.includes('تعذّرت قراءة الملف'));
+
+  // csv ⇒ نفس معاينة الجدول
+  const csvForm = new FormData();
+  csvForm.append('title', 'قائمة csv');
+  csvForm.append('file', new Blob(['الاسم,الدرجة\nأحمد,90'], { type: 'text/csv' }), 'data.csv');
+  await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: csvForm, redirect: 'manual' });
+  const csvId = (
+    await pool.query("SELECT id FROM files WHERE user_id = $1 AND title = 'قائمة csv' ORDER BY created_at DESC LIMIT 1", [userId])
+  ).rows[0].id;
+  check('1E معاينة CSV كجدول', (await call(`/files/${csvId}/view`, { cookie })).text.includes('الدرجة'));
+  // ملف غير معروض (zip) ⇒ إرشاد تحميل بلا معاينة
+  const zipUpload = new FormData();
+  zipUpload.append('title', 'أرشيف مضغوط');
+  zipUpload.append('file', new Blob(['PKfake'], { type: 'application/zip' }), 'bundle.zip');
+  await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: zipUpload, redirect: 'manual' });
+  const zipRow = await pool.query(
+    "SELECT id FROM files WHERE user_id = $1 AND title = 'أرشيف مضغوط' ORDER BY created_at DESC LIMIT 1",
+    [userId]
+  );
+  const zipView = await call(`/files/${zipRow.rows[0].id}/view`, { cookie });
+  check('1E ملف zip: إرشاد تحميل (لا معاينة)', zipView.ok && zipView.text.includes('لا يعرض المتصفح هذا النوع'));
 
   const del = await call(`/files/${file.id}/delete`, { method: 'POST', cookie, expect: [303] });
   check('1E حذف الملف (303)', del.ok && del.location.includes('ok=file_deleted'), del.location);

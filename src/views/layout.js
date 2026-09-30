@@ -577,9 +577,36 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   font-size: 12.5px; line-height: 1.9; color: var(--ink);
   font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
 }
+/* معاينة جدول بيانات (xlsx/csv) */
+.file-preview--sheet { display: grid; gap: 10px; }
+.sheet-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.sheet-tab {
+  padding: 6px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+  background: var(--mist-soft); color: var(--ink-70); border: 1px solid transparent;
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sheet-tab.is-active { background: var(--ink); color: var(--paper); }
+.sheet-panel { display: none; }
+.sheet-panel:target { display: block; }
+.file-preview--sheet .sheet-panel:first-of-type { display: block; }
+.sheet-wrap {
+  max-height: 72vh; overflow: auto; border: 1px solid var(--mist); border-radius: 10px;
+  background: #fff;
+}
+.sheet-table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; font-size: 12.5px; }
+.sheet-table th, .sheet-table td {
+  padding: 8px 12px; border-bottom: 1px solid var(--mist); border-left: 1px solid var(--mist);
+  text-align: start; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis;
+}
+.sheet-table th { background: var(--mist-soft); font-weight: 700; position: sticky; top: 0; z-index: 1; }
+.sheet-table td.is-empty { background: var(--mist-soft); }
+.sheet-table tr:hover td { background: var(--mist-soft); }
+.sheet-table tr:nth-child(even) td { background: rgba(15, 40, 62, 0.02); }
+
 @media (max-width: 900px) {
   .file-viewer { grid-template-columns: minmax(0, 1fr); }
   .file-preview--pdf iframe { height: 62vh; }
+  .sheet-wrap { max-height: 62vh; }
 }
 
 .storage-bar { display: grid; gap: 7px; }
