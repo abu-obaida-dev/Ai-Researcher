@@ -31,13 +31,18 @@ for (const provider of status) {
     console.log(`${label} ${warn('غير مُعدّ — لا مفتاح في .env')}`);
     continue;
   }
-  const probe = await probeProvider(provider.key);
+  const probe = await probeProvider(provider.key, { perKey: true });
+  const keyMarks = (probe.keys || [])
+    .map((entry) => (entry.ok ? `${ok('✔')}#${entry.position}` : `${bad('✘')}#${entry.position} ${entry.status || ''}`))
+    .join('  ');
+
   if (probe.ok) {
     working += 1;
-    console.log(ok(`✔ ${label} يعمل خلال ${probe.ms}ms — «${probe.text}»`));
+    console.log(ok(`✔ ${label} ${probe.ms}ms — «${probe.text}»  ${keyMarks}`));
   } else {
     const code = probe.status ? `HTTP ${probe.status}` : 'بلا استجابة';
     console.log(bad(`✘ ${label} ${code} — ${probe.reason}`));
+    console.log(`     ${keyMarks}`);
   }
 }
 

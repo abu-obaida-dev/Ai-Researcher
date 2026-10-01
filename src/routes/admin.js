@@ -149,7 +149,7 @@ router.get('/providers', (req, res) =>
       const shouldProbe = ['1', 'true', 'yes'].includes(String(req.query.probe || '').toLowerCase());
 
       const probes = shouldProbe
-        ? await Promise.all(status.filter((item) => item.configured).map((item) => probeProvider(item.key, { timeoutMs: 25000 })))
+        ? await Promise.all(status.filter((item) => item.configured).map((item) => probeProvider(item.key, { timeoutMs: 25000, perKey: true })))
         : [];
 
       return {

@@ -76,18 +76,22 @@ curl -s http://localhost:3000/api/health
 - [x] **1G شخصية المشرف + التسعير الفعلي + الذاكرة + الملفات:** `supervisor-prompt.js` (شخصية Zena بأقسام شرطية)
       + `supervisor-context.js` (١٢ متغيّراً من القاعدة) + `supervisor-memory.js` + `tokens.js` (حجز ← نداء ← تسوية)
       + وسم `[[strike]]` بلا استدعاء مصنّف + وضع المناقشة + إرفاق ملفات (٣ بحدّ ٤٠KB)
-- [x] **1H مناعة المزوّدين:** تبديل النماذج داخل المفتاح (`AI_MODEL_*` قائمة) + طلب مموَّه بالتوازي
-      (`AI_HEDGE_MS`) + خروج المزوّد الفاشل ١٠ دقائق + لا إعادة محاولة للأخطاء الدائمة
-      + `npm run doctor` و`/admin/providers` لتشخيص السبب الحقيقي (402/403/429/503) + `npm run set-admin`
+- [x] **1H مناعة المزوّدين:** مفاتيح متعدّدة لكل مزوّد (`*_API_KEYS`) + تبديل النماذج داخل المفتاح
+      (`AI_MODEL_*` قائمة) + طلب مموَّه بالتوازي (`AI_HEDGE_MS`) + خروج **كل مفتاح** على حدة ١٠ دقائق
+      + لا إعادة محاولة للأخطاء الدائمة + مزوّد **Groq** (gsk_) غير Grok (xai_)
+      + `npm run doctor` و`/admin/providers` لتشخيص السبب الحقيقي لكل مفتاح (402/403/429/503)
+      + `npm run set-admin`
 - [x] **المصطلح:** «توكنز» ← «نقاط» في كل واجهة الموقع (أسماء الأعمدة بقيت `tokens_*` عمداً)
 - [x] **اختبار دخان للمرحلة الأولى:** `scripts/smoke-phase1.mjs` (`npm run smoke:phase1`)
       (1D/1E/1F/1G/1H + الحماية + رفض أنواع الملفات + عزل ملفات المستخدمين) — نتيجته الآن 136/136
 
-### ⚠️ مفتاح يحتاج شحناً من صاحب المشروع
-- [ ] **OpenRouter 402:** «can only afford 210 tokens» — الحساب بلا رصيد كافٍ. الشحن:
-      https://openrouter.ai/settings/credits  (الموقع يعمل الآن على Gemini وحده)
-- [ ] **Grok 403:** «newly created team doesn't have any credits or licenses» — اشحن الفريق:
-      https://console.x.ai/team  (وإلا يخرج المزوّد من الدوران كل ١٠ دقائق بلا فائدة)
+### ⚠️ مفاتيح تحتاج شحناً من صاحب المشروع
+- [ ] **OpenRouter — المفتاح القديم (#2):** «can only afford 210 tokens» بلا رصيد كافٍ. إما اشحنه
+      (https://openrouter.ai/settings/credits) أو احذفه من `OPENROUTER_API_KEYS` — المفتاح الجديد (#1) يعمل،
+      والكود يتخطّى القديم تلقائياً ١٠ دقائق كل مرة بلا أثر.
+- [ ] **Grok (xAI) 403:** «newly created team doesn't have any credits or licenses» — اشحن الفريق
+      https://console.x.ai/team أو احذف `GROK_API_KEY` (الموقع لا يحتاجه: ٤ مزوّدات أخرى تعمل).
+      **انتبه للاسم:** ما أُضيف هو **Groq** (groq.com) بمفتاح `gsk_`، وهو مختلف تماماً عن **Grok** (xai.com).
 
 ### 🧑‍🏫 P2 — الأدوار + ربط المشرف
 - [ ] جدول `roles`/`role_permissions` + بذرة (user / researcher / supervisor / admin) + ترقية `syncUserRole`

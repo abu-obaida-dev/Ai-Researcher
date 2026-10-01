@@ -129,7 +129,7 @@ export function renderChatPage({
 
   const providerWarning = providers.length
     ? ''
-    : `<div class="alert chat-flash"><b>لا يوجد مزوّد ذكاء اصطناعي مفعّل.</b> أضف أحد المفاتيح <code>OPENROUTER_API_KEY</code> أو <code>GEMINI_API_KEY</code> أو <code>GROK_API_KEY</code> في ملف <code>.env</code> ثم أعد تشغيل الخادم.</div>`;
+    : `<div class="alert chat-flash"><b>لا يوجد مزوّد ذكاء اصطناعي مفعّل.</b> أضف أحد المفاتيح <code>OPENROUTER_API_KEY</code> أو <code>GROQ_API_KEY</code> أو <code>GEMINI_API_KEY</code> في ملف <code>.env</code> ثم أعد تشغيل الخادم.</div>`;
 
   const stepContext = stepKey
     ? `<div class="chat-context">${icon('clipboard', 'icon-sm')} <span>السياق: ${escapeHtml(

@@ -94,23 +94,35 @@ export function renderAdminProviders({ status = [], probed = false, adminToken =
   const live = probed ? `${query ? '&' : '?'}probe=1` : `${query}${query ? '&' : '?'}probe=1`;
 
   const rows = status.map((item) => {
-      const probe = item.probe;
-      let badge = '<span class="badge badge-active">جاهز</span>';
-      if (!item.configured) badge = '<span class="badge">غير مُعدّ</span>';
-      else if (probe && !probe.ok) badge = `<span class="badge badge-error">متوقّف${probe.status ? ` · ${probe.status}` : ''}</span>`;
-      else if (item.down) badge = '<span class="badge badge-error">خارج الدوران</span>';
-      else if (probe && probe.ok) badge = '<span class="badge badge-active">يعمل الآن</span>';
+    const probe = item.probe;
+    let badge = '<span class="badge badge-active">جاهز</span>';
+    if (!item.configured) badge = '<span class="badge">غير مُعدّ</span>';
+    else if (probe && !probe.ok) badge = `<span class="badge badge-error">متوقّف${probe.status ? ` · ${probe.status}` : ''}</span>`;
+    else if (item.down) badge = '<span class="badge badge-error">خارج الدوران</span>';
+    else if (probe && probe.ok) badge = '<span class="badge badge-active">يعمل الآن</span>';
 
-      const backIn = item.down && item.backInMs ? ` · يعود بعد ${Math.ceil(item.backInMs / 60000)} دقيقة` : '';
-      const models = (item.models || []).map((model) => escapeHtml(model)).join(' ← ');
-      const detail = probe && !probe.ok ? probe.reason : item.reason || '';
+    const backIn = item.down && item.backInMs ? ` · يعود بعد ${Math.ceil(item.backInMs / 60000)} دقيقة` : '';
+    const models = (item.models || []).map((model) => escapeHtml(model)).join(' ← ');
+    const detail = probe && !probe.ok ? probe.reason : item.reason || '';
+    const keyCount = item.keyCount > 1 ? ` · ${item.keyCount} مفاتيح` : '';
 
-      return `
-      <td class="strong">${escapeHtml(item.label || item.key)}</td>
-      <td>${badge}</td>
-      <td><span class="mono small">${models || '—'}</span></td>
-      <td>${escapeHtml(detail || '—')}${escapeHtml(backIn)}</td>
-      <td>${probe ? `${probe.ms}ms` : '—'}</td>`;
+    // سطر لكل مفتاح: المفتاح الثاني قد ينفد رصيده بينما الأول سليم.
+    const keyLines = (item.keyStates || []).map((state) => {
+      const probed = (probe?.keys || []).find((entry) => entry.position === state.position);
+      const mark = probed ? (probed.ok ? '✔' : '✘') : state.down ? '⏸' : '·';
+      const note = probed ? probed.reason : state.reason || '';
+      const tail = state.down && state.backInMs ? ` (يعود بعد ${Math.ceil(state.backInMs / 60000)} د)` : '';
+      return `<li><b>${mark} مفتاح ${state.position}</b> — ${escapeHtml(note || 'لم يُفحص')}${escapeHtml(tail)}</li>`;
+    });
+
+    return `
+    <td class="strong">${escapeHtml(item.label || item.key)}</td>
+    <td>${badge}</td>
+    <td><span class="mono small">${models || '—'}</span></td>
+    <td>${escapeHtml(detail || '—')}${escapeHtml(backIn)}${escapeHtml(keyCount)}
+      ${keyLines.length ? `<ul class="small muted" style="margin:6px 0 0;padding-inline-start:18px">${keyLines.join('')}</ul>` : ''}
+    </td>
+    <td>${probe ? `${probe.ms}ms` : '—'}</td>`;
   });
 
   const body = `
@@ -127,7 +139,7 @@ export function renderAdminProviders({ status = [], probed = false, adminToken =
   </div>
   <div class="card mt-16">
     ${renderTable({
-      columns: ['المزوّد', 'الحالة', 'النماذج (بترتيب التبديل)', 'السبب', 'زمن الرد'],
+      columns: ['المزوّد', 'الحالة', 'النماذج (بترتيب التبديل)', 'السبب + كل مفتاح', 'زمن الرد'],
       rows,
       emptyMessage: 'لا يوجد مزوّدات.'
     })}
@@ -139,6 +151,11 @@ export function renderAdminProviders({ status = [], probed = false, adminToken =
       <li><b>403</b> لا ترخيص على فريق xAI — اشحنه من console.x.ai/team.</li>
       <li><b>429</b> تجاوزت حصة المفتاح أو حدّ معدّله.</li>
       <li><b>503</b> النموذج مزدحم — يتغيّر بين النماذج تلقائياً بقائمة النماذج.</li>
+      </ul>
+      <p class="muted">كل مزوّد يقرأ مفتاحه من <code>NAME_API_KEYS</code> (مفاتيح مفصولة بفواصل) أو
+        <code>NAME_API_KEY</code> (مفتاح واحد). نفاد رصيد مفتاح لا يوقف الموقع: يخرج ذلك المفتاح وحده
+        من الدوران ١٠ دقائق ويعمل الباقي، ثم يعود وحده بعد شحنه بلا إعادة تشغيل.</p>
+      <ul class="muted">
     </ul>
   </div>`;
 

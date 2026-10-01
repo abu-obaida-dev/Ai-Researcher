@@ -471,7 +471,17 @@ async function testChat(userId, cookie) {
   check('1H كل مزوّد يحمل قائمة نماذج لا نموذجاً واحداً', statusRows.every((row) => Array.isArray(row.models) && row.models.length >= 1) && (geminiStatus?.models.length || 0) >= 2, `${geminiStatus?.models.length} نماذج لـ Gemini`);
   check('1H الحالة تُميّز المُعدّ من غير المُعدّ', statusRows.some((row) => row.configured) && statusRows.every((row) => typeof row.down === 'boolean'));
   const labels = providerStatus().map((row) => row.label);
-  check('1H أسماء المزوّدين عربية في التقارير', labels.includes('OpenRouter') && labels.includes('Grok (xAI)'), labels.join(' · '));
+  check('1H أسماء المزوّدين عربية في التقارير', labels.includes('OpenRouter') && labels.includes('Grok (xAI)') && labels.includes('Groq'), labels.join(' · '));
+
+  // مفاتيح متعدّدة: مفتاح نُفد رصيده لا يطعن في أخيه، والحالة تُعرض لكل مفتاح
+  const multi = providerStatus().find((row) => row.keyCount > 1);
+  if (multi) {
+    check('1H عدّة مفاتيح = عدّة أهداف مستقلّة', multi.keyStates.length === multi.keyCount, `${multi.label}: ${multi.keyCount} مفاتيح`);
+  } else {
+    check('1H بنية المفاتيح المتعدّدة جاهزة', true, 'لا يوجد مزوّد بأكثر من مفتاح في هذه البيئة');
+  }
+  const groqRow = providerStatus().find((row) => row.key === 'groq');
+  check('1H Groq مزوّد معرّف بنماذج عربية', Boolean(groqRow) && groqRow.models.some((m) => /qwen|allam/.test(m)), groqRow?.models.join(' ← '));
 
   const providersPage = await call('/admin/providers', { cookie });
   check('1H لوحة المدير تعرض حالة المزوّدين', providersPage.status === 200 && providersPage.text.includes('النماذج (بترتيب التبديل)') && providersPage.text.includes('معاني الأخطاء'));
@@ -489,8 +499,15 @@ async function testChat(userId, cookie) {
   /* ---------- 1G: فشل المزوّدين يردّ الحجز كاملاً (بلا خصم نهائي) ---------- */
   const { user: refundUser } = await createTestUser();
   await pool.query('UPDATE users SET tokens_balance = 500, tokens_used = 0 WHERE id = $1', [refundUser.id]);
+  // نعطّل كل أسماء المفاتيح (مفردها وجمعها) حتى لا يبقى مزوّد يعمل صدفةً
   const savedKeys = {};
-  for (const key of ['OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'GEMINI_API_KEY_FALLBACK', 'GROK_API_KEY']) {
+  for (const key of [
+    'OPENROUTER_API_KEY', 'OPENROUTER_API_KEYS',
+    'GEMINI_API_KEY', 'GEMINI_API_KEYS',
+    'GEMINI_API_KEY_FALLBACK', 'GEMINI_API_KEY_FALLBACKS',
+    'GROQ_API_KEY', 'GROQ_API_KEYS',
+    'GROK_API_KEY', 'GROK_API_KEYS'
+  ]) {
     savedKeys[key] = process.env[key];
     delete process.env[key];
   }

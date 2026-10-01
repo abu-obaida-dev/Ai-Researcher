@@ -1,10 +1,16 @@
 /**
- * طبقة مزوّدي الذكاء الاصطناعي (1F).
+ * طبقة مزوّدي الذكاء الاصطناعي (1F + 1H).
  *
- * سلسلة المزوّدين بالترتيب: OpenRouter ثم Gemini ثم مفتاح Gemini الاحتياطي ثم Grok.
- * أول مزوّد يستجيب بنجاح هو الذي يُستخدم، وكل محاولة (ناجحة أو فاشلة) تُسجَّل في
- * جدول ai_requests للمراقبة. لا مفاتيح سرية في الواجهة إطلاقاً — الواجهة تعرض
- * أسماء المزوّدين المفعّلة فقط عبر availableProviders().
+ * كل مزوّد قد يحمل **عدّة مفاتيح** (مفصولة بفواصل في `NAME_API_KEYS`، أو مفتاح
+ * واحد في `NAME_API_KEY` كسقوط متوافق). كل (مزوّد × مفتاح) «هدف» مستقل في
+ * السباق، فإذا نفد رصيد مفتاح انتقل الطلب لغيره بلا انتظار.
+ *
+ * ثلاثة خطوط دفاع تتراكم: تبديل النماذج داخل المزوّد، ثم السباق المموَّه
+ * (hedged requests) على مستوى الأهداف، ثم إخراج الفاشل من الدوران مؤقّتاً.
+ *
+ * أول من يردّ بنجاح هو المعتمد، وكل محاولة (ناجحة أو فاشلة) تُسجَّل في جدول
+ * ai_requests. لا مفاتيح سرية في الواجهة إطلاقاً — الواجهة تعرض أسماء المزوّدين
+ * المفعّلة وعدد مفاتيحها فقط.
  */
 
 const TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 60000);
@@ -64,21 +70,71 @@ function isUnhealthy(key) {
   return true;
 }
 
-/** حالة كل المزوّدين للوحة الإدارة وأداة الفحص. */
+/** أسماء عربية للمزوّدين تُعرض في الواجهة والتقارير. */
+export const PROVIDER_LABELS = {
+  openrouter: 'OpenRouter',
+  groq: 'Groq',
+  gemini: 'Gemini',
+  'gemini-fallback': 'Gemini احتياطي',
+  grok: 'Grok (xAI)'
+};
+
+/**
+ * مفاتيح مزوّد: `NAME_API_KEYS` (قائمة) أولاً ثم `NAME_API_KEY` (واحد).
+ *   OPENROUTER_API_KEYS=sk-or-AAA,sk-or-BBB
+ * عدد المفاتيح مقصود أن يكون أكثر من واحد: نفاد رصيد مفتاح يجب ألا يوقف الموقع.
+ */
+function keysOf(provider) {
+  const raw = process.env[`${provider.envKey}S`] ?? process.env[provider.envKey] ?? '';
+  return String(raw)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+/**
+ * الأهداف = (كل مزوّد × كل مفتاح فيه). هي وحدات السباق في runSupervisor،
+ * والصحّة تُتابَع لكل هدف على حدة: مفتاح نُفد رصيده لا يُطعن في أخيه.
+ */
+function activeTargets() {
+  const targets = [];
+  for (const provider of PROVIDERS) {
+    keysOf(provider).forEach((apiKey, position) => {
+      targets.push({ provider, apiKey, id: `${provider.key}#${position + 1}`, position });
+    });
+  }
+  return targets;
+}
+
+/** حالة المزوّدين: مستوى المزوّد (مع عدد المفاتيح) + مستوى كل مفتاح. */
 export function providerStatus() {
   return PROVIDERS.map((provider) => {
-    const configured = Boolean(process.env[provider.envKey]);
-    const health = HEALTH.get(provider.key);
+    const keys = keysOf(provider);
+    const keyStates = keys.map((apiKey, position) => {
+      const id = `${provider.key}#${position + 1}`;
+      const health = HEALTH.get(id);
+      return {
+        id,
+        position: position + 1,
+        down: isUnhealthy(id),
+        reason: health?.reason || null,
+        hard: Boolean(health?.hard),
+        backInMs: health ? Math.max(0, health.until - Date.now()) : 0
+      };
+    });
+
     return {
       key: provider.key,
       label: PROVIDER_LABELS[provider.key] || provider.key,
       model: provider.models[0],
       models: provider.models,
-      configured,
-      down: configured && isUnhealthy(provider.key),
-      reason: health?.reason || null,
-      hard: Boolean(health?.hard),
-      backInMs: health ? Math.max(0, health.until - Date.now()) : 0
+      configured: keys.length > 0,
+      keyCount: keys.length,
+      down: keys.length > 0 && keyStates.every((state) => state.down),
+      keysDown: keyStates.filter((state) => state.down).length,
+      reason: keyStates.find((state) => state.reason)?.reason || null,
+      backInMs: Math.max(0, ...keyStates.map((state) => state.backInMs)),
+      keyStates
     };
   });
 }
@@ -235,6 +291,39 @@ const PROVIDERS = [
     }
   },
   {
+    key: 'groq',
+    envKey: 'GROQ_API_KEY',
+    // qwen3.8-27b سريع جداً (≈٦٦٠ms) وأفضله عربياً بين نماذج Groq؛ ثم بدائل.
+    // نستبعد whisper (صوت) و llama-prompt-guard (تصنيف لا توليد).
+    models: modelList(process.env.AI_MODEL_GROQ, 'qwen/qwen3.8-27b,openai/gpt-oss-20b,allam-2-7b'),
+    async call({ apiKey, models, system, messages, temperature, maxTokens = MAX_TOKENS, signal = null }) {
+      const failures = [];
+      for (const model of models) {
+        try {
+          const data = await callOnce({
+            label: 'Groq',
+            url: 'https://api.groq.com/openai/v1/chat/completions',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+            body: { model, messages: [{ role: 'system', content: system }, ...messages], temperature, max_tokens: maxTokens },
+            model,
+            signal
+          });
+
+          const text = data?.choices?.[0]?.message?.content;
+          if (!text) throw new Error('ردّ فارغ');
+          return { text, model: data?.model || model, usage: data?.usage || null };
+        } catch (error) {
+          failures.push(`${model}: ${error.message.slice(0, 90)}`);
+          if ([401, 402, 403, 404, 422].includes(error.status) || signal?.aborted) break;
+        }
+      }
+      const last = failures.at(-1) || 'بلا تفاصيل';
+      const error = new Error(`Groq فشل على ${models.length} نموذج — ${last}`);
+      error.status = /402|403|401/.test(last) ? 402 : 503;
+      throw error;
+    }
+  },
+  {
     key: 'gemini',
     envKey: 'GEMINI_API_KEY',
     models: modelList(process.env.AI_MODEL_GEMINI, 'gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-flash-latest'),
@@ -267,13 +356,6 @@ const PROVIDERS = [
   }
 ];
 
-/** أسماء عربية للمزوّدين تُعرض في الواجهة والتقارير. */
-export const PROVIDER_LABELS = {
-  openrouter: 'OpenRouter',
-  gemini: 'Gemini',
-  'gemini-fallback': 'Gemini احتياطي',
-  grok: 'Grok (xAI)'
-};
 
 /**
  * فحص مباشر لمزوّد واحد بلا سلسلة التبديل: يناديه بأصغر نداء ممكن.
@@ -281,46 +363,74 @@ export const PROVIDER_LABELS = {
  * سبب تعطّل مزوّد بعينه (رصيد/حصة/ترخيص/اسم نموذج).
  * يرجع { key, ok, status, reason, ms, text }.
  */
-export async function probeProvider(key, { timeoutMs = 30000 } = {}) {
+export async function probeProvider(key, { timeoutMs = 30000, perKey = false } = {}) {
   const provider = PROVIDERS.find((item) => item.key === key);
+  const keys = provider ? keysOf(provider) : [];
+
+  if (!provider) return { key, ok: false, status: 0, reason: 'مزوّد غير معروف', ms: 0, keys: [] };
+  if (!keys.length) return { key, ok: false, status: 0, reason: 'لا مفتاح في .env', ms: 0, keys: [] };
+
   const startedAt = Date.now();
-
-  if (!provider) return { key, ok: false, status: 0, reason: 'مزوّد غير معروف', ms: 0 };
-  if (!process.env[provider.envKey]) return { key, ok: false, status: 0, reason: 'لا مفتاح في .env', ms: 0 };
-
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const keyReports = [];
+  let firstText = '';
+
   try {
-    const result = await provider.call({
-      apiKey: process.env[provider.envKey],
-      models: provider.models,
-      system: 'أجب بكلمة واحدة فقط.',
-      messages: [{ role: 'user', content: 'قل: تم' }],
-      temperature: 0.1,
-      maxTokens: 400,
-      signal: controller.signal
-    });
-    return { key, ok: true, status: 200, reason: 'يعمل', ms: Date.now() - startedAt, text: result.text?.slice(0, 60) || '' };
-  } catch (error) {
-    const failure = classifyFailure(error.status, error.message);
-    const detail = String(error.message || '').replace(/\s+/g, ' ').slice(0, 150);
+    for (const [position, apiKey] of keys.entries()) {
+      try {
+        const result = await provider.call({
+          apiKey,
+          models: provider.models,
+          system: 'أجب بكلمة واحدة فقط.',
+          messages: [{ role: 'user', content: 'قل: تم' }],
+          temperature: 0.1,
+          maxTokens: 400,
+          signal: controller.signal
+        });
+        keyReports.push({ position: position + 1, ok: true, reason: 'يعمل' });
+        if (!firstText) firstText = result.text?.slice(0, 60) || '';
+        // أول مفتاح يعمل يكفي للمدير؛ وperKey يجعله يفحص كل المفاتيح.
+        if (!perKey) {
+          return { key, ok: true, status: 200, reason: 'يعمل', ms: Date.now() - startedAt, text: firstText, keys: keyReports };
+        }
+      } catch (error) {
+        const failure = classifyFailure(error.status, error.message);
+        const detail = String(error.message || '').replace(/\s+/g, ' ').slice(0, 150);
+        keyReports.push({ position: position + 1, ok: false, status: error.status || 0, reason: `${failure.reason}${detail ? ` — ${detail}` : ''}` });
+        if (perKey) continue;
+        break;
+      }
+    }
+
+    // بعد كل المفاتيح: يكفي أن يعمل واحد منها، والبقية مجرّد تفاصيل للمدير.
+    const good = keyReports.filter((report) => report.ok).length;
+    const firstBad = keyReports.find((report) => !report.ok);
+
     return {
       key,
-      ok: false,
-      status: error.status || 0,
-      reason: `${failure.reason}${detail ? ` — ${detail}` : ''}`,
-      ms: Date.now() - startedAt
+      ok: good > 0,
+      status: good > 0 ? 200 : firstBad?.status || 0,
+      reason: good > 0
+        ? `يعمل — ${good}/${keyReports.length} مفتاح`
+        : keyReports.length > 1
+          ? `كل المفاتيح (${keyReports.length}) فاشلة — ${firstBad?.reason || '؟'}`
+          : firstBad?.reason || 'فشل',
+      ms: Date.now() - startedAt,
+      text: firstText,
+      keys: keyReports
     };
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** المزوّدون المفعّلون فعلياً (تظهر أسماؤهم في صفحة الشات). */
+/** المزوّدون المفعّلون فعلياً (تظهر أسماؤهم وعدد مفاتيحهم في صفحة الشات). */
 export function availableProviders() {
-  return PROVIDERS.filter((provider) => Boolean(process.env[provider.envKey])).map((provider) => ({
+  return PROVIDERS.filter((provider) => keysOf(provider).length).map((provider) => ({
     key: provider.key,
     models: provider.models,
+    keyCount: keysOf(provider).length
   }));
 }
 
@@ -344,30 +454,33 @@ async function logRequest({ userId, provider, model, latencyMs, status, error })
 }
 
 /**
- * تنفيذ طلب للمشرف الذكي مع تبديل تلقائي **ومتوازٍ** بين المزوّدين.
+ * تنفيذ طلب للمشرف الذكي عبر سباق **مموَّه** على الأهداف (مزوّد × مفتاح).
  *
- * المنطق: نطلق المزوّد الأول، وبعد AI_HEDGE_MS نطلق الثاني بالتوازي، وهكذا.
- * أول مزوّد يردّ بنجاح هو المعتمد، ويُلغى الباقون فوراً. الفائز دائماً من
- * المتاح فعلاً، فسقوط Gemini أو ازدحامه لا يعني انقطاع الخدمة.
+ * المنطق: نطلق الهدف الأول، وبعد AI_HEDGE_MS نطلق التالي بالتوازي، وهكذا.
+ * أول من يردّ بنجاح هو المعتمد، ويُلغى الباقون فوراً: لا-drop ولا انتظار.
+ * ازدحام Gemini أو نفاد رصيد مفتاح OpenRouter لا يعني انقطاع الخدمة ما دام
+ * هدفٌ واحد حيّ.
  * messages: [{ role: 'user' | 'assistant', content }] بترتيب زمني.
  * maxTokens: سقف طول الردّ (يقلّص الاستهلاك ويفرض قصر الرسالة).
- * يرجع { text, model, provider, usage } — و usage هو الاستهلاك الحقيقي للتسعير.
+ * يرجع { text, model, provider, target, usage } — و usage هو الاستهلاك الحقيقي.
  * يرمي خطأً يحمل code = NO_PROVIDER / PROVIDERS_FAILED.
  */
 export async function runSupervisor({ userId = null, messages, system, temperature = 0.4, maxTokens = MAX_TOKENS } = {}) {
-  const all = PROVIDERS.filter((provider) => Boolean(process.env[provider.envKey]));
-  const configured = all.filter((provider) => !isUnhealthy(provider.key));
+  const all = activeTargets();
+  const targets = all.filter((target) => !isUnhealthy(target.id));
 
   if (!all.length) {
     const error = new Error(
-      'لم يُضبط أي مزوّد ذكاء اصطناعي بعد (OPENROUTER_API_KEY أو GEMINI_API_KEY أو GROK_API_KEY).'
+      'لم يُضبط أي مزوّد ذكاء اصطناعي بعد (OPENROUTER_API_KEY أو GROQ_API_KEY أو GEMINI_API_KEY أو GROK_API_KEY).'
     );
     error.code = 'NO_PROVIDER';
     throw error;
   }
 
-  if (!configured.length) {
-    const error = new Error(`كل المزوّدين متوقّفون الآن: ${all.map((p) => `${p.key} (${HEALTH.get(p.key)?.reason || '؟'})`).join(' · ')}`);
+  if (!targets.length) {
+    const error = new Error(
+      `كل المزوّدين متوقّفون الآن: ${all.map((t) => `${t.id} (${HEALTH.get(t.id)?.reason || '؟'})`).join(' · ')}`
+    );
     error.code = 'PROVIDERS_FAILED';
     throw error;
   }
@@ -375,7 +488,7 @@ export async function runSupervisor({ userId = null, messages, system, temperatu
   const failures = [];
   const controller = new AbortController();
 
-  // وعد يفوز به أول مزوّد ينجح. (Promise.any لا يصلح: يلتقط القائمة لحظة بدئه فقط)
+  // وعد يفوز به أول هدف ينجح. (Promise.any لا يصلح: يلتقط القائمة لحظة بدئه فقط)
   let resolveWinner;
   let rejectWinner;
   const winner = new Promise((resolve, reject) => {
@@ -400,18 +513,19 @@ export async function runSupervisor({ userId = null, messages, system, temperatu
   // إطلاق متدرّج: الأول فوراً، والتالي بعد HEDGE_MS إن لم يسبقه الأول،
   // أو فوراً إن فشل الأول قبل ذلك (لا ننتظر زمناً على مزوّد ميت).
   const launch = () => {
-    const provider = configured[index];
+    const target = targets[index];
     index += 1;
-    if (!provider) return false;
-    attempt(provider);
+    if (!target) return false;
+    attempt(target);
     return true;
   };
 
-  const attempt = async (provider) => {
+  const attempt = async (target) => {
+    const { provider } = target;
     const startedAt = Date.now();
     try {
       const result = await provider.call({
-        apiKey: process.env[provider.envKey],
+        apiKey: target.apiKey,
         models: provider.models,
         system,
         messages,
@@ -421,22 +535,23 @@ export async function runSupervisor({ userId = null, messages, system, temperatu
       });
 
       await logRequest({ userId, provider: provider.key, model: result.model, latencyMs: Date.now() - startedAt, status: 'ok' });
-      finish(resolveWinner, { ...result, provider: provider.key });
+      finish(resolveWinner, { ...result, provider: provider.key, target: target.id });
     } catch (error) {
-      if (settled) return; // أُلغي لأن مزوّداً آخر سبقنا
+      if (settled) return; // أُلغي لأن هدفاً آخر سبقنا
 
-      markUnhealthy(provider.key, classifyFailure(error.status, error.message));
-      failures.push(`${provider.key}: ${error.message}`);
+      // الخروج من الدوران للمفتاح وحده: مفتاحٌ بلا رصيد لا يُطعن في أخيه.
+      markUnhealthy(target.id, classifyFailure(error.status, error.message));
+      failures.push(`${target.id}: ${error.message}`);
       await logRequest({ userId, provider: provider.key, model: provider.models[0], latencyMs: Date.now() - startedAt, status: 'error', error });
-      console.warn(`فشل المزوّد ${provider.key}: ${error.message}`);
+      console.warn(`فشل ${target.id}: ${String(error.message).slice(0, 120)}`);
 
       failed += 1;
       // نرفض فقط بعد أن جُرّب الجميع: فشل مبكّر لا يعني نهاية السباق.
-      if (failed >= configured.length) {
+      if (failed >= targets.length) {
         finish(rejectWinner, new Error('فشلت كل المزوّدين'));
         return;
       }
-      if (index < configured.length) clearInterval(hedgeTimer);
+      if (index < targets.length) clearInterval(hedgeTimer);
       launch(); // التالي فوراً
     }
   };
@@ -450,8 +565,8 @@ export async function runSupervisor({ userId = null, messages, system, temperatu
   try {
     return await winner;
   } catch {
-    for (const provider of configured.slice(index)) {
-      failures.push(`${provider.key}: لم يُطلق (انتهى الدوران)`);
+    for (const target of targets.slice(index)) {
+      failures.push(`${target.id}: لم يُطلق (انتهى الدوران)`);
     }
   }
 
@@ -460,4 +575,3 @@ export async function runSupervisor({ userId = null, messages, system, temperatu
   error.failures = failures;
   throw error;
 }
-
