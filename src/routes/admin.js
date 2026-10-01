@@ -7,10 +7,12 @@ import { saveStorageLimits, storageLimits } from '../services/settings.js';
 import {
   renderAdminHome,
   renderAdminPlans,
+  renderAdminProviders,
   renderAdminSettings,
   renderAdminUsage,
   renderAdminUsers
 } from '../views/admin.js';
+import { probeProvider, providerStatus } from '../services/ai.js';
 
 /**
  * لوحة الإدارة: صفحات HTML مولَّدة على الخادم بديلاً عن واجهة /admin القديمة (React).
@@ -131,6 +133,32 @@ router.get('/', (req, res) =>
       };
     },
     renderAdminHome
+  )
+);
+
+/**
+ * حالة مزوّدي الذكاء الاصطناعي: من يعمل، من متوقّف، ولماذا بالضبط.
+ * ?probe=1 يرسل نداءً صغيراً لكل مزوّد (يستهلك رصيداً ضئيلاً) ليرى المدير
+ * السبب الحقيقي: 402 لا رصيد · 403 لا ترخيص · 429 حصة · 503 ازدحام.
+ */
+router.get('/providers', (req, res) =>
+  renderPage(
+    res,
+    async () => {
+      const status = providerStatus();
+      const shouldProbe = ['1', 'true', 'yes'].includes(String(req.query.probe || '').toLowerCase());
+
+      const probes = shouldProbe
+        ? await Promise.all(status.filter((item) => item.configured).map((item) => probeProvider(item.key, { timeoutMs: 25000 })))
+        : [];
+
+      return {
+        status: status.map((item) => ({ ...item, probe: probes.find((p) => p.key === item.key) || null })),
+        probed: shouldProbe,
+        adminToken: String(req.query.token || '').slice(0, 200)
+      };
+    },
+    renderAdminProviders
   )
 );
 

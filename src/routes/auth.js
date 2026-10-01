@@ -158,7 +158,7 @@ router.get('/auth/google/callback', async (req, res) => {
     if (user.is_new) {
       notifyUser(user.id, {
         title: 'أهلاً بك في Zena AI',
-        body: `رصيدك الترحيبي ${user.tokens_granted} توكن — أكمل ملفك البحثي وابدأ مع المشرف الذكي.`,
+        body: `رصيدك الترحيبي ${user.tokens_granted} نقطة — أكمل ملفك البحثي وابدأ مع المشرف الذكي.`,
         kind: 'welcome',
         url: user.onboarding_complete ? '/dashboard' : '/onboarding'
       }).catch(() => {});

@@ -10,7 +10,7 @@ import { escapeHtml, renderLayout } from './layout.js';
  * - زر «محادثة جديدة» في أعلى قائمة المحادثات بالسايدبار (لا مكان له داخل الكارت).
  * - زر الإرسال بجانب مربع الكتابة مباشرة (وليس تحته).
  * - بلا اقتراحات داخل الكارت: «محادثة جديدة» تبدأ محادثة نظيفة.
- * - الحذف لا يلمس التوكنز: الاستهلاك يُسجَّل في usage_logs وقت كل رسالة،
+ * - الحذف لا يلمس النقاط: الاستهلاك يُسجَّل في usage_logs وقت كل رسالة،
  *   وحذف المحادثة يحذف المحادثة ورسائلها فقط (لا رصيد ولا سجل استهلاك).
  */
 
@@ -61,7 +61,7 @@ function renderConversations(conversations, activeId) {
   return `<div class="chat-nav">
   <a class="btn btn-primary btn-block" href="/chat">${icon('plus', 'icon-sm')} محادثة جديدة</a>
   ${list}
-  <p class="chat-side-note">حذف المحادثة لا يُرجِع التوكنز المستهلكة.</p>
+  <p class="chat-side-note">حذف المحادثة لا يُرجِع النقاط المستهلكة.</p>
 </div>`;
 }
 

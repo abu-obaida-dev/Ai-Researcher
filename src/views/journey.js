@@ -49,7 +49,7 @@ function stepLinks(step) {
 </div>`;
 }
 
-/** بطاقة خطوة واحدة: حالتها + ملاحظة المخرجات + سعر التوكنز + روابطها. */
+/** بطاقة خطوة واحدة: حالتها + ملاحظة المخرجات + سعر النقاط + روابطها. */
 function renderStep(step, statuses) {
   const doneMark = step.status === 'done' ? `<span class="step-check">${icon('check', 'icon-sm')}</span>` : '';
   const completed = step.completedAt ? `تُمت في ${escapeHtml(formatDateTime(step.completedAt))}` : '';
@@ -65,7 +65,7 @@ function renderStep(step, statuses) {
       <span class="badge ${step.required ? 'badge-plan' : 'badge-off'}">${step.required ? 'إلزامية' : 'اختيارية'}</span>
       <span class="badge badge-active" title="سعر الخطوة من قائمة الأسعار">${escapeHtml(step.costLabel)} · ${escapeHtml(
         formatNumber(step.cost)
-      )} توكن</span>
+      )} نقطة</span>
     </div>
   </header>
 

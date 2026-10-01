@@ -20,7 +20,7 @@ import { renderChatPage } from '../views/chat.js';
  * - GET  /chat                    صفحة المحادثة (?c=id لعرض محادثة، ?step= للسياق)
  * - POST /chat                    إرسال رسالة (تُحفظ في messages ويُسجَّل الاستهلاك)
  * - POST /chat/:id/delete         حذف محادثة
- * التوكنز تُخصم ذرّياً داخل services/chat.js ولا يوجد أي تسعير في الواجهة.
+ * النقاط تُخصم ذرّياً داخل services/chat.js ولا يوجد أي تسعير في الواجهة.
  */
 const router = express.Router();
 
@@ -30,7 +30,7 @@ const FLASH = {
   empty: { type: 'error', message: 'اكتب رسالتك أولاً.' },
   no_tokens: { type: 'error', message: 'رصيدك لا يكفي لهذه الرسالة — اشترِ باقة أو ابدأ محادثة جديدة أقصر.' },
   no_provider: { type: 'error', message: 'لم يُضبط أي مزوّد ذكاء اصطناعي بعد — راجع ملف .env.' },
-  failed: { type: 'error', message: 'تعذّر الوصول للمشرف الذكي الآن — توكناتك أُعيدت لرصيدك، أعد المحاولة.' },
+  failed: { type: 'error', message: 'تعذّر الوصول للمشرف الذكي الآن — نقاطك أُعيدت لرصيدك، أعد المحاولة.' },
   bad_step: { type: 'error', message: 'الخطوة المحددة غير موجودة في مسارك.' },
   missing_conversation: { type: 'error', message: 'المحادثة غير موجودة.' },
   mode_normal: { type: 'ok', message: 'رجعت المحادثة إلى وضع الإرشاد.' },

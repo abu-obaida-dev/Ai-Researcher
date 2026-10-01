@@ -39,8 +39,10 @@ const BRAND = {
 const NAV_ITEMS = [
   { href: '/admin', label: 'نظرة عامة', key: 'home' },
   { href: '/admin/users', label: 'الباحثون', key: 'users' },
+  { href: '/admin/providers', label: 'المزوّدون', key: 'providers' },
   { href: '/admin/plans', label: 'الباقات', key: 'plans' },
-  { href: '/admin/usage', label: 'الاستهلاك', key: 'usage' }
+  { href: '/admin/usage', label: 'الاستهلاك', key: 'usage' },
+  { href: '/admin/settings', label: 'الإعدادات', key: 'settings' }
 ];
 
 /**
@@ -167,6 +169,9 @@ tbody tr:hover { background: var(--paper); }
 .badge-off { background: var(--ink-05); color: var(--slate); }
 .badge-admin { background: var(--apricot-soft); color: var(--ink); }
 .badge-plan { background: var(--mist-soft); color: var(--ink); }
+.badge-error { background: #fdecea; color: #a03024; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.small { font-size: 12px; }
 
 /* ==== عناصر التحكم ==== */
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
@@ -780,7 +785,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .app-nav a.danger:hover { background: var(--apricot-soft); color: var(--ink); }
 
 /* ============ مساحة عمل الباحث: مسار البحث والمراجع والمفكرة والملفات والشات ============ */
-/* ترويسة بطاقة: العنوان يمين وزر إجراء يسار (مثل «إضافة توكنز» في الإحصائية) */
+/* ترويسة بطاقة: العنوان يمين وزر إجراء يسار (مثل «إضافة نقاط» في الإحصائية) */
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .card-head h2 { margin: 0; }
 .btn-sm { padding: 7px 12px; font-size: 12.5px; }
@@ -1065,7 +1070,7 @@ function renderAppTopbar(account, unread = 0) {
         </div>
       </div>
       <a class="app-user" href="/dashboard" title="لوحتي">${avatar}<span class="app-user-name">${escapeHtml(name)}</span></a>
-      <a class="icon-btn" href="/account" title="حسابي ورصيد التوكنز" aria-label="حسابي ورصيد التوكنز">${icon('user', 'icon-sm')}</a>
+      <a class="icon-btn" href="/account" title="حسابي ورصيد النقاط" aria-label="حسابي ورصيد النقاط">${icon('user', 'icon-sm')}</a>
       <a class="icon-btn" href="/logout" title="تسجيل الخروج" aria-label="تسجيل الخروج">${icon('logout', 'icon-sm')}</a>
     </div>
   </div>
@@ -1158,7 +1163,7 @@ function renderPublicFooter() {
       <h3>الحساب</h3>
       <ul>
         <li><a href="/login">تسجيل الدخول بحساب جوجل</a></li>
-        <li><a href="/account">حسابي ورصيد التوكنز</a></li>
+        <li><a href="/account">حسابي ورصيد النقاط</a></li>
         <li><a href="/onboarding">ملفي البحثي</a></li>
       </ul>
     </div>

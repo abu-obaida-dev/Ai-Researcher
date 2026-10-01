@@ -205,7 +205,7 @@ export async function askSupervisor({ userId, prompt, conversationId = null, ste
   if (!(await deductCredits(userId, reservation.credits))) {
     const balance = await balanceOf(userId);
     const error = new Error(
-      `رصيدك (${balance}) لا يكفي لهذه الرسالة: نحتاج ${reservation.credits} توكن كحدٍّ أقصى قبل الإرسال. اشترِ باقة أو ابدأ محادثة جديدة أقصر.`
+      `رصيدك (${balance}) لا يكفي لهذه الرسالة: نحتاج ${reservation.credits} نقطة كحدٍّ أقصى قبل الإرسال. اشترِ باقة أو ابدأ محادثة جديدة أقصر.`
     );
     error.code = 'NO_TOKENS';
     throw error;

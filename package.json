@@ -17,7 +17,9 @@
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
     "smoke:phase1": "node scripts/smoke-phase1.mjs",
-    "fonts:fetch": "node scripts/fetch-fonts.mjs"
+    "fonts:fetch": "node scripts/fetch-fonts.mjs",
+    "doctor": "node --env-file=.env scripts/doctor.mjs",
+    "set-admin": "node --env-file=.env scripts/set-admin.mjs"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",

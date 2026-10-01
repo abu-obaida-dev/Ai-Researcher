@@ -14,7 +14,7 @@ import { DEFAULT_RESEARCH_PATHS } from '../data/research-paths.js';
 const COST_BY_TYPE = new Map(TOKEN_COSTS.map((item) => [item.type, item]));
 const STATUS_VALUES = new Set(STEP_STATUSES.map((item) => item.value));
 
-/** سعر الخطوة بالتوكنز من TOKEN_COSTS (سقوط آمن على سعر رسالة المشرف). */
+/** سعر الخطوة بالنقاط من TOKEN_COSTS (سقوط آمن على سعر رسالة المشرف). */
 export function costForType(type) {
   return COST_BY_TYPE.get(type)?.tokens ?? TOKEN_COSTS[0].tokens;
 }

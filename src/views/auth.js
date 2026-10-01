@@ -21,7 +21,7 @@ import { BRAND, escapeHtml, renderLayout } from './layout.js';
 /** مزايا التسجيل المعروضة في لوحة الدخول — الرصيد المجاني من الباقة المجانية */
 function buildBenefits(freeTokens) {
   return [
-    { icon: 'coins', text: `${formatNumber(freeTokens)} توكن مجاناً بمجرد التسجيل` },
+    { icon: 'coins', text: `${formatNumber(freeTokens)} نقطة مجاناً بمجرد التسجيل` },
     { icon: 'graduation', text: 'ملف بحثي مخصص حسب مجالك وجامعتك' },
     { icon: 'shield', text: 'دخول آمن بحساب جوجل بدون كلمات مرور' }
   ];
@@ -71,7 +71,7 @@ function cleanUsageSummary(summary) {
 
 /**
  * سجل الاستهلاك في صورة قائمة بطاقات مضغوطة بدل جدول عريض:
- * كل عملية = سطر واحد (النوع + الملخص) مع التوكنز والتاريخ على الطرف الآخر.
+ * كل عملية = سطر واحد (النوع + الملخص) مع النقاط والتاريخ على الطرف الآخر.
  */
 function renderUsageList(rows) {
   if (!rows.length) {
@@ -139,7 +139,7 @@ export function renderLoginPage({ freeTokens, error = '', next = '', googleReady
       ${action}
       <p class="auth-note">
         بالمتابعة أنت توافق على شروط الاستخدام وسياسة الخصوصية، ويحصل حسابك الجديد على
-        ${escapeHtml(formatNumber(freeTokens))} توكن مجاناً.
+        ${escapeHtml(formatNumber(freeTokens))} نقطة مجاناً.
       </p>
       <div class="auth-links"><a href="/">العودة إلى الصفحة الرئيسية</a></div>
     </div>
@@ -326,16 +326,16 @@ export function renderAccountPage({
   </div>
 
   <div class="card">
-    <h2>رصيد التوكنز</h2>
-    <p class="balance">${escapeHtml(formatNumber(balance))} <span>توكن متاح</span></p>
+    <h2>رصيد النقاط</h2>
+    <p class="balance">${escapeHtml(formatNumber(balance))} <span>نقطة متاحة</span></p>
     <div class="meter"><i style="width:${percent}%"></i></div>
     <p class="muted">استُهلك ${escapeHtml(formatNumber(used))} من إجمالي ${escapeHtml(
       formatNumber(granted)
-    )} توكن (${percent}%).</p>
+    )} نقطة (${percent}%).</p>
     <dl class="kv">
       ${kv('الباقة الحالية', plan?.title || account.plan_code || 'لا توجد باقة')}
       ${kv('عمليات مسجّلة', formatNumber(usage.events))}
-      ${kv('توكنز مستهلكة', formatNumber(used))}
+      ${kv('نقاط مستهلكة', formatNumber(used))}
     </dl>
   </div>
 
@@ -364,7 +364,7 @@ export function renderAccountPage({
 
   return renderLayout({
     title: 'حسابي',
-    subtitle: 'بياناتك البحثية ورصيد التوكنز محفوظة في قاعدة بيانات المنصة',
+    subtitle: 'بياناتك البحثية ورصيد النقاط محفوظة في قاعدة بيانات المنصة',
     area: 'app',
     activeKey: 'account',
     account,
@@ -394,14 +394,14 @@ export function renderDashboardPage({ account, profile, plan, usage, journey = n
 
   <div class="card">
     <div class="card-head">
-      <h2>رصيد التوكنز</h2>
-      <a class="btn btn-primary btn-sm" href="/#pricing">${icon('coin', 'icon-sm')} إضافة توكنز</a>
+      <h2>رصيد النقاط</h2>
+      <a class="btn btn-primary btn-sm" href="/#pricing">${icon('coin', 'icon-sm')} إضافة نقاط</a>
     </div>
-    <p class="balance">${escapeHtml(formatNumber(balance))} <span>توكن متاح</span></p>
+    <p class="balance">${escapeHtml(formatNumber(balance))} <span>نقطة متاحة</span></p>
     <div class="meter"><i style="width:${percent}%"></i></div>
     <p class="muted">استُهلك ${escapeHtml(formatNumber(used))} من إجمالي ${escapeHtml(
       formatNumber(granted)
-    )} توكن (${percent}%).</p>
+    )} نقطة (${percent}%).</p>
     <dl class="kv">
       ${kv('الباقة الحالية', plan?.title || account.plan_code || 'لا توجد باقة')}
       ${kv('عمليات مسجّلة', formatNumber(usage.events))}

@@ -15,7 +15,7 @@ export function renderAdminHome({ counts, latestUsers, sent = 0, adminToken = ''
     ['ملفات بحثية', counts.profiles],
     ['الباقات', counts.plans],
     ['عمليات استهلاك', counts.usage_events],
-    ['توكنز مستهلكة', counts.tokens_used]
+    ['نقاط مستهلكة', counts.tokens_used]
   ]
     .map(([label, value]) => renderStat(label, value))
     .join('');
@@ -85,6 +85,71 @@ export function renderAdminHome({ counts, latestUsers, sent = 0, adminToken = ''
   });
 }
 
+/**
+ * صفحة حالة المزوّدين: جدول يوضّح لكل مزوّد حالته وسبب تعطّله،
+ * وزر «فحص الآن» يرسل نداءً صغيراً لكل مفتاح ليرى المدير الخطأ الحقيقي.
+ */
+export function renderAdminProviders({ status = [], probed = false, adminToken = '' }) {
+  const query = adminToken ? `?token=${encodeURIComponent(adminToken)}` : '';
+  const live = probed ? `${query ? '&' : '?'}probe=1` : `${query}${query ? '&' : '?'}probe=1`;
+
+  const rows = status.map((item) => {
+      const probe = item.probe;
+      let badge = '<span class="badge badge-active">جاهز</span>';
+      if (!item.configured) badge = '<span class="badge">غير مُعدّ</span>';
+      else if (probe && !probe.ok) badge = `<span class="badge badge-error">متوقّف${probe.status ? ` · ${probe.status}` : ''}</span>`;
+      else if (item.down) badge = '<span class="badge badge-error">خارج الدوران</span>';
+      else if (probe && probe.ok) badge = '<span class="badge badge-active">يعمل الآن</span>';
+
+      const backIn = item.down && item.backInMs ? ` · يعود بعد ${Math.ceil(item.backInMs / 60000)} دقيقة` : '';
+      const models = (item.models || []).map((model) => escapeHtml(model)).join(' ← ');
+      const detail = probe && !probe.ok ? probe.reason : item.reason || '';
+
+      return `
+      <td class="strong">${escapeHtml(item.label || item.key)}</td>
+      <td>${badge}</td>
+      <td><span class="mono small">${models || '—'}</span></td>
+      <td>${escapeHtml(detail || '—')}${escapeHtml(backIn)}</td>
+      <td>${probe ? `${probe.ms}ms` : '—'}</td>`;
+  });
+
+  const body = `
+  <div class="card">
+    <h2>حالة مزوّدي الذكاء الاصطناعي</h2>
+    <p class="muted">
+      يردّ الموقع من أول مزوّد ينجح. عند تعطّل مزوّد يخرج من الدوران مؤقّتاً حتى لا يضيّع وقت الباحث،
+      والطلب يذهب للمزوّد التالي بالتوازي بعد ٣٫٥ ثانية، ومعه قائمة نماذج تُجرَّب بالترتيب.
+    </p>
+    <div class="links">
+      <a class="btn btn-primary" href="/admin/providers${live}">فحص الآن (نداء صغير لكل مفتاح)</a>
+      <a class="btn" href="/admin/providers${query}">تحديث الحالة فقط</a>
+    </div>
+  </div>
+  <div class="card mt-16">
+    ${renderTable({
+      columns: ['المزوّد', 'الحالة', 'النماذج (بترتيب التبديل)', 'السبب', 'زمن الرد'],
+      rows,
+      emptyMessage: 'لا يوجد مزوّدات.'
+    })}
+  </div>
+  <div class="card">
+    <h2>معاني الأخطاء</h2>
+    <ul class="muted">
+      <li><b>402</b> لا يوجد رصيد عند المزوّد — اشحن حساب OpenRouter من settings/credits.</li>
+      <li><b>403</b> لا ترخيص على فريق xAI — اشحنه من console.x.ai/team.</li>
+      <li><b>429</b> تجاوزت حصة المفتاح أو حدّ معدّله.</li>
+      <li><b>503</b> النموذج مزدحم — يتغيّر بين النماذج تلقائياً بقائمة النماذج.</li>
+    </ul>
+  </div>`;
+
+  return renderLayout({
+    title: 'المزوّدون',
+    subtitle: 'من يردّ الآن على المشرف الذكي، ولماذا يتعطّل',
+    activeKey: 'providers',
+    body
+  });
+}
+
 /** سجل الاستهلاك: ملخص حسب النوع + آخر العمليات. */
 export function renderAdminUsage({ summary, recent, totalTokens }) {
   const summaryRows = summary.map(
@@ -104,14 +169,14 @@ export function renderAdminUsage({ summary, recent, totalTokens }) {
   );
 
   const body = `
-  <div class="grid">${renderStat('إجمالي التوكنز المستهلكة', totalTokens)}${renderStat(
+  <div class="grid">${renderStat('إجمالي النقاط المستهلكة', totalTokens)}${renderStat(
     'عدد العمليات',
     summary.reduce((total, row) => total + Number(row.events), 0)
   )}</div>
   <div class="card mt-16">
     <h2>الاستهلاك حسب النوع</h2>
     ${renderTable({
-      columns: ['النوع', 'عدد العمليات', 'التوكنز'],
+      columns: ['النوع', 'عدد العمليات', 'النقاط'],
       rows: summaryRows,
       emptyMessage: 'لا يوجد استهلاك مسجّل بعد.'
     })}
@@ -119,7 +184,7 @@ export function renderAdminUsage({ summary, recent, totalTokens }) {
   <div class="card">
     <h2>آخر 100 عملية</h2>
     ${renderTable({
-      columns: ['التاريخ', 'الباحث', 'النوع', 'التوكنز', 'الملخص'],
+      columns: ['التاريخ', 'الباحث', 'النوع', 'النقاط', 'الملخص'],
       rows: recentRows,
       emptyMessage: 'لا توجد عمليات مسجّلة بعد.'
     })}
@@ -127,7 +192,7 @@ export function renderAdminUsage({ summary, recent, totalTokens }) {
 
   return renderLayout({
     title: 'سجل الاستهلاك',
-    subtitle: 'متابعة استهلاك التوكنز لكل عملية ولكل باحث',
+    subtitle: 'متابعة استهلاك النقاط لكل عملية ولكل باحث',
     activeKey: 'usage',
     body
   });
@@ -206,7 +271,7 @@ export function renderAdminUsers({ users, total, page, pageSize, search, filter,
     <h2>الباحثون (${escapeHtml(formatNumber(total))})</h2>
     ${toolbar}
     ${renderTable({
-      columns: ['الباحث', 'الجامعة / المجال', 'الباقة', 'التوكنز', 'التسجيل'],
+      columns: ['الباحث', 'الجامعة / المجال', 'الباقة', 'النقاط', 'التسجيل'],
       rows,
       emptyMessage: search
         ? 'لا يوجد باحثون مطابقون للبحث. جرّب مصطلحاً آخر أو ألغِ الفلتر.'
@@ -217,7 +282,7 @@ export function renderAdminUsers({ users, total, page, pageSize, search, filter,
 
   return renderLayout({
     title: 'إدارة الباحثين',
-    subtitle: 'بحث وفلترة ومتابعة الباقة ورصيد التوكنز لكل باحث',
+    subtitle: 'بحث وفلترة ومتابعة الباقة ورصيد النقاط لكل باحث',
     activeKey: 'users',
     body
   });
@@ -245,7 +310,7 @@ export function renderAdminPlans({ plans, totalSubscribers }) {
   <div class="card mt-16">
     <h2>الباقات</h2>
     ${renderTable({
-      columns: ['الكود', 'الاسم', 'السعر', 'التوكنز', 'الحالة', 'المشتركون', 'تاريخ الإنشاء'],
+      columns: ['الكود', 'الاسم', 'السعر', 'النقاط', 'الحالة', 'المشتركون', 'تاريخ الإنشاء'],
       rows,
       emptyMessage: 'لا توجد باقات بعد — شغّل npm run db:seed لإضافة الباقات الافتراضية.'
     })}

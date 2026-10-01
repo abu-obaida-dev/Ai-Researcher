@@ -9,6 +9,7 @@ import { deleteFile, filesSummary, saveUpload } from '../src/services/files.js';
 import { saveStorageLimits, storageLimits } from '../src/services/settings.js';
 import ExcelJS from 'exceljs';
 import { askSupervisor } from '../src/services/chat.js';
+import { probeProvider, providerStatus } from '../src/services/ai.js';
 import { buildSystemPrompt } from '../src/services/supervisor-prompt.js';
 import { addStrike, getStrikes, resetStrikes } from '../src/services/supervisor-memory.js';
 import { chargeUsage, estimateReservation, normalizeUsage } from '../src/services/tokens.js';
@@ -462,6 +463,28 @@ async function testChat(userId, cookie) {
   check('1G سعر الإخراج أعلى من سعر الإدخال', TOKEN_RATES.outputPer1k > TOKEN_RATES.inputPer1k, `${TOKEN_RATES.inputPer1k} / ${TOKEN_RATES.outputPer1k} لكل 1000`);
   check('1G التسعير يفصل الإدخال عن الإخراج', priced.credits === Math.ceil(((est.inputTokens / 1000) * TOKEN_RATES.inputPer1k + (300 / 1000) * TOKEN_RATES.outputPer1k) * 1), `${priced.credits}`);
   check('1G تطبيع usage لكل مزوّد', normalizeUsage({ prompt_tokens: 10, completion_tokens: 5 }).outputTokens === 5 && normalizeUsage({ promptTokenCount: 10, candidatesTokenCount: 5 }).outputTokens === 5);
+  check('1G توكنز تفكير Gemini تُحتسب ضمن الإخراج', normalizeUsage({ promptTokenCount: 10, candidatesTokenCount: 5, thoughtsTokenCount: 100 }).outputTokens === 105);
+
+  /* ---------- 1H: مناعة المزوّدات: تبديل النماذج + الخروج من الدوران ---------- */
+  const statusRows = providerStatus();
+  const geminiStatus = statusRows.find((row) => row.key === 'gemini');
+  check('1H كل مزوّد يحمل قائمة نماذج لا نموذجاً واحداً', statusRows.every((row) => Array.isArray(row.models) && row.models.length >= 1) && (geminiStatus?.models.length || 0) >= 2, `${geminiStatus?.models.length} نماذج لـ Gemini`);
+  check('1H الحالة تُميّز المُعدّ من غير المُعدّ', statusRows.some((row) => row.configured) && statusRows.every((row) => typeof row.down === 'boolean'));
+  const labels = providerStatus().map((row) => row.label);
+  check('1H أسماء المزوّدين عربية في التقارير', labels.includes('OpenRouter') && labels.includes('Grok (xAI)'), labels.join(' · '));
+
+  const providersPage = await call('/admin/providers', { cookie });
+  check('1H لوحة المدير تعرض حالة المزوّدين', providersPage.status === 200 && providersPage.text.includes('النماذج (بترتيب التبديل)') && providersPage.text.includes('معاني الأخطاء'));
+
+  // مزوّد وهمي بلا مفتاح: يفشل فوراً ولا يُعيد المحاولة (لا مضيعة وقت ولا رصيد)
+  const fakeKey = 'zena-test-unknown';
+  const saved = process.env.ZEN_FAKE_KEY;
+  process.env.ZEN_FAKE_KEY = fakeKey;
+  const beforeRequests = Date.now();
+  const probeMissing = await probeProvider('does-not-exist');
+  check('1H فحص مزوّد غير موجود يفشل بلا رصيد', probeMissing.ok === false && Date.now() - beforeRequests < 1000, probeMissing.reason);
+  if (saved) process.env.ZEN_FAKE_KEY = saved;
+  else delete process.env.ZEN_FAKE_KEY;
 
   /* ---------- 1G: فشل المزوّدين يردّ الحجز كاملاً (بلا خصم نهائي) ---------- */
   const { user: refundUser } = await createTestUser();

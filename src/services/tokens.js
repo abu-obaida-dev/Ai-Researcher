@@ -14,14 +14,14 @@ import { TOKEN_RATES, priceMultiplier } from '../constants.js';
  * أن يخصم رصيداً سالباً مع رسالتين متزامنتين.
  */
 
-/** تقدير التوكنز من النص: العربية/الإنجليزية ≈ ٢.٦ حرفاً للتوكن. */
+/** تقدير النقاط من النص: العربية/الإنجليزية ≈ ٢.٦ حرفاً للنقطة. */
 export function estimateTokens(text) {
   const length = String(text || '').length;
   return Math.ceil(length / 2.6);
 }
 
 /**
- * الحجز المسبق: أقصى ما قد تكلّفه الرسالة = توكنز الإدخال التقديرية بسعر
+ * الحجز المسبق: أقصى ما قد تكلّفه الرسالة = نقاط الإدخال التقديرية بسعر
  * الإدخال + سقف الرد بسعر الإخراج، مع هامش أمان صغير. كل ما يُحجز يُردّ
  * بعد الرد، فالفارق بين الحجز والفعلي لا يكلّف الباحث شيئاً.
  */
@@ -52,18 +52,25 @@ export function chargeUsage({ inputTokens = 0, outputTokens = 0, multiplier = pr
   };
 }
 
-/** يوحّد أسماء حقول الاستهلاك بين المزوّدين (OpenAI/Grok مقابل Gemini). */
+/**
+ * يوحّد أسماء حقول الاستهلاك بين المزوّدين (OpenAI/Grok مقابل Gemini).
+ *
+ * ملاحظة مهمة: نماذج Gemini المفكّرة (مثل 3.8-flash) تُرجع نقاط التفكير في
+ * thoughtsTokenCount **خارج** candidatesTokenCount، وتحتسب على الباحث كإخراج.
+ * نضمّها هنا حتى لا نحتسب 10% فقط من الاستهلاك الفعلي.
+ */
 export function normalizeUsage(usage) {
   if (!usage || typeof usage !== 'object') return { inputTokens: 0, outputTokens: 0 };
 
   // OpenAI/Grok: { prompt_tokens, completion_tokens }
-  // Gemini:     { promptTokenCount, candidatesTokenCount }
+  // Gemini:     { promptTokenCount, candidatesTokenCount, thoughtsTokenCount }
   const inputTokens = Number(usage.prompt_tokens ?? usage.promptTokenCount ?? usage.input_tokens ?? 0);
   const outputTokens = Number(usage.completion_tokens ?? usage.candidatesTokenCount ?? usage.output_tokens ?? 0);
+  const thoughts = Number(usage.thoughtsTokenCount ?? usage.thoughts_token_count ?? 0);
 
   return {
     inputTokens: Number.isFinite(inputTokens) ? inputTokens : 0,
-    outputTokens: Number.isFinite(outputTokens) ? outputTokens : 0
+    outputTokens: (Number.isFinite(outputTokens) ? outputTokens : 0) + (Number.isFinite(thoughts) ? thoughts : 0)
   };
 }
 
@@ -94,7 +101,7 @@ export async function refundCredits(userId, credits) {
 }
 
 /**
- * تسجيل الاستهلاك بتفصيله: توكنز الإدخال/الإخراج + المزوّد + النموذج + معامل
+ * تسجيل الاستهلاك بتفصيله: نقاط الإدخال/الإخراج + المزوّد + النموذج + معامل
  * السعر. هذا هو السجل الذي نحتاجه لأي اعتراض من العميل عن الفاتورة.
  * يفشل بصمت حتى لا يعطّل الرد.
  */

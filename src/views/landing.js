@@ -49,7 +49,7 @@ function buildSteps(freeTokens) {
     {
       icon: 'userPlus',
       title: 'سجّل بحساب جوجل',
-      description: `دخول بضغطة واحدة بدون كلمات مرور أو رسائل تأكيد، وتحصل مباشرة على ${formatNumber(freeTokens)} توكن مجاناً.`
+      description: `دخول بضغطة واحدة بدون كلمات مرور أو رسائل تأكيد، وتحصل مباشرة على ${formatNumber(freeTokens)} نقطة مجاناً.`
     },
     {
       icon: 'clipboard',
@@ -59,7 +59,7 @@ function buildSteps(freeTokens) {
     {
       icon: 'rocket',
       title: 'ابدأ الإشراف البحثي',
-      description: 'اطلب عنواناً، هيكلاً، مراجعة فصل، أو مصادر، وتابع استهلاكك من التوكنز لحظة بلحظة.'
+      description: 'اطلب عنواناً، هيكلاً، مراجعة فصل، أو مصادر، وتابع استهلاكك من النقاط لحظة بلحظة.'
     }
   ];
 }
@@ -83,7 +83,7 @@ function renderHero(freeTokens) {
       </div>
       <ul class="checklist">
         <li>ملف بحثي مخصص لمجالك</li>
-        <li>${escapeHtml(label)} توكن مجاناً</li>
+        <li>${escapeHtml(label)} نقطة مجاناً</li>
         <li>بدون بطاقة بنكية</li>
       </ul>
     </div>
@@ -95,7 +95,7 @@ function renderHero(freeTokens) {
             <img src="${BRAND.icon}" alt="" width="34" height="34" />
             <span><b>المشرف البحثي</b><em>متصل الآن</em></span>
           </span>
-          <span class="chat-pill">${escapeHtml(label)} توكن متاح</span>
+          <span class="chat-pill">${escapeHtml(label)} نقطة متاحة</span>
         </div>
         <div class="chat-body">
           <p class="bubble-user">أريد عنواناً لرسالة ماجستير في الذكاء الاصطناعي التعليمي</p>
@@ -113,7 +113,7 @@ function renderHero(freeTokens) {
 
   <div class="hero-stats">
     <div class="hero-stats-inner">
-      <div class="stat-cell"><b>${escapeHtml(label)}</b><span>توكن مجاني لكل باحث</span></div>
+      <div class="stat-cell"><b>${escapeHtml(label)}</b><span>نقاط مجانية لكل باحث</span></div>
       <div class="stat-cell"><b>5 دقائق</b><span>لتجهيز ملفك البحثي</span></div>
       <div class="stat-cell"><b>24/7</b><span>مشرف متاح دائماً</span></div>
     </div>
@@ -146,7 +146,7 @@ function renderFeatures() {
 </section>`;
 }
 
-/** قسم «كيف تعمل» + جدول استهلاك التوكنز. */
+/** قسم «كيف تعمل» + جدول استهلاك النقاط. */
 function renderHowItWorks(freeTokens) {
   const steps = buildSteps(freeTokens)
     .map(
@@ -161,7 +161,7 @@ function renderHowItWorks(freeTokens) {
 
   const costs = TOKEN_COSTS.map(
     (item) => `<div class="cost-card">
-  <header><b>${escapeHtml(item.label)}</b><span class="cost-pill">${escapeHtml(formatNumber(item.tokens))} توكن</span></header>
+  <header><b>${escapeHtml(item.label)}</b><span class="cost-pill">${escapeHtml(formatNumber(item.tokens))} نقطة</span></header>
   <p>${escapeHtml(item.description)}</p>
 </div>`
   ).join('');
@@ -179,13 +179,13 @@ function renderHowItWorks(freeTokens) {
       <div class="costs-head">
         <span class="feature-icon warm">${icon('coins')}</span>
         <div>
-          <h3>كيف يُحسب استهلاك التوكنز؟</h3>
-          <p>كل عملية على المنصة تستهلك عدداً ثابتاً من التوكنز، ويظهر لك رصيدك وكل عملية قمت بها من صفحة حسابك.</p>
+          <h3>كيف يُحسب استهلاك النقاط؟</h3>
+          <p>كل عملية على المنصة تستهلك عدداً ثابتاً من النقاط، ويظهر لك رصيدك وكل عملية قمت بها من صفحة حسابك.</p>
         </div>
       </div>
       <div class="cost-grid">${costs}</div>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="/login">جرّب الآن بـ ${escapeHtml(formatNumber(freeTokens))} توكن مجاناً</a>
+        <a class="btn btn-primary" href="/login">جرّب الآن بـ ${escapeHtml(formatNumber(freeTokens))} نقطة مجاناً</a>
       </div>
     </div>
   </div>
@@ -205,7 +205,7 @@ function renderPlanCard(plan) {
     <b>${escapeHtml(isFree ? 'مجاناً' : formatNumber(plan.price))}</b>${isFree ? '' : '<span>ج.م</span>'}
   </div>
   <p class="plan-period">${escapeHtml(plan.period)}</p>
-  <span class="plan-tokens">${icon('coin', 'icon-sm')} ${escapeHtml(formatNumber(plan.tokens))} توكن</span>
+  <span class="plan-tokens">${icon('coin', 'icon-sm')} ${escapeHtml(formatNumber(plan.tokens))} نقطة</span>
   <ul class="plan-features">${features}</ul>
   <a class="btn${isFree ? '' : ' btn-primary'}" href="/login">${escapeHtml(plan.cta)}</a>
 </article>`;
@@ -224,7 +224,7 @@ function renderPricing(plans) {
       <span class="eyebrow">الباقات</span>
       <h2 class="section-title">ابدأ مجاناً ثم اختر الباقة المناسبة لمرحلتك</h2>
       <p class="section-lead">
-        كل باقة تمنحك رصيداً من التوكنز يُستخدم في جميع أدوات المنصة، ويمكنك الترقية أو التغيير في أي وقت.
+        كل باقة تمنحك رصيداً من النقاط يُستخدم في جميع أدوات المنصة، ويمكنك الترقية أو التغيير في أي وقت.
       </p>
     </div>
 
@@ -269,7 +269,7 @@ function renderCtaBand(freeTokens) {
     <div>
       <h2>ابدأ رحلتك البحثية اليوم</h2>
       <p>
-        ${escapeHtml(formatNumber(freeTokens))} توكن مجانية بلا بطاقة بنكية، وملف بحثي يجهز في 5 دقائق.
+        ${escapeHtml(formatNumber(freeTokens))} نقاط مجانية بلا بطاقة بنكية، وملف بحثي يجهز في 5 دقائق.
         رصيدك يبقى محفوظاً ويمكنك الترقية وقتما تشاء.
       </p>
     </div>
@@ -308,12 +308,12 @@ function buildFaqs(freeTokens) {
   return [
     {
       question: 'هل التجربة المجانية حقيقية؟',
-      answer: `نعم، يحصل كل حساب جديد على ${formatNumber(freeTokens)} توكن مجاناً بمجرد التسجيل بحساب جوجل، وبدون أي بطاقة بنكية أو التزام.`
+      answer: `نعم، يحصل كل حساب جديد على ${formatNumber(freeTokens)} نقطة مجاناً بمجرد التسجيل بحساب جوجل، وبدون أي بطاقة بنكية أو التزام.`
     },
     {
-      question: 'ما المقصود بالتوكن؟',
+      question: 'ما المقصود بالنقطة؟',
       answer:
-        'التوكن هو وحدة قياس استهلاك الذكاء الاصطناعي. كل عملية على المنصة (رسالة، هيكل بحث، مراجعة فصل، اقتراح مصادر) تستهلك عدداً معروفاً من التوكنز، ويظهر لك رصيدك وسجل استهلاكك الكامل من صفحة حسابك.'
+        'النقطة هو وحدة قياس استهلاك الذكاء الاصطناعي. كل عملية على المنصة (رسالة، هيكل بحث، مراجعة فصل، اقتراح مصادر) تستهلك عدداً معروفاً من النقاط، ويظهر لك رصيدك وسجل استهلاكك الكامل من صفحة حسابك.'
     },
     {
       question: 'كيف تُستخدم بياناتي البحثية؟',
@@ -334,7 +334,7 @@ function buildFaqs(freeTokens) {
     {
       question: 'هل يمكنني إلغاء الاشتراك؟',
       answer:
-        'الباقات شهرية بدون أي ارتباط طويل، ويمكنك التوقف في أي وقت، مع الاحتفاظ بما تبقى من رصيد التوكنز خلال المدة المدفوعة.'
+        'الباقات شهرية بدون أي ارتباط طويل، ويمكنك التوقف في أي وقت، مع الاحتفاظ بما تبقى من رصيد النقاط خلال المدة المدفوعة.'
     }
   ];
 }

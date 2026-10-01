@@ -3,7 +3,7 @@
  * - الواجهة: مكتبة Firebase JS (compat عبر CDN) + مفتاح VAPID لتوكنات Web Push.
  * - الخادم: Firebase Admin SDK (FCM) لإرسال الـ push — اختياري، وبدونه
  *   تُحفظ الإشعارات داخل الموقع فقط.
- * - كل بيانات المستخدمين والتوكنات في PostgreSQL (جداول notifications وdevice_tokens).
+ * - كل بيانات المستخدمين والنقطةات في PostgreSQL (جداول notifications وdevice_tokens).
  */
 
 const OPTIONAL_WEB_KEYS = [

@@ -15,7 +15,7 @@ const { Pool } = pg;
  * Firebase يُستخدم حصرياً لقناة إشعارات الدفع (FCM) — لا مصادقة Firebase ولا Firestore.
  * مستمد من النسخة السابقة للمنصة (Firestore): مستند UserDoc في مجموعة users
  * + المجموعة الفرعية للاستهلاك + الباقات + إعدادات المنصة وقائمة المديرين
- * + المجموعة الفرعية للإشعارات وتوكنات أجهزة FCM.
+ * + المجموعة الفرعية للإشعارات ونقطةات أجهزة FCM.
  */
 
 /** جدول المستخدمين: الهوية من جوجل + الدور + الحالة + الرصيد. */
@@ -232,7 +232,7 @@ const FILES_TABLE = `
   );
 `;
 
-/** محادثات المشرف الذكي + رسائلها (تكلفة التوكنز تُسجَّل في usage_logs). */
+/** محادثات المشرف الذكي + رسائلها (تكلفة النقاط تُسجَّل في usage_logs). */
 const CONVERSATIONS_TABLE = `
   CREATE TABLE IF NOT EXISTS conversations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -321,7 +321,7 @@ const NOTIFICATIONS_TABLE = `
   );
 `;
 
-/** توكنات أجهزة الإشعارات (FCM) — بديل حقل fcmTokens الذي كان في مستند Firestore. */
+/** نقطةات أجهزة الإشعارات (FCM) — بديل حقل fcmTokens الذي كان في مستند Firestore. */
 const DEVICE_TOKENS_TABLE = `
   CREATE TABLE IF NOT EXISTS device_tokens (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -340,7 +340,7 @@ const USERS_NOTIFICATIONS_COLUMN = `
   ALTER TABLE users ADD COLUMN IF NOT EXISTS notifications_enabled BOOLEAN NOT NULL DEFAULT false;
 `;
 
-/** فهارس الإشعارات والتوكنات — تُنشأ مرة واحدة فقط (idempotent). */
+/** فهارس الإشعارات والنقطةات — تُنشأ مرة واحدة فقط (idempotent). */
 const NOTIFICATION_INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id) WHERE read = false;

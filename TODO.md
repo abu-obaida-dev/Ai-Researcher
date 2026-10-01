@@ -71,10 +71,23 @@ curl -s http://localhost:3000/api/health
       بحث في المكتبة + «أضف إلى مراجعى» + إضافة يدوية + حالة القراءة؛ ملاحظات CRUD بتثبيت ووسوم وبحث وربط بالخطوة؛
       رفع multipart بلا مكتبة خارجية (undici `formData`) + حد حجم/نوع + اسم ملف نظيف + حماية بملكية الجلسة
 - [x] **1F `/chat` (المشرف الذكي):** `services/ai.js` بسلسلة fallback (OpenRouter → Gemini → Gemini-fallback → Grok)
-      + إعادة محاولة عند 429/5xx + خصم توكنز ذرّي (`WHERE tokens_balance >= $2`) + تسجيل `usage_logs` + رفض عند رصيد صفر
-      + حفظ المحادثة ورسائلها + **رد التوكنز عند فشل كل المزوّدين** + رفع استثناءات موحّد في `services/chat.js`
-- [x] **اختبار دخان للمرحلة الأولى:** `scripts/smoke-phase1.mjs` (`npm run smoke:phase1`) — 47 فحصاً على المسارات الحيّة
-      (1D/1E/1F + الحماية + رفض أنواع الملفات + عزل ملفات المستخدمين) — نتيجته الآن 47/47
+      + خصم نقاط ذرّي (`WHERE tokens_balance >= $2`) + تسجيل `usage_logs` + رفض عند رصيد غير كافٍ
+      + حفظ المحادثة ورسائلها + **ردّ الحجز كاملاً عند فشل كل المزوّدين** + استثناءات موحّد في `services/chat.js`
+- [x] **1G شخصية المشرف + التسعير الفعلي + الذاكرة + الملفات:** `supervisor-prompt.js` (شخصية Zena بأقسام شرطية)
+      + `supervisor-context.js` (١٢ متغيّراً من القاعدة) + `supervisor-memory.js` + `tokens.js` (حجز ← نداء ← تسوية)
+      + وسم `[[strike]]` بلا استدعاء مصنّف + وضع المناقشة + إرفاق ملفات (٣ بحدّ ٤٠KB)
+- [x] **1H مناعة المزوّدين:** تبديل النماذج داخل المفتاح (`AI_MODEL_*` قائمة) + طلب مموَّه بالتوازي
+      (`AI_HEDGE_MS`) + خروج المزوّد الفاشل ١٠ دقائق + لا إعادة محاولة للأخطاء الدائمة
+      + `npm run doctor` و`/admin/providers` لتشخيص السبب الحقيقي (402/403/429/503) + `npm run set-admin`
+- [x] **المصطلح:** «توكنز» ← «نقاط» في كل واجهة الموقع (أسماء الأعمدة بقيت `tokens_*` عمداً)
+- [x] **اختبار دخان للمرحلة الأولى:** `scripts/smoke-phase1.mjs` (`npm run smoke:phase1`)
+      (1D/1E/1F/1G/1H + الحماية + رفض أنواع الملفات + عزل ملفات المستخدمين) — نتيجته الآن 136/136
+
+### ⚠️ مفتاح يحتاج شحناً من صاحب المشروع
+- [ ] **OpenRouter 402:** «can only afford 210 tokens» — الحساب بلا رصيد كافٍ. الشحن:
+      https://openrouter.ai/settings/credits  (الموقع يعمل الآن على Gemini وحده)
+- [ ] **Grok 403:** «newly created team doesn't have any credits or licenses» — اشحن الفريق:
+      https://console.x.ai/team  (وإلا يخرج المزوّد من الدوران كل ١٠ دقائق بلا فائدة)
 
 ### 🧑‍🏫 P2 — الأدوار + ربط المشرف
 - [ ] جدول `roles`/`role_permissions` + بذرة (user / researcher / supervisor / admin) + ترقية `syncUserRole`
