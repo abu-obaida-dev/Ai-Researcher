@@ -734,31 +734,48 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .app-user-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ==== قائمة الجرس ==== */
+/* الجرس في نهاية شريط التطبيق (يسار الشاشة لأن الواجهة RTL)، فنثبّت القائمة
+   على الحافة نفسها (inset-inline-end) لتتمدد نحو داخل الصفحة لا خارج الشاشة.
+   ولو انقلبت الواجهة إلى LTR عادت تلقائياً للجهة المقابلة. */
 .bell-wrap { position: relative; }
 .bell-menu {
-  position: absolute; top: calc(100% + 9px); inset-inline-start: 0; width: min(370px, 92vw);
+  position: absolute; top: calc(100% + 9px); inset-inline-end: 0;
+  width: min(370px, calc(100vw - 20px));
+  /* لا تتجاوز القائمة أسفل الشاشة أبداً: الرأس والتذييل ثابتان والقائمة وحدها تُمرَّر */
+  max-height: calc(100vh - 78px);
+  display: flex; flex-direction: column;
   background: #fff; border: 1px solid var(--mist); border-radius: 16px; color: var(--slate);
   box-shadow: 0 26px 48px -26px var(--ink-10); overflow: hidden; z-index: 80;
 }
+[dir="ltr"] .bell-menu { inset-inline-end: auto; inset-inline-start: 0; }
 .bell-menu[hidden] { display: none; }
-.bell-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 13px; border-bottom: 1px solid var(--mist); }
+.bell-head { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 13px; border-bottom: 1px solid var(--mist); }
 .bell-head b { color: var(--ink); font-size: 13px; }
 .bell-mini {
   border: 0; background: transparent; color: var(--sea); font-family: inherit;
   font-size: 11.5px; font-weight: 700; cursor: pointer; padding: 4px 7px; border-radius: 8px;
+  white-space: nowrap;
 }
 .bell-mini:hover { background: var(--mist-soft); }
-.bell-list { list-style: none; margin: 0; padding: 6px; max-height: 330px; overflow-y: auto; display: grid; gap: 6px; }
+/* مرونة كاملة: تأخذ ما تبقّى من ارتفاع القائمة بلا حدّ ثابت مقطوع */
+.bell-list {
+  list-style: none; margin: 0; padding: 6px; flex: 1 1 auto; min-height: 0;
+  overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 6px; align-content: start;
+}
 .bell-list li { display: flex; gap: 8px; align-items: flex-start; padding: 9px 10px; border-radius: 12px; border: 1px solid transparent; background: var(--paper); }
 .bell-list li.unread { background: var(--mist-soft); border-color: var(--fresh-20); }
 .bell-item-body { flex: 1; min-width: 0; }
 .bell-item-title { color: var(--ink); font-size: 12.5px; font-weight: 700; }
-.bell-item-text { margin-top: 3px; font-size: 11.5px; line-height: 1.8; color: var(--slate); }
+.bell-item-text { margin-top: 3px; font-size: 11.5px; line-height: 1.8; color: var(--slate); overflow-wrap: anywhere; }
 .bell-item-time { margin-top: 4px; font-size: 10.5px; color: var(--slate); opacity: .85; }
 .bell-item-actions { display: grid; gap: 3px; flex: 0 0 auto; }
-.bell-empty { padding: 20px 14px; text-align: center; font-size: 12px; color: var(--slate); }
+.bell-empty { flex: 0 0 auto; padding: 20px 14px; text-align: center; font-size: 12px; color: var(--slate); }
 .bell-empty[hidden] { display: none; }
-.bell-foot { padding: 9px 13px; border-top: 1px solid var(--mist); text-align: center; font-size: 11.5px; font-weight: 600; }
+.bell-foot { flex: 0 0 auto; padding: 9px 13px; border-top: 1px solid var(--mist); text-align: center; font-size: 11.5px; font-weight: 600; }
+/* شاشة قصيرة: نفتح للأعلى بدل أن ينزل شيء تحت حافة الشاشة */
+@media (max-height: 620px) {
+  .bell-menu { top: auto; bottom: calc(100% + 9px); max-height: calc(100vh - 78px); }
+}
 
 /* ==== هيكل الصفحة: شريط جانبي يمين (لأن الواجهة RTL) + محتوى ==== */
 .app-page { padding: 0; }
