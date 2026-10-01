@@ -772,9 +772,12 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .bell-empty { flex: 0 0 auto; padding: 20px 14px; text-align: center; font-size: 12px; color: var(--slate); }
 .bell-empty[hidden] { display: none; }
 .bell-foot { flex: 0 0 auto; padding: 9px 13px; border-top: 1px solid var(--mist); text-align: center; font-size: 11.5px; font-weight: 600; }
-/* شاشة قصيرة: نفتح للأعلى بدل أن ينزل شيء تحت حافة الشاشة */
+/* ملاحظة: الجرس في أعلى الشاشة، فالقائمة تنزل دائماً للأسفل ولا تنقلب أبداً
+   (القلب للأعلى يدفعها خارج أعلى الشاشة فيختفي كل شيء). على الشاشات القصيرة
+   نكتفي بتقليل الفراغات، والـ max-height أعلاه يمنع تجاوز حافة الشاشة. */
 @media (max-height: 620px) {
-  .bell-menu { top: auto; bottom: calc(100% + 9px); max-height: calc(100vh - 78px); }
+  .bell-menu { top: calc(100% + 5px); max-height: calc(100vh - 66px); }
+  .bell-list li { padding: 7px 9px; }
 }
 
 /* ==== هيكل الصفحة: شريط جانبي يمين (لأن الواجهة RTL) + محتوى ==== */
