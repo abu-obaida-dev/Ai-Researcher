@@ -10,7 +10,7 @@
 
 const DEFAULT_TITLE = 'إشعار من Zena AI';
 const DEFAULT_ICON = '/zena-ai-icon.svg';
-const DEFAULT_URL = '/notifications';
+const DEFAULT_URL = '/dashboard';
 const SITE_NAME_CACHE = 'zena-site-name';
 const SITE_NAME_KEY = '/__zena-site-name';
 

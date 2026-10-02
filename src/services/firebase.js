@@ -75,7 +75,7 @@ async function adminMessaging() {
  * إرسال push عبر FCM لتوكنات جهاز معينة.
  * يعيد { sent, failed, invalidTokens } — التوكنات الميتة تُحذف من قاعدة البيانات.
  */
-export async function sendPushToTokens(tokens, { title, body = '', url = '/notifications' } = {}) {
+export async function sendPushToTokens(tokens, { title, body = '', url = '/account' } = {}) {
   const unique = [...new Set((tokens || []).filter(Boolean))].slice(0, 500);
   if (!unique.length) return { sent: 0, failed: 0, invalidTokens: [], skipped: 'no-tokens' };
   const messaging = await adminMessaging();

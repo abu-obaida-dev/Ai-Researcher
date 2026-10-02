@@ -199,6 +199,9 @@ export async function getJourneySummary(userId, degreeLevel) {
       total: journey.total,
       done: journey.done,
       percent: journey.percent,
+      requiredTotal: journey.requiredTotal,
+      requiredDone: journey.requiredDone,
+      completed: journey.completed,
       currentKey: journey.current?.key || '',
       currentTitle: journey.current ? journey.current.title : 'اكتمل المسار',
       source: journey.source

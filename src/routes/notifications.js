@@ -8,16 +8,13 @@ import {
   listNotifications,
   markAllNotificationsRead,
   markNotificationRead,
-  pushStatusHint,
   registerDeviceToken,
   unreadCount
 } from '../services/notifications.js';
-import { renderNotice } from '../views/layout.js';
-import { renderNotificationsPage } from '../views/notifications.js';
 
 /**
- * مسارات الإشعارات:
- * - GET  /notifications                صفحة الإشعارات داخل لوحة الباحث (area:'app' + سايدبار)
+ * مسارات الإشعارات (بلا صفحة مخصّصة — تظهر كلها في قائمة جرس الإشعارات المنسدلة):
+ * - GET  /notifications                تحويل إلى /dashboard (توافق مع الروابط القديمة)
  * - GET  /api/firebase-config          إعدادات Firebase العامة للواجهة والـ SW (بدون أسرار)
  * - GET  /api/notifications            JSON: عدد غير المقروء + آخر الإشعارات (يغذي جرس الشريط العلوي)
  * - POST /api/notifications/register    حفظ توكن جهاز (FCM)
@@ -39,32 +36,10 @@ router.get('/api/firebase-config', (_req, res) => {
   res.json(firebaseWebConfig());
 });
 
-// صفحة الإشعارات داخل الموقع (تحتاج جلسة فعّالة — الزائر يُحوَّل لـ /login)
-router.get('/notifications', requireAccount, async (req, res) => {
-  try {
-    const userId = req.account.id;
-    const [items, unread, devices] = await Promise.all([
-      listNotifications(userId),
-      unreadCount(userId),
-      activeDeviceCount(userId)
-    ]);
-    res.type('html').send(
-      renderNotificationsPage({
-        account: req.account,
-        items,
-        unread,
-        devices,
-        hint: pushStatusHint()
-      })
-    );
-  } catch (error) {
-    const { html } = renderNotice({
-      title: 'تعذّر تحميل الإشعارات',
-      message: 'حدث خطأ أثناء قراءة إشعاراتك من قاعدة البيانات — أعد المحاولة بعد لحظات.',
-      details: error?.message || ''
-    });
-    res.status(500).type('html').send(html);
-  }
+// لا توجد صفحة إشعارات مخصّصة: الإشعارات تظهر في قائمة الجرس المنسدلة فقط.
+// نُبقي المسار كتحويل لعدم كسر الروابط القديمة أو روابط الـ push المحفوظة.
+router.get('/notifications', (_req, res) => {
+  res.redirect(302, '/dashboard');
 });
 
 // JSON للاستخدام من أي واجهة: آخر إشعارات الحساب + عدّاد غير المقروء

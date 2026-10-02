@@ -1,4 +1,4 @@
-import { APP_NAME, PAYMENT_METHODS, SUPPORT_EMAIL, SUPPORT_WHATSAPP, TOKEN_COSTS } from '../constants.js';
+import { APP_NAME, PAYMENT_METHODS, SUPPORT_EMAIL, SUPPORT_WHATSAPP } from '../constants.js';
 import { formatNumber } from './format.js';
 import { icon } from './icons.js';
 import { BRAND, escapeHtml, renderLayout } from './layout.js';
@@ -14,7 +14,7 @@ const FEATURES = [
   {
     icon: 'message',
     title: 'محادثة إشرافية ذكية',
-    description: 'اسأل مشرفك عن أي جزء من البحث، وسيحصل على رد علمي مبني على ملفك البحثي ومجال تخصصك.'
+    description: 'اسأل مشرفك عن أي جزء من البحث، واحصل على رد مبني على ملفك البحثي ومجال تخصصك، مع إشارة واضحة لما يحتاج تحققاً منك.'
   },
   {
     icon: 'list',
@@ -24,7 +24,7 @@ const FEATURES = [
   {
     icon: 'book',
     title: 'مصادر ومراجع مقترحة',
-    description: 'اقتراح المراجع والدراسات السابقة المناسبة لمتغيرات البحث مع صياغة الاقتباس بشكل صحيح.'
+    description: 'اقتراح دراسات سابقة مناسبة لمتغيرات بحثك وتوثيقها بنظام APA — تحقّق من كل مرجع قبل الاستشهاد به.'
   },
   {
     icon: 'language',
@@ -33,8 +33,8 @@ const FEATURES = [
   },
   {
     icon: 'searchCheck',
-    title: 'تحليل الدراسات السابقة',
-    description: 'تلخيص ومقارنة الدراسات العربية والأجنبية لاستخراج الفجوة البحثية التي يعالجها بحثك.'
+    title: 'صياغة الفجوة البحثية',
+    description: 'مناقشة الدراسات السابقة ومقارنة نتائجها وحدودها، لمساعدتك على صياغة الفجوة التي يعالجها بحثك.'
   },
   {
     icon: 'bulb',
@@ -49,7 +49,7 @@ function buildSteps(freeTokens) {
     {
       icon: 'userPlus',
       title: 'سجّل بحساب جوجل',
-      description: `دخول بضغطة واحدة بدون كلمات مرور أو رسائل تأكيد، وتحصل مباشرة على ${formatNumber(freeTokens)} نقطة مجاناً.`
+      description: `دخول بضغطة واحدة بحساب جوجل بدون كلمات مرور، وتحصل مباشرة على ${formatNumber(freeTokens)} نقطة مجاناً.`
     },
     {
       icon: 'clipboard',
@@ -59,7 +59,7 @@ function buildSteps(freeTokens) {
     {
       icon: 'rocket',
       title: 'ابدأ الإشراف البحثي',
-      description: 'اطلب عنواناً، هيكلاً، مراجعة فصل، أو مصادر، وتابع استهلاكك من النقاط لحظة بلحظة.'
+      description: 'اطلب عنواناً أو هيكلاً أو مراجعة فصل أو مصادر، وتابع رصيدك واستهلاكك من صفحة حسابك.'
     }
   ];
 }
@@ -71,8 +71,8 @@ function renderHero(freeTokens) {
   return `<section class="landing-hero">
   <div class="hero-grid">
     <div class="hero-copy">
-      <span class="eyebrow-pill">${icon('sparkles', 'icon-sm')} مدعوم بالذكاء الاصطناعي التوليدي</span>
-      <h1>مشرف بحثي ذكي يرافقك من <span class="accent">فكرة البحث</span> حتى المناقشة</h1>
+      <span class="eyebrow-pill">${icon('sparkles', 'icon-sm')} إشراف بحثي ذكي مدعوم بالذكاء الاصطناعي</span>
+      <h1>مشرف بحثي ذكي يرافقك من <span class="accent">الفكرة الأولى</span> إلى فصل متماسك</h1>
       <p class="lead">
         منصة عربية تساعد طلاب الدراسات العليا والباحثين في اختيار العنوان، بناء هيكل الرسالة، مراجعة
         الفصول، واقتراح المصادر وتوثيقها — بملف بحثي مخصص يعرف مجالك وجامعتك ومرحلتك.
@@ -89,17 +89,17 @@ function renderHero(freeTokens) {
     </div>
 
     <div class="hero-visual">
-      <div class="chat-card">
-        <div class="chat-head">
-          <span class="chat-agent">
+      <div class="hero-chat">
+        <div class="hero-chat-head">
+          <span class="hero-chat-agent">
             <img src="${BRAND.icon}" alt="" width="34" height="34" />
-            <span><b>المشرف البحثي</b><em>متصل الآن</em></span>
+            <span><b>المشرف البحثي</b><em>نموذج توضيحي</em></span>
           </span>
-          <span class="chat-pill">${escapeHtml(label)} نقطة متاحة</span>
+          <span class="hero-chat-pill">${escapeHtml(label)} نقطة متاحة</span>
         </div>
-        <div class="chat-body">
-          <p class="bubble-user">أريد عنواناً لرسالة ماجستير في الذكاء الاصطناعي التعليمي</p>
-          <div class="bubble-ai">
+        <div class="hero-chat-body">
+          <p class="hero-bubble-user">أريد عنواناً لرسالة ماجستير في الذكاء الاصطناعي التعليمي</p>
+          <div class="hero-bubble-ai">
             <strong>ثلاثة عناوين مقترحة:</strong>
             <p>1. أثر أنظمة الذكاء الاصطناعي التوليدي على التحصيل الدراسي الجامعي.</p>
             <p>2. تصميم بيئة تعلّم تكيفية معزّزة بنماذج اللغة الكبيرة.</p>
@@ -146,25 +146,18 @@ function renderFeatures() {
 </section>`;
 }
 
-/** قسم «كيف تعمل» + جدول استهلاك النقاط. */
+/** قسم «كيف تعمل» — ثلاث خطوات فقط (جدول استهلاك النقاط حُذف بقرار المحتوى). */
 function renderHowItWorks(freeTokens) {
   const steps = buildSteps(freeTokens)
     .map(
       (step, index) => `<article class="step-card">
-  <span class="step-number">${index + 1}</span>
+  <span class="step-badge">${index + 1}</span>
   <span class="feature-icon">${icon(step.icon)}</span>
   <h3>${escapeHtml(step.title)}</h3>
   <p>${escapeHtml(step.description)}</p>
 </article>`
     )
     .join('');
-
-  const costs = TOKEN_COSTS.map(
-    (item) => `<div class="cost-card">
-  <header><b>${escapeHtml(item.label)}</b><span class="cost-pill">${escapeHtml(formatNumber(item.tokens))} نقطة</span></header>
-  <p>${escapeHtml(item.description)}</p>
-</div>`
-  ).join('');
 
   return `<section class="slab slab-alt" id="how">
   <div class="slab-inner">
@@ -174,20 +167,6 @@ function renderHowItWorks(freeTokens) {
     </div>
 
     <div class="steps-grid">${steps}</div>
-
-    <div class="costs">
-      <div class="costs-head">
-        <span class="feature-icon warm">${icon('coins')}</span>
-        <div>
-          <h3>كيف يُحسب استهلاك النقاط؟</h3>
-          <p>كل عملية على المنصة تستهلك عدداً ثابتاً من النقاط، ويظهر لك رصيدك وكل عملية قمت بها من صفحة حسابك.</p>
-        </div>
-      </div>
-      <div class="cost-grid">${costs}</div>
-      <div class="hero-actions">
-        <a class="btn btn-primary" href="/login">جرّب الآن بـ ${escapeHtml(formatNumber(freeTokens))} نقطة مجاناً</a>
-      </div>
-    </div>
   </div>
 </section>`;
 }
@@ -297,7 +276,7 @@ export function renderLandingPage({ plans, freeTokens, account = null }) {
   ].join('\n');
 
   return renderLayout({
-    title: `${APP_NAME} — مساعدك البحثي الذكي`,
+    title: `${APP_NAME} — مشرفك البحثي الذكي`,
     area: 'public',
     pageHead: false,
     account,
@@ -307,8 +286,8 @@ export function renderLandingPage({ plans, freeTokens, account = null }) {
 function buildFaqs(freeTokens) {
   return [
     {
-      question: 'هل التجربة المجانية حقيقية؟',
-      answer: `نعم، يحصل كل حساب جديد على ${formatNumber(freeTokens)} نقطة مجاناً بمجرد التسجيل بحساب جوجل، وبدون أي بطاقة بنكية أو التزام.`
+      question: 'ما الذي أحصل عليه مجاناً عند التسجيل؟',
+      answer: `يحصل كل حساب جديد على ${formatNumber(freeTokens)} نقطة مجاناً بمجرد التسجيل بحساب جوجل، وبلا أي بطاقة بنكية أو التزام.`
     },
     {
       question: 'ما المقصود بالنقطة؟',
@@ -316,9 +295,19 @@ function buildFaqs(freeTokens) {
         'النقطة هو وحدة قياس استهلاك الذكاء الاصطناعي. كل عملية على المنصة (رسالة، هيكل بحث، مراجعة فصل، اقتراح مصادر) تستهلك عدداً معروفاً من النقاط، ويظهر لك رصيدك وسجل استهلاكك الكامل من صفحة حسابك.'
     },
     {
+      question: 'هل المصادر المقترحة جاهزة للاستخدام مباشرة؟',
+      answer:
+        'المراجع قوائم اقتراحات أولية يولّدها المشرف الذكي، والمنصة لا تتحقق منها تلقائياً. راجع كل مرجع في قاعدة علمية مثل Google Scholar أو Scopus وتأكد من صحة بياناته قبل الاستشهاد به.'
+    },
+    {
+      question: 'هل تكتب المنصة الدراسة بدلاً مني؟',
+      answer:
+        'لا. المنصة أداة إشراف: تساعدك على بناء الخطة، وصياغة الأسئلة، ومراجعة ما تكتبه أنت — والنص النهائي ومسؤوليته عليك، وهو ما تريده لجنة المناقشة.'
+    },
+    {
       question: 'كيف تُستخدم بياناتي البحثية؟',
       answer:
-        'نستخدم بياناتك (مجال البحث، الجامعة، المرحلة الدراسية، الاهتمامات) لتخصيص ردود المشرف الذكي فقط، بحيث تكون الإجابات مناسبة لتخصصك ومستواك العلمي، ولا تُشارك مع أي جهة خارجية.'
+        'نستخدم بياناتك (مجال البحث، الجامعة، المرحلة الدراسية، الاهتمامات) لتخصيص ردود المشرف الذكي فقط، بحيث تكون الإجابات مناسبة لتخصصك ومستواك العلمي، ولا تُستخدم لتدريب النماذج ولا تُشارك مع أي جهة خارجية.'
     },
     {
       question: 'هل يدعم الموقع اللغة الإنجليزية؟',

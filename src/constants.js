@@ -5,7 +5,7 @@
  */
 
 export const APP_NAME = 'Zena AI';
-export const APP_TAGLINE = 'مساعدك البحثي الذكي';
+export const APP_TAGLINE = 'المشرف البحثي الذكي';
 export const SUPPORT_EMAIL = 'support@moshrefai.com';
 export const SUPPORT_WHATSAPP = '01000000000';
 
@@ -20,7 +20,7 @@ export const TOKEN_COSTS = [
     type: 'chat',
     label: 'رسالة إلى المشرف الذكي',
     tokens: 30,
-    description: 'سعر محسوب من الاستهلاك الفعلي: نقاط الإدخال + نقاط ردّك بسعرين مختلفين'
+    description: 'يُخصم فعلياً بعد كل رد، ويُردّ الفرق إن كان الاستهلاك أقل من المتوقع'
   },
   { type: 'translate', label: 'ترجمة وصياغة أكاديمية', tokens: 60, description: 'ترجمة عربي/إنجليزي بصياغة علمية' },
   { type: 'outline', label: 'بناء خطة وهيكل بحث', tokens: 80, description: 'تقسيم الفصول والمحاور والأهداف' },
@@ -209,7 +209,7 @@ export const DEFAULT_PLANS = [
       'كل مزايا باقة الطالب',
       'مراجعة منهجية لفصول البحث',
       'اقتراح المصادر وتوثيقها بنظام APA',
-      'تحليل الدراسات السابقة (Literature Review)',
+      'مراجعة الدراسات السابقة وصياغة الفجوة البحثية',
       'أولوية في الدعم الفني'
     ]
   },

@@ -60,6 +60,33 @@ async function createTestUser() {
   return { user, cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(createSessionCookie(user))}` };
 }
 
+/** اختبارات 1C: صفحة الإحصائية (المؤشرات + المخططات + عدم تكرار أزرار السايدبار). */
+async function testDashboard(userId, cookie) {
+  // نزرع استهلاكاً بأنواع مختلفة لضمان رسم المخطط الدائري والأعمدة
+  await pool.query(
+    `INSERT INTO usage_logs (user_id, type, tokens_used, summary, created_at) VALUES
+       ($1, 'chat', 30, 'سؤال اختباري', NOW()),
+       ($1, 'review', 150, 'مراجعة اختبارية', NOW() - interval '1 day')`,
+    [userId]
+  );
+
+  const page = await call('/dashboard', { cookie });
+  const html = page.text;
+  const mainStart = html.indexOf('<div class="app-main">');
+  const sideStart = html.indexOf('<aside class="app-side">');
+  const main = mainStart > -1 && sideStart > mainStart ? html.slice(mainStart, sideStart) : html;
+
+  check('1C /dashboard يفتح', page.ok && html.includes('الإحصائية'), `status=${page.status}`);
+  check('1C شريط المؤشرات (KPIs) موجود', html.includes('class="stat-grid"'));
+  check('1C مخطط الأعمدة لآخر ٧ أيام مرسوم', html.includes('class="bars"') && html.includes('bar-fill'));
+  check('1C المخطط الدائري لتوزيع الاستهلاك مرسوم', html.includes('conic-gradient') && html.includes('class="legend"'));
+  check('1C بطاقة مكتبتك البحثية موجودة', html.includes('mini-stats'));
+
+  const duplicateLinks = ['href="/chat"', 'href="/journey"', 'href="/account"'].filter((href) => main.includes(href));
+  check('1C لا أزرار مكرّرة مع السايدبار في جسم الإحصائية', duplicateLinks.length === 0, duplicateLinks.join(' '));
+  check('1C زر «إضافة نقاط» باقٍ (غير مكرّر)', main.includes('href="/#pricing"'));
+}
+
 /** اختبارات 1D: صفحة المسار + حفظ الحالة + رفض خطوة غير موجودة. */
 async function testJourney(cookie) {
   const journey = await call('/journey', { cookie });
@@ -609,7 +636,8 @@ async function testChat(userId, cookie) {
     !navHtml.includes('حسابى') && !navHtml.includes('ملفي البحثى') && !navHtml.includes('تسجيل الخروج')
   );
   const topbar = chatBody.slice(chatBody.indexOf('<header class="app-top">'), chatBody.indexOf('</header>'));
-  check('1F الشريط العلوي فيه الحساب والخروج', topbar.includes('href="/account"') && topbar.includes('href="/logout"'));
+  check('1F الشريط العلوي فيه صورة الحساب والقائمة المنسدلة', topbar.includes('id="user-toggle"') && topbar.includes('id="user-menu"'));
+  check('1F القائمة فيها الحساب والخروج', topbar.includes('href="/account"') && topbar.includes('href="/logout"'));
 
   // رابط «المشرف الذكي» هو آخر رابط تنقّل (قبله روابط الجلسات /chat?c=)
   const tools = [...navHtml.matchAll(/<a href="(\/(?:dashboard|journey|references|notes|files|chat|account|admin|onboarding))"/g)].map((m) => m[1]);
@@ -730,6 +758,7 @@ async function main() {
   const { user, cookie } = await createTestUser();
 
   try {
+    await testDashboard(user.id, cookie);
     await testJourney(cookie);
     await testReferences(user.id, cookie);
     await testNotes(user.id, cookie);

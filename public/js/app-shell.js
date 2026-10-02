@@ -1,13 +1,72 @@
 /**
  * سلوك لوحة الباحث:
  * 1) قائمة جرس الإشعارات: تعليم كمقروء (فردي/الكل) وحذف — بدون إعادة تحميل الصفحة.
- * 2) فتح/غلق القائمة بالنقر أو زر Escape أو النقر خارجها.
+ * 2) فتح/غلق القوائم المنسدلة (الجرس + صورة الحساب) بالنقر أو زر Escape أو النقر خارجها.
  *
  * ملاحظات: لا سكربتات سطرية (CSP: 'self')، وكل النصوص تُكتب بـ textContent
  * لمنع أي حقن HTML قادم من قاعدة البيانات.
  */
 (function () {
   'use strict';
+
+  /** فتح/غلق قائمة منسدلة عامة: زر + قائمة، تُغلق مع القوائم الأخرى وزر Escape والنقر خارجها. */
+  var dropdowns = [];
+
+  function closeAllDropdowns(except) {
+    dropdowns.forEach(function (entry) {
+      if (entry === except) return;
+      entry.menu.hidden = true;
+      entry.toggle.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  function wireDropdown(toggleId, menuId, options) {
+    var toggle = document.getElementById(toggleId);
+    var menu = document.getElementById(menuId);
+    if (!toggle || !menu) return null;
+    var onOpen = options && typeof options.onOpen === 'function' ? options.onOpen : null;
+
+    var entry = {
+      toggle: toggle,
+      menu: menu,
+      open: function () {
+        closeAllDropdowns(entry);
+        menu.hidden = false;
+        toggle.setAttribute('aria-expanded', 'true');
+        if (onOpen) onOpen();
+      },
+      close: function () {
+        menu.hidden = true;
+        toggle.setAttribute('aria-expanded', 'false');
+      }
+    };
+
+    toggle.addEventListener('click', function (event) {
+      event.stopPropagation();
+      if (menu.hidden) entry.open();
+      else entry.close();
+    });
+
+    menu.addEventListener('click', function (event) {
+      // روابط القائمة تنتقل للصفحة المطلوبة؛ النقر داخلها فقط لا يُغلق قبل الانتقال
+      if (event.target.closest('a')) return;
+      event.stopPropagation();
+    });
+
+    dropdowns.push(entry);
+    return entry;
+  }
+
+  document.addEventListener('click', function () {
+    closeAllDropdowns(null);
+  });
+
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') closeAllDropdowns(null);
+  });
+
+  // قائمة صورة الحساب: تعمل دائماً (حتى بلا جرس) في الشريط العلوي والترويسة العامة
+  wireDropdown('user-toggle', 'user-menu');
 
   var toggle = document.getElementById('bell-toggle');
   var menu = document.getElementById('bell-menu');
@@ -19,7 +78,8 @@
   if (!toggle || !menu || !list) return;
 
   var items = [];
-  var loaded = false;
+  // listLoaded: هل جُلبت القائمة ورُسمت فعلاً؟ (الجلب المسبق للشارة لا يكفي وحده)
+  var listLoaded = false;
 
   /** شارة عدد غير المقروء في الشريط العلوي. */
   function setBadge(count) {
@@ -137,13 +197,13 @@
 
   /** تحميل الإشعارات (مرة واحدة عند أول فتح، أو إجبارياً). */
   function load(force) {
-    if (loaded && !force) return Promise.resolve();
+    if (listLoaded && !force) return Promise.resolve();
     showEmpty('جارٍ تحميل الإشعارات…');
 
     return request('/api/notifications')
       .then(function (data) {
         items = Array.isArray(data.items) ? data.items : [];
-        loaded = true;
+        listLoaded = true;
         setBadge(data.unread || 0);
         render();
       })
@@ -198,42 +258,23 @@
       });
   }
 
-  function openMenu() {
-    menu.hidden = false;
-    toggle.setAttribute('aria-expanded', 'true');
-    load(false);
-  }
-
-  function closeMenu() {
-    menu.hidden = true;
-    toggle.setAttribute('aria-expanded', 'false');
-  }
-
-  toggle.addEventListener('click', function (event) {
-    event.stopPropagation();
-    if (menu.hidden) openMenu();
-    else closeMenu();
+  var bellDropdown = wireDropdown('bell-toggle', 'bell-menu', {
+    onOpen: function () {
+      // إن كان الجلب المسبق قد انتهى نرسم ما وصلنا فوراً، ثم نتحقق من أي جديد
+      if (listLoaded) render();
+      load(false);
+    }
   });
-
-  menu.addEventListener('click', function (event) {
-    event.stopPropagation();
-  });
-
-  document.addEventListener('click', function () {
-    if (!menu.hidden) closeMenu();
-  });
-
-  document.addEventListener('keydown', function (event) {
-    if (event.key === 'Escape' && !menu.hidden) closeMenu();
-  });
+  if (!bellDropdown) return;
 
   if (readAllButton) readAllButton.addEventListener('click', markAllRead);
 
-  // تحديث الشارة عند فتح الصفحة (بدون فتح القائمة) حتى تبقى الأرقام حديثة
+  // تحديث الشارة عند فتح الصفحة (بدون فتح القائمة) حتى تبقى الأرقام حديثة،
+  // ونضع علامة أن القائمة جُلبت فعلاً حتى تُرسم لحظة فتح الجرس.
   request('/api/notifications')
     .then(function (data) {
       items = Array.isArray(data.items) ? data.items : [];
-      loaded = true;
+      listLoaded = true;
       setBadge(data.unread || 0);
     })
     .catch(function () {

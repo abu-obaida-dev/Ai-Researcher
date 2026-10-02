@@ -25,7 +25,7 @@ import { homePathFor, needsOnboarding } from '../middleware/auth.js';
  */
 
 const APP_NAME = 'Zena AI';
-const APP_TAGLINE = 'مساعدك البحثى الذكى';
+const APP_TAGLINE = 'المشرف البحثي الذكي';
 
 /** ملفات الشعار والخطوط كما هي في مجلد public — تُقدَّم كملفات ثابتة من server.js. */
 const BRAND = {
@@ -35,14 +35,34 @@ const BRAND = {
   fonts: '/fonts.css' // تعريفات خطوط الهوية
 };
 
-/** روابط التنقل في لوحة الإدارة. */
-const NAV_ITEMS = [
-  { href: '/admin', label: 'نظرة عامة', key: 'home' },
-  { href: '/admin/users', label: 'الباحثون', key: 'users' },
-  { href: '/admin/providers', label: 'المزوّدون', key: 'providers' },
-  { href: '/admin/plans', label: 'الباقات', key: 'plans' },
-  { href: '/admin/usage', label: 'الاستهلاك', key: 'usage' },
-  { href: '/admin/settings', label: 'الإعدادات', key: 'settings' }
+/**
+ * روابط السايدبار في لوحة الإدارة (area: 'admin') — مجموعات بأيقونات:
+ * الإشراف (نظرة عامة/باحثون/مديرون/أدوار) · المنصة (باقات/استهلاك/مزوّدون) · النظام (إعدادات).
+ */
+const ADMIN_NAV = [
+  {
+    label: 'الإشراف',
+    items: [
+      { href: '/admin', label: 'نظرة عامة', key: 'home', icon: 'sparkles' },
+      { href: '/admin/users', label: 'الباحثون', key: 'users', icon: 'user' },
+      { href: '/admin/admins', label: 'المديرون', key: 'admins', icon: 'shield' },
+      { href: '/admin/roles', label: 'الأدوار والصلاحيات', key: 'roles', icon: 'check' }
+    ]
+  },
+  {
+    label: 'المنصة',
+    items: [
+      { href: '/admin/plans', label: 'الباقات', key: 'plans', icon: 'coins' },
+      { href: '/admin/usage', label: 'الاستهلاك', key: 'usage', icon: 'clipboard' },
+      { href: '/admin/providers', label: 'المزوّدون', key: 'providers', icon: 'refresh' }
+    ]
+  },
+  {
+    label: 'النظام',
+    items: [
+      { href: '/admin/settings', label: 'الإعدادات', key: 'settings', icon: 'edit' }
+    ]
+  }
 ];
 
 /**
@@ -61,8 +81,8 @@ const APP_NAV = [
 const APP_CHAT_NAV = { href: '/chat', label: 'المشرف الذكي', key: 'chat', icon: 'message' };
 
 /**
- * روابط الحساب: الحساب والملف البحثي في الشريط العلوي، وتعديل الملف من
- * بطاقات الإحصائية ومسار البحث — فلا تكرار في السايدبار.
+ * روابط الحساب (legacy): لم تعد تُستخدم في السايدبار — الحساب/الملف البحثي/الخروج
+ * في قائمة صورة الحساب بالشريط العلوي (renderUserMenu). تُبقى مُصدَّرة للتوافق فقط.
  */
 const APP_ACCOUNT_NAV = [
   { href: '/account', label: 'حسابى والرصيد', key: 'account', icon: 'user' },
@@ -278,7 +298,32 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .footer-logo img { padding: 3px; border-radius: 8px; background: var(--paper); }
 .footer-desc { margin-top: 13px; max-width: 46ch; font-size: 12.5px; line-height: 1.95; opacity: .85; }
 .footer-contacts { margin-top: 13px; font-size: 12px; opacity: .8; }
-.footer-bottom { border-top: 1px solid rgba(216, 243, 239, .18); padding: 15px 20px; text-align: center; font-size: 11px; opacity: .72; }
+.footer-bottom {
+  border-top: 1px solid rgba(216, 243, 239, .18); padding: 13px 20px;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 18px;
+}
+.footer-copy { font-size: 11px; opacity: .72; }
+/* شارة حالة الخدمة في أسفل الفوتر — تشير إلى صفحة /status */
+.status-chip {
+  display: inline-flex; align-items: center; gap: 7px; padding: 4px 12px;
+  border-radius: 999px; background: rgba(216, 243, 239, .12);
+  border: 1px solid rgba(216, 243, 239, .26);
+  color: #fff; font-size: 11px; font-weight: 700; text-decoration: none;
+}
+.status-chip:hover { background: rgba(216, 243, 239, .22); color: #fff; }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: #3ddc97; box-shadow: 0 0 0 3px rgba(61, 220, 151, .22); }
+
+/* ترويسة الموقع على الشاشات الصغيرة: صفّان فقط — (العلامة + الأزرار) ثم روابط قابلة للتمرير */
+@media (max-width: 700px) {
+  .site-header-inner { gap: 6px 10px; padding: 10px 16px; }
+  .site-nav {
+    order: 3; width: 100%; flex-wrap: nowrap; gap: 4px;
+    overflow-x: auto; scrollbar-width: none; padding-bottom: 2px;
+  }
+  .site-nav::-webkit-scrollbar { display: none; }
+  .site-nav a { white-space: nowrap; padding: 6px 11px; border-radius: 999px; background: var(--mist-soft); font-size: 12.5px; }
+  .site-nav a:hover { background: var(--mist); color: var(--sea-deep); }
+}
 
 /* ==== أقسام الصفحة العامة ==== */
 .slab { padding: 58px 0; background: #fff; border-bottom: 1px solid var(--mist); }
@@ -308,6 +353,14 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .hero-copy .lead { margin-top: 16px; max-width: 56ch; font-size: 14.5px; line-height: 1.95; color: var(--slate); }
 .hero-actions { margin-top: 24px; display: flex; flex-wrap: wrap; gap: 10px; }
 .accent { color: var(--sea); }
+/* تدرّج تركوازي للكلمة المفتاحية في العنوان (مع بقاء لون احتياطي إن لم يُدعم background-clip) */
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .accent {
+    background: linear-gradient(120deg, var(--sea) 5%, var(--fresh) 95%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+}
 .checklist { margin-top: 22px; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px 20px; }
 .checklist li { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--slate); }
 .checklist li::before {
@@ -315,21 +368,30 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
   background: var(--mist); color: var(--sea-deep); font-size: 11px; font-weight: 800;
 }
 
-/* بطاقة المحادثة التوضيحية */
-.chat-card {
+/* ==== بطاقة المحادثة التوضيحية في الهيرو ==== */
+/* الأسماء مسبوقة بـ hero- حصراً حتى لا تتقاطع مع قواعد شات التطبيق (.chat-card/.chat-body/.bubble)
+   التي تُعرَّف لاحقاً وتسبّبت بارتفاع بطاقة تساوي 70vh على الموبايل وتبديل ألوان الفقاعات. */
+.hero-visual { position: relative; }
+.hero-visual::before {
+  content: ""; position: absolute; z-index: 0;
+  inset-inline-start: -14px; bottom: -18px; width: 120px; height: 120px;
+  border-radius: 50%; background: var(--mist); opacity: .7;
+}
+.hero-chat {
+  position: relative; z-index: 1;
   background: #fff; border: 1px solid var(--mist); border-radius: 22px; padding: 18px;
   box-shadow: 0 26px 60px -36px var(--ink-10);
 }
-.chat-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 13px; border-bottom: 1px solid var(--mist); }
-.chat-agent { display: flex; align-items: center; gap: 10px; }
-.chat-agent img { padding: 3px; border-radius: 10px; background: var(--paper); }
-.chat-agent b { display: block; font-size: 13px; color: var(--ink); }
-.chat-agent em { display: block; font-size: 11px; font-weight: 700; font-style: normal; color: var(--sea); }
-.chat-pill { padding: 5px 11px; border-radius: 999px; background: var(--mist-soft); color: var(--ink); font-size: 11px; font-weight: 700; }
-.chat-body { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; }
-.bubble-user { margin-inline-start: auto; max-width: 88%; padding: 10px 14px; border-radius: 16px; background: var(--sea); color: #fff; font-size: 12.5px; line-height: 1.85; }
-.bubble-ai { margin-inline-end: auto; max-width: 94%; padding: 12px 14px; border-radius: 16px; background: var(--mist-soft); color: var(--ink); font-size: 12.5px; line-height: 1.95; }
-.bubble-ai strong { display: block; margin-bottom: 6px; }
+.hero-chat-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 13px; border-bottom: 1px solid var(--mist); }
+.hero-chat-agent { display: flex; align-items: center; gap: 10px; }
+.hero-chat-agent img { padding: 3px; border-radius: 10px; background: var(--paper); }
+.hero-chat-agent b { display: block; font-size: 13px; color: var(--ink); }
+.hero-chat-agent em { display: block; font-size: 11px; font-weight: 700; font-style: normal; color: var(--sea); }
+.hero-chat-pill { padding: 5px 11px; border-radius: 999px; background: var(--mist-soft); color: var(--ink); font-size: 11px; font-weight: 700; }
+.hero-chat-body { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; }
+.hero-bubble-user { margin-inline-start: auto; max-width: 88%; padding: 10px 14px; border-radius: 16px; background: var(--sea); color: #fff; font-size: 12.5px; line-height: 1.85; }
+.hero-bubble-ai { margin-inline-end: auto; max-width: 94%; padding: 12px 14px; border-radius: 16px; background: var(--mist-soft); color: var(--ink); font-size: 12.5px; line-height: 1.95; }
+.hero-bubble-ai strong { display: block; margin-bottom: 6px; }
 .typing { margin-inline-end: auto; display: flex; gap: 5px; width: fit-content; padding: 12px 14px; border-radius: 14px; background: var(--mist-soft); }
 .typing span { width: 7px; height: 7px; border-radius: 50%; background: var(--slate); opacity: .4; animation: zena-blink 1.2s infinite ease-in-out; }
 .typing span:nth-child(2) { animation-delay: .18s; }
@@ -340,7 +402,14 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 }
 
 .hero-stats { position: relative; border-top: 1px solid var(--mist); background: var(--paper); }
-.hero-stats-inner { max-width: 1100px; margin: 0 auto; padding: 22px 20px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; text-align: center; }
+.hero-stats-inner { max-width: 1100px; margin: 0 auto; padding: 22px 20px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+/* بطاقات الأرقام الثلاث — نمط البطاقات نفسه المستخدم في لوحة التحكم */
+.stat-cell {
+  background: #fff; border: 1px solid var(--mist); border-radius: 16px;
+  padding: 16px 14px; text-align: center; box-shadow: var(--shadow);
+  transition: transform .18s ease, border-color .18s ease;
+}
+.stat-cell:hover { transform: translateY(-2px); border-color: var(--fresh); }
 .stat-cell b { display: block; font-size: 24px; font-weight: 800; color: var(--sea); }
 .stat-cell span { font-size: 12px; font-weight: 600; color: var(--slate); }
 
@@ -348,6 +417,7 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .feature-grid { margin-top: 34px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
 .feature-card {
   background: #fff; border: 1px solid var(--mist); border-radius: 18px; padding: 22px;
+  box-shadow: var(--shadow);
   transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
 .feature-card:hover { transform: translateY(-3px); border-color: var(--fresh); box-shadow: 0 24px 42px -32px var(--ink-10); }
@@ -355,37 +425,35 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
   display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px;
   background: var(--mist-soft); color: var(--sea);
 }
-.feature-icon.warm { background: var(--apricot-soft); color: var(--ink); }
+/* تنوع لوني بين رقائق الأيقونات: زوجي = مشمشي ناعم بدل التركوازي المتكرر */
+.feature-card:nth-child(even) .feature-icon { background: var(--apricot-soft); color: var(--ink); }
 .feature-card h3 { margin-top: 14px; font-size: 15px; }
 .feature-card p { margin-top: 8px; font-size: 12.5px; line-height: 1.95; color: var(--slate); }
 
 .steps-grid { margin-top: 40px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
-.step-card { position: relative; background: #fff; border: 1px solid var(--mist); border-radius: 18px; padding: 26px 22px 22px; }
-.step-number {
+.step-card { position: relative; background: #fff; border: 1px solid var(--mist); border-radius: 18px; padding: 26px 22px 22px; box-shadow: var(--shadow); }
+/* شارة الرقم في خطوات «كيف تعمل» — مسبوقة بـ step- بدل step-number المتصادمة مع شارة رحلة المستخدم */
+.step-badge {
   position: absolute; top: -15px; inset-inline-end: 22px; display: grid; place-items: center;
   width: 32px; height: 32px; border-radius: 50%; background: var(--sea); color: #fff; font-size: 13px; font-weight: 800;
+  box-shadow: 0 6px 14px -8px var(--sea-deep);
 }
 .step-card h3 { margin-top: 14px; font-size: 15px; }
 .step-card p { margin-top: 8px; font-size: 12.5px; line-height: 1.95; color: var(--slate); }
-
-.costs { margin-top: 34px; background: #fff; border: 1px solid var(--mist); border-radius: 20px; padding: 26px; }
-.costs-head { display: flex; align-items: flex-start; gap: 14px; }
-.costs-head h3 { font-size: 16px; }
-.costs-head p { margin-top: 6px; font-size: 12.5px; line-height: 1.95; color: var(--slate); }
-.cost-grid { margin-top: 22px; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-.cost-card { background: var(--paper); border: 1px solid var(--mist); border-radius: 14px; padding: 14px; }
-.cost-card header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.cost-card header b { font-size: 12.5px; color: var(--ink); }
-.cost-card p { margin-top: 7px; font-size: 11.5px; color: var(--slate); }
-.cost-pill { padding: 3px 10px; border-radius: 999px; background: #fff; color: var(--sea-deep); font-size: 11px; font-weight: 800; white-space: nowrap; }
 
 /* ==== بطاقات الباقات ==== */
 .plans { margin-top: 36px; display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
 .plan {
   position: relative; display: flex; flex-direction: column; background: #fff;
   border: 1px solid var(--mist); border-radius: 20px; padding: 26px 20px 20px;
+  box-shadow: var(--shadow);
 }
-.plan.featured { border-color: var(--fresh); box-shadow: 0 28px 52px -36px var(--ink-10); }
+/* الباقة المميزة: حدود تركوازية + تدرّج خفيف في الخلفية لتمييزها عن الأخريات */
+.plan.featured {
+  border-color: var(--fresh);
+  background: linear-gradient(180deg, var(--mist-soft), #fff 46%);
+  box-shadow: 0 28px 52px -36px var(--ink-10);
+}
 .plan-flag {
   position: absolute; top: -13px; inset-inline-end: 20px; padding: 4px 12px; border-radius: 999px;
   background: var(--sea); color: #fff; font-size: 11px; font-weight: 700;
@@ -409,7 +477,12 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 
 /* ==== الأسئلة الشائعة ==== */
 .faq-list { margin-top: 30px; display: flex; flex-direction: column; gap: 10px; }
-.faq-item { background: #fff; border: 1px solid var(--mist); border-radius: 16px; padding: 16px 18px; }
+.faq-item {
+  background: #fff; border: 1px solid var(--mist); border-radius: 16px; padding: 16px 18px;
+  box-shadow: var(--shadow);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.faq-item:hover { border-color: var(--fresh); box-shadow: 0 18px 34px -28px var(--ink-10); }
 .faq-item[open] { border-color: var(--fresh); }
 .faq-item summary {
   display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer;
@@ -421,8 +494,20 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .faq-item p { margin-top: 12px; font-size: 12.5px; line-height: 2; color: var(--slate); }
 
 /* ==== شريط الدعوة ==== */
-.cta-band { background: var(--ink); color: #fff; }
+/* خلفية كحلية بعمق بصري: شرارتا teal/مشمشي مموّهتان خلف المحتوى */
+.cta-band { position: relative; overflow: hidden; background: var(--ink); color: #fff; }
+.cta-band::after {
+  content: ""; position: absolute; inset-inline-start: -110px; bottom: -140px;
+  width: 300px; height: 300px; border-radius: 50%;
+  background: var(--sea); opacity: .3; filter: blur(60px);
+}
+.cta-band::before {
+  content: ""; position: absolute; inset-inline-end: 12%; top: -130px;
+  width: 250px; height: 250px; border-radius: 50%;
+  background: var(--apricot); opacity: .14; filter: blur(55px);
+}
 .cta-inner {
+  position: relative; z-index: 1;
   max-width: 1100px; margin: 0 auto; padding: 48px 20px;
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 24px;
 }
@@ -479,7 +564,8 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .nav-bell {
   position: relative; display: inline-flex; align-items: center; justify-content: center;
   width: 38px; height: 38px; border-radius: 12px; border: 1px solid var(--mist);
-  background: #fff; color: var(--ink); transition: background .15s ease, border-color .15s ease;
+  background: #fff; color: var(--ink); cursor: pointer; font-family: inherit; padding: 0;
+  transition: background .15s ease, border-color .15s ease;
 }
 .nav-bell:hover { background: var(--mist-soft); border-color: var(--fresh); }
 .nav-bell-badge {
@@ -487,22 +573,7 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
   padding: 0 5px; border-radius: 999px; background: var(--apricot); color: var(--ink);
   font-size: 10px; font-weight: 800; line-height: 18px; text-align: center;
 }
-.notif-grid { display: grid; gap: 16px; }
-.notif-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.notif-list { list-style: none; margin-top: 14px; display: grid; gap: 10px; }
-.notif-item {
-  display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px;
-  border: 1px solid var(--mist); border-radius: 14px; background: #fff;
-}
-.notif-item.notif-unread { background: var(--mist-soft); border-color: var(--fresh); }
-.notif-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--apricot); margin-top: 7px; flex: none; }
-.notif-content { flex: 1; min-width: 0; }
-.notif-title { font-weight: 700; font-size: 13.5px; }
-.notif-link { color: var(--ink); text-decoration: none; }
-.notif-link:hover { color: var(--fresh); }
-.notif-body { margin-top: 4px; font-size: 12.5px; line-height: 1.9; color: var(--slate); }
-.notif-time { margin-top: 6px; font-size: 11px; color: var(--slate); }
-.notif-read-btn { font-size: 11.5px; padding: 7px 11px; flex: none; }
+.nav-bell-badge[hidden] { display: none; }
 button.btn:disabled { opacity: .55; cursor: not-allowed; }
 
 /* ==== نماذج الملف البحثي ==== */
@@ -653,7 +724,22 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .form-actions { margin-top: 26px; display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
 
 /* ==== صفحة الحساب ==== */
+/* نفس شبكة الإحصائية: بطاقة عريضة أعلى + بطاقتان جنباً إلى جنب + عمود واحد على الجوال */
 .account-grid { display: grid; gap: 16px; grid-template-columns: 1.4fr 1fr; }
+.account-grid > .card.full { grid-column: 1 / -1; }
+.account-hero { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; }
+.account-hero h2 { font-size: 18px; }
+.account-meta { display: grid; gap: 7px; min-width: 0; }
+.account-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-start; max-width: 100%; }
+/* شارة الدور بجانب الاسم — أوضح من سطر «باحث · عضو منذ» المختلط */
+.role-chip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 11px; border-radius: 999px;
+  background: var(--mist-soft); border: 1px solid var(--mist); color: var(--sea-deep);
+  font-size: 11.5px; font-weight: 700; white-space: nowrap;
+}
+.role-chip.is-admin { background: var(--ink); border-color: var(--ink); color: #fff; }
+.id-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.id-meta .muted { margin: 0; }
 /* ==== الإحصائية (الصفحة الرئيسية للوحة الباحث) ==== */
 .dash-grid { display: grid; gap: 16px; grid-template-columns: 1.4fr 1fr; }
 .dash-grid .card h2 { font-size: 15px; }
@@ -674,6 +760,68 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .kv div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 9px; border-bottom: 1px dashed var(--mist); font-size: 12.5px; }
 .kv dt { font-weight: 600; color: var(--slate); }
 .kv dd { margin: 0; font-weight: 700; color: var(--ink); text-align: end; }
+
+/* شريط مؤشرات الإحصائية (KPIs) */
+.stat-grid { grid-column: 1 / -1; display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); }
+.stat-card {
+  display: flex; align-items: center; gap: 12px; padding: 15px 17px;
+  background: #fff; border: 1px solid var(--mist); border-radius: 18px; box-shadow: var(--shadow);
+}
+.stat-icon {
+  display: grid; place-items: center; flex: 0 0 auto; width: 40px; height: 40px;
+  border-radius: 13px; background: var(--mist-soft); color: var(--sea-deep);
+}
+.stat-label { font-size: 12px; font-weight: 600; color: var(--slate); }
+.stat-value { font-size: 21px; font-weight: 800; color: var(--ink); line-height: 1.35; }
+.stat-hint { margin-top: 2px; font-size: 11px; color: var(--slate); opacity: .92; }
+.dash-hello { display: grid; gap: 7px; min-width: 0; }
+.dash-side { display: grid; gap: 12px; justify-items: start; max-width: 100%; }
+.dash-side .chips { margin: 0; justify-content: flex-start; }
+
+/* مخططات الإحصائية: أعمدة + دائري (CSS خالص، بلا مكتبات ولا سكربتات) */
+.dash-grid > .card.full { grid-column: 1 / -1; }
+.chart-card { align-self: start; }
+.chart-total { font-size: 11.5px; font-weight: 700; color: var(--sea-deep); white-space: nowrap; }
+.bars { display: flex; align-items: flex-end; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.bar-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.bar-value { font-size: 11px; font-weight: 700; color: var(--ink); }
+.bar-value.is-empty { color: var(--slate); opacity: .5; }
+.bar-track {
+  width: 100%; height: 132px; display: flex; flex-direction: column; justify-content: flex-end;
+  background: var(--mist-soft); border-radius: 10px; overflow: hidden;
+}
+.bar-fill {
+  display: block; width: 100%; height: 0; border-radius: 10px;
+  background: linear-gradient(180deg, var(--fresh), var(--sea));
+}
+.bar-label { font-size: 10.5px; font-weight: 600; color: var(--slate); }
+/* عمود اليوم الحالي: أوضح بصرياً حتى يُعرف اتجاه الزمن في المخطط (RTL: الأقدم يميناً) */
+.bar-col.is-today .bar-label { color: var(--sea-deep); font-weight: 800; }
+.bar-col.is-today .bar-track { box-shadow: inset 0 0 0 1px var(--fresh-20); }
+
+.donut-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 22px; margin-top: 14px; }
+.donut { position: relative; flex: 0 0 auto; width: 148px; height: 148px; border-radius: 50%; }
+.donut-hole {
+  position: absolute; inset: 26%; border-radius: 50%; background: #fff;
+  display: grid; place-items: center; align-content: center; text-align: center; line-height: 1.3;
+}
+.donut-hole b { display: block; font-size: 18px; color: var(--ink); }
+.donut-hole em { font-size: 10px; font-style: normal; color: var(--slate); }
+.legend { flex: 1 1 205px; min-width: 0; list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+.legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.legend-dot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; }
+.legend-label { color: var(--ink); font-weight: 600; }
+.legend-value { margin-inline-start: auto; color: var(--slate); font-weight: 700; white-space: nowrap; }
+
+.mini-stats { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 10px; }
+.mini-stats li { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.mini-icon {
+  display: grid; place-items: center; flex: 0 0 auto; width: 30px; height: 30px;
+  border-radius: 10px; background: var(--mist-soft); color: var(--sea-deep);
+}
+.mini-stats b { color: var(--ink); font-size: 15px; font-weight: 800; }
+.mini-label { color: var(--slate); }
+.mini-note { margin-top: 12px; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--slate); }
 
 @media (max-width: 900px) {
   .hero-grid { grid-template-columns: 1fr; padding: 40px 20px; }
@@ -720,18 +868,46 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   font-size: 10px; font-weight: 800; line-height: 17px; text-align: center;
 }
 .icon-btn-badge[hidden] { display: none; }
-.app-user {
-  display: inline-flex; align-items: center; gap: 8px; padding: 3px 11px 3px 5px;
-  border-radius: 999px; background: rgba(255, 255, 255, .09); color: #fff;
-  font-size: 12px; font-weight: 700; max-width: 210px;
-}
-.app-user:hover { background: rgba(255, 255, 255, .18); color: #fff; }
-.app-user img, .app-user .avatar-xs {
-  width: 28px; height: 28px; border-radius: 50%; flex: 0 0 auto; object-fit: cover;
+.avatar-xs {
   display: grid; place-items: center; background: var(--paper); color: var(--sea-deep);
   font-size: 12px; font-weight: 800;
 }
-.app-user-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ==== قائمة حساب المستخدم المنسدلة (زر دائري بصورة الحساب في الناف بار) ==== */
+/* الزر دائري بصورة الحساب؛ القائمة بيضاء أسفله على حافة الشريط نحو داخل الصفحة */
+.user-wrap { position: relative; }
+.user-toggle {
+  display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
+  border: 2px solid rgba(216, 243, 239, .35); background: transparent; cursor: pointer; padding: 0; overflow: hidden;
+}
+.user-toggle:hover { border-color: var(--fresh); }
+.user-toggle img, .user-toggle .avatar-xs {
+  width: 100%; height: 100%; border-radius: 50%; object-fit: cover;
+  display: grid; place-items: center; background: var(--paper); color: var(--sea-deep);
+  font-size: 13px; font-weight: 800;
+}
+.user-menu {
+  position: absolute; top: calc(100% + 9px); inset-inline-end: 0; min-width: 218px;
+  background: #fff; border: 1px solid var(--mist); border-radius: 16px; color: var(--slate);
+  box-shadow: 0 26px 48px -26px var(--ink-10); overflow: hidden; z-index: 80; padding: 6px;
+}
+.user-menu[hidden] { display: none; }
+.user-menu-head { padding: 10px 12px 8px; border-bottom: 1px solid var(--mist); display: grid; gap: 2px; }
+.user-menu-head b { color: var(--ink); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-menu-head span { font-size: 11.5px; color: var(--slate); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-menu a {
+  display: flex; align-items: center; gap: 10px; padding: 9px 11px; margin-top: 2px;
+  border-radius: 11px; color: var(--slate); font-size: 12.5px; font-weight: 600;
+}
+.user-menu a:hover { background: var(--mist-soft); color: var(--sea-deep); }
+.user-menu a.danger, .app-nav a.danger { color: #a13a2c; }
+.user-menu a.danger:hover, .app-nav a.danger:hover { background: var(--apricot-soft); color: #7c2b1f; }
+
+/* النسخة الفاتحة للقائمة في الترويسة العامة */
+.site-actions .user-toggle { border-color: var(--mist); }
+.site-actions .user-toggle:hover { border-color: var(--fresh); }
+.site-actions .user-menu a.danger { color: #a13a2c; }
+.site-actions .user-menu a.danger:hover { background: var(--apricot-soft); color: #7c2b1f; }
 
 /* ==== قائمة الجرس ==== */
 /* الجرس في نهاية شريط التطبيق (يسار الشاشة لأن الواجهة RTL)، فنثبّت القائمة
@@ -771,7 +947,6 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .bell-item-actions { display: grid; gap: 3px; flex: 0 0 auto; }
 .bell-empty { flex: 0 0 auto; padding: 20px 14px; text-align: center; font-size: 12px; color: var(--slate); }
 .bell-empty[hidden] { display: none; }
-.bell-foot { flex: 0 0 auto; padding: 9px 13px; border-top: 1px solid var(--mist); text-align: center; font-size: 11.5px; font-weight: 600; }
 /* ملاحظة: الجرس في أعلى الشاشة، فالقائمة تنزل دائماً للأسفل ولا تنقلب أبداً
    (القلب للأعلى يدفعها خارج أعلى الشاشة فيختفي كل شيء). على الشاشات القصيرة
    نكتفي بتقليل الفراغات، والـ max-height أعلاه يمنع تجاوز حافة الشاشة. */
@@ -803,6 +978,28 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .app-nav-label { padding: 9px 11px 3px; font-size: 10.5px; font-weight: 800; letter-spacing: .08em; color: var(--slate); }
 .app-nav-sep { height: 1px; background: var(--mist); margin: 6px 9px; }
 .app-nav a.danger:hover { background: var(--apricot-soft); color: var(--ink); }
+
+/* ==== لوحة الإدارة (area: 'admin'): ترويسة + سايدبار + عناصر تحكم ==== */
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+.topbar-link { color: #fff; font-size: 13px; font-weight: 600; padding: 8px 11px; border-radius: 10px; }
+.topbar-link:hover { background: rgba(255, 255, 255, .12); color: #fff; }
+/* أقراص الصلاحيات: الاسم + زر صغير للحذف داخل الشريحة نفسها */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--mist-soft); border: 1px solid var(--mist); border-radius: 999px;
+  padding: 4px 10px; font-size: 12px; font-weight: 600; color: var(--ink);
+}
+.chip form { display: inline-flex; margin: 0; }
+.chip button {
+  border: 0; background: transparent; padding: 0 1px; cursor: pointer;
+  color: var(--slate); font-size: 14px; line-height: 1;
+}
+.chip button:hover { color: #a13a2c; }
+/* شبكة معلومات في صفحة تفصيل الباحث وبطاقة النظام */
+.info-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.info-grid .card { margin: 0; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 
 /* ============ مساحة عمل الباحث: مسار البحث والمراجع والمفكرة والملفات والشات ============ */
 /* ترويسة بطاقة: العنوان يمين وزر إجراء يسار (مثل «إضافة نقاط» في الإحصائية) */
@@ -998,8 +1195,8 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   .app-nav a { white-space: nowrap; padding: 8px 12px; border-radius: 999px; }
   .app-nav-foot { margin-top: 0; display: flex; align-items: center; gap: 6px; }
   .app-nav-sep { display: none; }
+  .app-nav-label { display: none; }
   .app-top .brand-text { display: none; }
-  .app-user-name { display: none; }
   .chat-card { height: 70vh; min-height: 420px; }
   .chat-nav { margin-top: 0; }
   .chat-list { max-height: 120px; }
@@ -1007,18 +1204,59 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 }
 `;
 
-/** شريط التنقل مع تمييز الصفحة الحالية. */
-function renderNav(activeKey) {
-  return NAV_ITEMS.map((item) => {
-    const active = item.key === activeKey ? ' class="active"' : '';
-    return `<a href="${item.href}"${active}>${escapeHtml(item.label)}</a>`;
-  }).join('');
+/**
+ * سايدبار لوحة الإدارة: مجموعات أقسام بأيقونات + تمييز الصفحة الحالية،
+ * وأسفله رابط زيارة الموقع وتسجيل الخروج (نفس عائلة تنسيقات app-nav).
+ */
+function renderAdminSidebar(activeKey) {
+  const link = (item) =>
+    `<a href="${item.href}"${item.key === activeKey ? ' class="active"' : ''}>${icon(item.icon, 'icon-sm')}<span>${escapeHtml(
+      item.label
+    )}</span></a>`;
+
+  const groups = ADMIN_NAV.map(
+    (group) => `<div class="app-nav-label">${escapeHtml(group.label)}</div>${group.items.map(link).join('')}`
+  ).join('');
+
+  return `<aside class="app-side">
+  <nav class="app-nav" aria-label="أقسام لوحة الإدارة">
+    <div class="app-nav-sep first"></div>
+    ${groups}
+    <div class="app-nav-foot">
+      <div class="app-nav-sep"></div>
+      <a href="/">${icon('rocket', 'icon-sm')}<span>زيارة الموقع</span></a>
+      <a class="danger" href="/logout">${icon('logout', 'icon-sm')}<span>تسجيل الخروج</span></a>
+    </div>
+  </nav>
+</aside>`;
 }
 
-/** بطاقة إحصائية واحدة. */
+/** ترويسة لوحة الإدارة: الشعار بعنوان «لوحة الإدارة» + رابط زيارة الموقع + قائمة الحساب. */
+function renderAdminTopbar(activeKey, account) {
+  return `<header class="topbar admin-top">
+  <div class="topbar-inner">
+    ${renderBrand(activeKey)}
+    <div class="topbar-actions">
+      <a class="topbar-link" href="/">زيارة الموقع</a>
+      ${account ? renderUserMenu(account) : ''}
+    </div>
+  </div>
+</header>`;
+}
+
+/**
+ * بطاقة إحصائية واحدة.
+ * الأرقام (والأرقام المكتوبة كنص) تُنسَّق بفواصل الآلاف، أم النصوص ذات الوحدات
+ * (مثل «100 MB» أو «1.2 GB · 42 ملف») فتُعرض كما هي — وإلا تحوّلت إلى NaN.
+ */
 export function renderStat(label, value) {
+  const isNumeric =
+    value == null ||
+    typeof value === 'number' ||
+    (typeof value === 'string' && (value.trim() === '' || Number.isFinite(Number(value))));
+  const text = isNumeric ? formatNumber(value) : String(value);
   return `<div class="stat"><p class="stat-label">${escapeHtml(label)}</p><p class="stat-value">${escapeHtml(
-    formatNumber(value)
+    text
   )}</p></div>`;
 }
 
@@ -1051,13 +1289,54 @@ function renderBrand(activeKey) {
 </a>`;
 }
 
-/** الشريط العلوي المضغوط للوحة الباحث: الشعار + جرس الإشعارات + حساب المستخدم. */
-function renderAppTopbar(account, unread = 0) {
-  const name = String(account?.full_name || account?.email || 'باحث').trim();
-  const avatar = account?.photo_url
-    ? `<img src="${escapeHtml(account.photo_url)}" alt="" width="28" height="28" referrerpolicy="no-referrer" />`
-    : `<span class="avatar-xs">${escapeHtml(name.charAt(0) || '؟')}</span>`;
+/**
+ * محتوى قائمة الإشعارات المنسدلة (مشترك بين شريط التطبيق والترويسة العامة).
+ * لا صفحة إشعارات مخصّصة — كل الإشعارات تُعرض هنا ويُدار بها من /js/app-shell.js.
+ */
+function renderBellMenu() {
+  return `<div class="bell-menu" id="bell-menu" hidden>
+    <div class="bell-head">
+      <b>الإشعارات</b>
+      <button type="button" class="bell-mini" id="bell-read-all">تعليم الكل كمقروء</button>
+    </div>
+    <ul class="bell-list" id="bell-list"></ul>
+    <div class="bell-empty" id="bell-empty">جارٍ تحميل الإشعارات…</div>
+  </div>`;
+}
 
+/**
+ * قائمة حساب المستخدم المنسدلة (مشتركة بين شريط التطبيق والترويسة العامة):
+ * زر دائري بصورة الحساب يفتح قائمة: حسابي · ملفي البحثي · الباقات · لوحة الإدارة (للمدير) · تسجيل الخروج.
+ */
+function renderUserMenu(account) {
+  const name = String(account?.full_name || account?.email || 'باحث').trim();
+  const email = String(account?.email || '').trim();
+  const initial = name.charAt(0) || '؟';
+
+  const avatar = account?.photo_url
+    ? `<img src="${escapeHtml(account.photo_url)}" alt="" width="32" height="32" referrerpolicy="no-referrer" />`
+    : `<span class="avatar-xs">${escapeHtml(initial)}</span>`;
+
+  return `<div class="user-wrap">
+    <button type="button" class="user-toggle" id="user-toggle" aria-expanded="false" aria-haspopup="true" aria-controls="user-menu" title="${escapeHtml(name)}" aria-label="قائمة الحساب">
+      ${avatar}
+    </button>
+    <div class="user-menu" id="user-menu" hidden>
+      <div class="user-menu-head">
+        <b>${escapeHtml(name)}</b>
+        ${email && email !== name ? `<span>${escapeHtml(email)}</span>` : ''}
+      </div>
+      <a href="/account">${icon('user', 'icon-sm')}<span>حسابي ورصيد النقاط</span></a>
+      <a href="/onboarding">${icon('searchCheck', 'icon-sm')}<span>ملفي البحثي</span></a>
+      <a href="/#pricing">${icon('coins', 'icon-sm')}<span>الباقات</span></a>
+      ${account?.role === 'admin' ? `<a href="/admin">${icon('shield', 'icon-sm')}<span>لوحة الإدارة</span></a>` : ''}
+      <a class="danger" href="/logout">${icon('logout', 'icon-sm')}<span>تسجيل الخروج</span></a>
+    </div>
+  </div>`;
+}
+
+/** الشريط العلوي المضغوط للوحة الباحث: الشعار + جرس الإشعارات + صورة الحساب (قائمة منسدلة). */
+function renderAppTopbar(account, unread = 0) {
   const badge =
     unread > 0
       ? `<span class="icon-btn-badge" id="bell-badge">${unread > 99 ? '99+' : unread}</span>`
@@ -1079,19 +1358,9 @@ function renderAppTopbar(account, unread = 0) {
           ${icon('bell', 'icon-sm')}
           ${badge}
         </button>
-        <div class="bell-menu" id="bell-menu" hidden>
-          <div class="bell-head">
-            <b>الإشعارات</b>
-            <button type="button" class="bell-mini" id="bell-read-all">تعليم الكل كمقروء</button>
-          </div>
-          <ul class="bell-list" id="bell-list"></ul>
-          <div class="bell-empty" id="bell-empty">جارٍ تحميل الإشعارات…</div>
-          <div class="bell-foot"><a href="/notifications">كل الإشعارات</a> · <a href="/dashboard">لوحتي</a></div>
-        </div>
+        ${renderBellMenu()}
       </div>
-      <a class="app-user" href="/dashboard" title="لوحتي">${avatar}<span class="app-user-name">${escapeHtml(name)}</span></a>
-      <a class="icon-btn" href="/account" title="حسابي ورصيد النقاط" aria-label="حسابي ورصيد النقاط">${icon('user', 'icon-sm')}</a>
-      <a class="icon-btn" href="/logout" title="تسجيل الخروج" aria-label="تسجيل الخروج">${icon('logout', 'icon-sm')}</a>
+      ${renderUserMenu(account)}
     </div>
   </div>
 </header>`;
@@ -1128,7 +1397,7 @@ function renderAppSidebar(activeKey, account, navBottom = '') {
 </aside>`;
 }
 
-/** ترويسة الصفحة العامة: قائمة الموقع + زر الدخول أو الحساب حسب حالة الجلسة. */
+/** ترويسة الصفحة العامة: قائمة الموقع + زر الدخول أو صورة الحساب (قائمة منسدلة) حسب الجلسة. */
 function renderPublicHeader(account, unread = 0) {
   const nav = PUBLIC_NAV.map((item) => `<a href="${item.href}">${escapeHtml(item.label)}</a>`).join('');
 
@@ -1136,15 +1405,23 @@ function renderPublicHeader(account, unread = 0) {
     ? `<a class="link-quiet" href="${needsOnboarding(account) ? '/onboarding' : homePathFor(account)}">${
         needsOnboarding(account) ? 'أكمل ملفك البحثي' : account.role === 'admin' ? 'لوحة الإدارة' : 'لوحتي'
       }</a>
-       <a class="btn" href="/logout">${icon('logout', 'icon-sm')} خروج</a>`
+       ${renderUserMenu(account)}`
     : `<a class="link-quiet" href="/login">تسجيل الدخول</a>
        <a class="btn btn-primary" href="/login">ابدأ مجاناً</a>`;
 
-  // جرس الإشعارات يظهر فقط للمسجّل — مع شارة عدد غير المقروء إن وُجدت
+  // جرس الإشعارات يظهر فقط للمسجّل — قائمة منسدلة (بلا صفحة مخصّصة)
+  const bellBadge =
+    unread > 0
+      ? `<span class="nav-bell-badge" id="bell-badge">${unread > 99 ? '99+' : unread}</span>`
+      : '<span class="nav-bell-badge" id="bell-badge" hidden>0</span>';
   const bell = account
-    ? `<a class="nav-bell" href="/notifications" title="الإشعارات" aria-label="الإشعارات">${icon('bell', 'icon-sm')}${
-        unread > 0 ? `<span class="nav-bell-badge">${unread > 99 ? '99+' : unread}</span>` : ''
-      }</a>`
+    ? `<div class="bell-wrap">
+      <button type="button" class="nav-bell" id="bell-toggle" aria-expanded="false" aria-haspopup="true" aria-controls="bell-menu" title="الإشعارات" aria-label="الإشعارات">
+        ${icon('bell', 'icon-sm')}
+        ${bellBadge}
+      </button>
+      ${renderBellMenu()}
+    </div>`
     : '';
 
   return `<header class="site-header">
@@ -1189,8 +1466,9 @@ function renderPublicFooter() {
     </div>
   </div>
   <div class="footer-bottom">
-    © ${new Date().getFullYear()} ${escapeHtml(APP_NAME)} — جميع الحقوق محفوظة. المنصة أداة مساعدة
-    للباحث ولا تُغني عن إشراف الأستاذ المشرف.
+    <a class="status-chip" href="/status"><span class="status-dot" aria-hidden="true"></span> جميع الأنظمة تعمل</a>
+    <span class="footer-copy">© ${new Date().getFullYear()} ${escapeHtml(APP_NAME)} — جميع الحقوق محفوظة. المنصة أداة مساعدة
+    للباحث ولا تُغني عن إشراف الأستاذ المشرف.</span>
   </div>
 </footer>`;
 }
@@ -1224,10 +1502,11 @@ export function renderLayout({
         ? ''
         : area === 'app'
           ? renderAppTopbar(account, unread)
-          : `<header class="topbar">
+          : area === 'admin'
+            ? renderAdminTopbar(activeKey, account)
+            : `<header class="topbar">
   <div class="topbar-inner">
     ${renderBrand(activeKey)}
-    <nav class="nav">${renderNav(activeKey)}</nav>
   </div>
 </header>`;
 
@@ -1248,9 +1527,14 @@ export function renderLayout({
   </div>`
     : '';
 
-  const scriptTags = Array.isArray(scripts)
-    ? scripts.map((src) => `<script src="${escapeHtml(src)}" defer></script>`).join('\n')
-    : '';
+  // جرس الإشعارات المنسدل يعمل أيضاً على الصفحات العامة ولوحة الإدارة لمن لديه جلسة
+  const extraScripts = (area === 'public' || area === 'admin') && account ? ['/js/app-shell.js'] : [];
+  const allScripts = [
+    ...new Set([...(Array.isArray(scripts) ? scripts : []), ...extraScripts])
+  ];
+  const scriptTags = allScripts
+    .map((src) => `<script src="${escapeHtml(src)}" defer></script>`)
+    .join('\n');
 
   // لوحة الباحث: السايدبار يمين (RTL) والمحتوى في العمود الثاني.
   // navBottom محتوى إضافي أسفل قائمة السايدبار (سجل جلسات الشات مثلاً).
@@ -1263,7 +1547,11 @@ export function renderLayout({
         account,
         navBottom
       )}</div>`
-      : `${headBlock}${body}`;
+      : area === 'admin'
+        ? `<div class="${shellClass}"><div class="app-main">${headBlock}${body}</div>${renderAdminSidebar(
+          activeKey
+        )}</div>`
+        : `${headBlock}${body}`;
 
   return `<!doctype html>
 <html lang="ar" dir="rtl">
@@ -1280,7 +1568,7 @@ export function renderLayout({
 </head>
 <body>
 ${header}
-<main class="${area === 'auth' ? 'auth-main' : area === 'app' ? 'app-page' : 'page'}">
+<main class="${area === 'auth' ? 'auth-main' : area === 'app' || area === 'admin' ? 'app-page' : 'page'}">
   ${mainInner}
 </main>
 ${footer}
@@ -1302,4 +1590,4 @@ export function renderNotice({ title, message, details = '', status = 200, extra
   return { status, html: renderLayout({ title, subtitle: 'لوحة الإدارة', activeKey: 'home', body }) };
 }
 
-export { APP_NAME, APP_TAGLINE, BRAND, NAV_ITEMS, APP_NAV, APP_ACCOUNT_NAV, STYLES };
+export { APP_NAME, APP_TAGLINE, BRAND, ADMIN_NAV, APP_NAV, APP_ACCOUNT_NAV, STYLES };

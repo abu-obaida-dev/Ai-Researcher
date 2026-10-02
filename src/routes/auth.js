@@ -24,9 +24,10 @@ import {
 } from '../constants.js';
 import { homePathFor, requireAccount } from '../middleware/auth.js';
 import { getJourneySummary } from '../services/journey.js';
+import { getDashboardStats } from '../services/dashboard.js';
 import { freeTrialTokens, getPlanByCode } from '../services/plans.js';
 import { ensureUserFromGoogle, getProfile, getUsageOverview, saveOnboarding } from '../services/users.js';
-import { activeDeviceCount, notifyUser, pushStatusHint, unreadCount } from '../services/notifications.js';
+import { notifyUser, unreadCount } from '../services/notifications.js';
 import { renderAccountPage, renderAuthNotice, renderDashboardPage, renderLoginPage, renderOnboardingPage } from '../views/auth.js';
 
 /**
@@ -290,11 +291,12 @@ router.get('/dashboard', requireAccount, async (req, res) => {
 
   // الملف البحثي أولاً لأن درجته هي التي تختار مسار البحث المعروض في الإحصائية
   const profile = await getProfile(req.account.id);
-  const [plan, usage, journey, unread] = await Promise.all([
+  const [plan, usage, journey, unread, stats] = await Promise.all([
     getPlanByCode(req.account.plan_code || FREE_PLAN_CODE),
     getUsageOverview(req.account.id),
     getJourneySummary(req.account.id, profile?.degree_level || 'bachelor'),
-    unreadCount(req.account.id)
+    unreadCount(req.account.id),
+    getDashboardStats(req.account.id)
   ]);
 
   res.type('html').send(
@@ -304,19 +306,19 @@ router.get('/dashboard', requireAccount, async (req, res) => {
       plan,
       usage,
       journey,
-      unread
+      unread,
+      stats
     })
   );
 });
 
-/** صفحة الحساب: البيانات + الباقة + الرصيد + آخر العمليات + حالة الإشعارات. */
+/** صفحة الحساب: البيانات + الباقة + الرصيد + آخر العمليات. */
 router.get('/account', requireAccount, async (req, res) => {
-  const [profile, plan, usage, unread, devices] = await Promise.all([
+  const [profile, plan, usage, unread] = await Promise.all([
     getProfile(req.account.id),
     getPlanByCode(req.account.plan_code || FREE_PLAN_CODE),
     getUsageOverview(req.account.id),
-    unreadCount(req.account.id),
-    activeDeviceCount(req.account.id)
+    unreadCount(req.account.id)
   ]);
 
   res.type('html').send(
@@ -325,7 +327,7 @@ router.get('/account', requireAccount, async (req, res) => {
       profile,
       plan,
       usage,
-      notifications: { hint: pushStatusHint(), devices, unread }
+      unread
     })
   );
 });
