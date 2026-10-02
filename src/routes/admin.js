@@ -17,7 +17,7 @@ import {
   renderAdminUserDetail,
   renderAdminUsers
 } from '../views/admin.js';
-import { probeProvider, providerStatus } from '../services/ai.js';
+import { probeProvider, providerStatus, addCustomLink, customLinks, linkCatalog, removeCustomLink } from '../services/ai.js';
 
 /**
  * لوحة الإدارة: صفحات HTML مولَّدة على الخادم بديلاً عن واجهة /admin القديمة (React).
@@ -45,6 +45,22 @@ function tokenBack(req) {
     const query = params.toString();
     return query ? `${path}?${query}` : path;
   };
+}
+
+/**
+ * يقرأ فلتر عمليات الاستهلاك من الطلب: تاريخ YYYY-MM-DD اختياري + من/إلى ساعة
+ * (0–23) + عدد نتائج محدود. يعيد قيماً نقية (null للفراغ) آمنة للاستعلام
+ * وإعادة العرض في النموذج.
+ */
+function readOpsFilter(req, { defaultLimit = 8, maxLimit = 500 } = {}) {
+  const dateRaw = String(req.query.date || '').trim();
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? dateRaw : null;
+  const hour = (value) => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isInteger(parsed) && parsed >= 0 && parsed <= 23 ? parsed : null;
+  };
+  const limit = Math.min(maxLimit, Math.max(1, Number.parseInt(req.query.limit, 10) || defaultLimit));
+  return { date, h1: hour(req.query.h1), h2: hour(req.query.h2), limit };
 }
 
 /** مدة تشغيل الخادم بصيغة عربية (أيام/ساعات/دقائق) لبطاقة حالة النظام. */
@@ -148,11 +164,13 @@ async function renderPage(res, load, view) {
   }
 }
 
-router.get('/', (req, res) =>
-  renderPage(
+router.get('/', (req, res) => {
+  const filter = readOpsFilter(req, { defaultLimit: 8 });
+
+  return renderPage(
     res,
     async () => {
-      const [counts, days, latestUsers, recent] = await Promise.all([
+      const [counts, days, latestUsers, recent, typeShare] = await Promise.all([
         pool.query(`SELECT
             (SELECT count(*) FROM users)::int AS users,
             (SELECT count(*) FROM users WHERE is_active)::int AS active_users,
@@ -180,25 +198,40 @@ router.get('/', (req, res) =>
             LEFT JOIN profiles p ON p.user_id = u.id
             ORDER BY u.created_at DESC
             LIMIT 5`),
-        pool.query(`SELECT l.created_at, l.type, l.tokens_used, l.summary, u.email
-            FROM usage_logs l
-            JOIN users u ON u.id = l.user_id
+        // آخر العمليات مع فلتر التاريخ/الساعات + عدد النتائج المختار
+        pool.query(
+          `SELECT l.created_at, l.type, l.tokens_used, l.summary, u.email
+             FROM usage_logs l
+             JOIN users u ON u.id = l.user_id
+            WHERE ($1::date IS NULL OR l.created_at::date = $1::date)
+              AND ($2::int IS NULL OR date_part('hour', l.created_at) >= $2::int)
+              AND ($3::int IS NULL OR date_part('hour', l.created_at) <= $3::int)
             ORDER BY l.created_at DESC
-            LIMIT 8`)
+            LIMIT $4`,
+          [filter.date, filter.h1, filter.h2, filter.limit]
+        ),
+        // توزيع نقاط الأسبوع على الأنواع للمخطط الدائري
+        pool.query(`SELECT type, COALESCE(SUM(tokens_used), 0)::int AS tokens, count(*)::int AS events
+            FROM usage_logs
+           WHERE created_at::date >= current_date - interval '6 days'
+           GROUP BY type
+           ORDER BY SUM(tokens_used) DESC`)
       ]);
 
       return {
         counts: counts.rows[0],
         days: days.rows,
+        typeShare: typeShare.rows,
         latestUsers: latestUsers.rows,
         recent: recent.rows,
+        filter,
         sent: Math.max(0, Number.parseInt(req.query.sent, 10) || 0),
         adminToken: String(req.query.token || '').slice(0, 200)
       };
     },
     renderAdminHome
-  )
-);
+  );
+});
 
 /**
  * حالة مزوّدي الذكاء الاصطناعي: من يعمل، من متوقّف، ولماذا بالضبط.
@@ -219,12 +252,34 @@ router.get('/providers', (req, res) =>
       return {
         status: status.map((item) => ({ ...item, probe: probes.find((p) => p.key === item.key) || null })),
         probed: shouldProbe,
+        links: customLinks(),
+        catalog: linkCatalog(),
+        saved: String(req.query.saved || '').slice(0, 60),
+        error: String(req.query.error || '').slice(0, 300),
         adminToken: String(req.query.token || '').slice(0, 200)
       };
     },
     renderAdminProviders
   )
 );
+
+/** ربط موديل بمفتاح خاص: يُحفظ في الإعدادات ويدخل الكاش فوراً (بلا إعادة تشغيل). */
+router.post('/providers/link', async (req, res) => {
+  const back = tokenBack(req);
+  const result = await addCustomLink({
+    provider: req.body?.provider,
+    model: req.body?.model,
+    api_key: req.body?.api_key
+  });
+  res.redirect(302, back('/admin/providers', result.ok ? { saved: 'link_added' } : { error: result.error }));
+});
+
+/** حذف رابط موديل بفهرسه: يخرج المفتاح من السباق ويحدّث الكاش فوراً. */
+router.post('/providers/link/delete', async (req, res) => {
+  const back = tokenBack(req);
+  const result = await removeCustomLink(req.body?.index);
+  res.redirect(302, back('/admin/providers', result.ok ? { saved: 'link_removed' } : { error: result.error }));
+});
 
 router.get('/plans', (req, res) =>
   renderPage(
@@ -248,32 +303,55 @@ router.get('/plans', (req, res) =>
   )
 );
 
-router.get('/usage', (_req, res) =>
-  renderPage(
+router.get('/usage', (req, res) => {
+  const filter = readOpsFilter(req, { defaultLimit: 100 });
+  const q = String(req.query.q ?? '').trim().slice(0, 100);
+  const term = `%${q.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`;
+
+  return renderPage(
     res,
     async () => {
-      const [summary, recent, totals] = await Promise.all([
+      const [summary, recent, totals, days14] = await Promise.all([
         pool.query(`SELECT type, count(*)::int AS events, COALESCE(SUM(tokens_used), 0)::int AS tokens
             FROM usage_logs
             GROUP BY type
             ORDER BY tokens DESC`),
-        pool.query(`SELECT l.created_at, l.type, l.tokens_used, l.summary, u.email
-            FROM usage_logs l
-            JOIN users u ON u.id = l.user_id
+        // بحث ?q= (إيميل/نوع/ملخص) + فلتر التاريخ/الساعات + عدد النتائج
+        pool.query(
+          `SELECT l.created_at, l.type, l.tokens_used, l.summary, u.email
+             FROM usage_logs l
+             JOIN users u ON u.id = l.user_id
+            WHERE ($1::date IS NULL OR l.created_at::date = $1::date)
+              AND ($2::int IS NULL OR date_part('hour', l.created_at) >= $2::int)
+              AND ($3::int IS NULL OR date_part('hour', l.created_at) <= $3::int)
+              AND ($4 = '' OR u.email ILIKE $5 OR l.type ILIKE $5 OR COALESCE(l.summary, '') ILIKE $5)
             ORDER BY l.created_at DESC
-            LIMIT 100`),
-        pool.query('SELECT COALESCE(SUM(tokens_used), 0)::int AS total FROM usage_logs')
+            LIMIT $6`,
+          [filter.date, filter.h1, filter.h2, q, term, filter.limit]
+        ),
+        pool.query('SELECT COALESCE(SUM(tokens_used), 0)::int AS total FROM usage_logs'),
+        pool.query(`SELECT to_char(gs::date, 'YYYY-MM-DD') AS day,
+             COALESCE(count(l.id), 0)::int AS events,
+             COALESCE(sum(l.tokens_used), 0)::int AS tokens
+        FROM generate_series(current_date - interval '13 days', current_date::timestamp, interval '1 day') AS gs
+   LEFT JOIN usage_logs l ON l.created_at::date = gs::date
+    GROUP BY gs::date
+    ORDER BY gs::date`)
       ]);
 
       return {
         summary: summary.rows,
         recent: recent.rows,
-        totalTokens: totals.rows[0].total
+        totalTokens: totals.rows[0].total,
+        days14: days14.rows,
+        q,
+        filter,
+        adminToken: String(req.query.token || '').slice(0, 200)
       };
     },
     renderAdminUsage
-  )
-);
+  );
+});
 
 router.get('/users', (req, res) => {
   const search = String(req.query.q ?? '').trim().slice(0, 100);
@@ -654,7 +732,6 @@ router.get('/admins', (req, res) =>
     async () => {
       const { rows } = await pool.query('SELECT email, added_by, created_at FROM admins ORDER BY created_at DESC');
       return {
-        envAdmins: adminEmailsFromEnv(),
         dbAdmins: rows,
         saved: String(req.query.saved || '').slice(0, 60),
         error: String(req.query.error || '').slice(0, 300),
@@ -664,6 +741,47 @@ router.get('/admins', (req, res) =>
     renderAdminAdmins
   )
 );
+
+/** تعديل بريد مدير موجود — يحدّث الجدول ويحتفظ بإضافة/تاريخ السطر. */
+router.post('/admins/edit', async (req, res) => {
+  const back = tokenBack(req);
+  const email = String(req.body?.email || '').trim().toLowerCase().slice(0, 255);
+  const newEmail = String(req.body?.new_email || '').trim().toLowerCase().slice(0, 255);
+
+  if (!EMAIL_RE.test(email) || !EMAIL_RE.test(newEmail)) {
+    res.redirect(302, back('/admin/admins', { error: 'بريد إلكتروني غير صالح.' }));
+    return;
+  }
+  if (email === newEmail) {
+    res.redirect(302, back('/admin/admins', { saved: 'admin_updated' }));
+    return;
+  }
+  if (adminEmailsFromEnv().includes(newEmail)) {
+    res.redirect(302, back('/admin/admins', { error: 'هذا البريد موجود في .env أصلاً — لا يحتاج إضافته هنا.' }));
+    return;
+  }
+
+  try {
+    const clash = await pool.query('SELECT 1 FROM admins WHERE lower(email) = $1 AND lower(email) <> $2', [
+      newEmail,
+      email
+    ]);
+    if (clash.rows.length) {
+      res.redirect(302, back('/admin/admins', { error: 'البريد الجديد مستخدم لمدير آخر.' }));
+      return;
+    }
+
+    const result = await pool.query('UPDATE admins SET email = $2 WHERE lower(email) = $1', [email, newEmail]);
+    if (!result.rowCount) {
+      res.redirect(302, back('/admin/admins', { error: 'هذا المدير غير موجود في الجدول.' }));
+      return;
+    }
+
+    res.redirect(302, back('/admin/admins', { saved: 'admin_updated' }));
+  } catch (error) {
+    res.redirect(302, back('/admin/admins', { error: hintForDatabaseError(error) }));
+  }
+});
 
 /** إضافة إيميل مدير إلى الجدول — يصبح صاحبه مديراً في طلبه القادم فوراً. */
 router.post('/admins/add', async (req, res) => {
@@ -803,6 +921,53 @@ router.post('/roles/:code/permissions/delete', async (req, res) => {
     res.redirect(302, back('/admin/roles', { saved: `حُذفت الصلاحية «${permission}» من الدور «${code}».` }));
   } catch (error) {
     res.redirect(302, back('/admin/roles', { error: hintForDatabaseError(error) }));
+  }
+});
+
+/** إضافة باقة جديدة — تظهر فوراً في صفحة الهبوط وكل نصوص الموقع. يسبق مسار :code عمداً. */
+router.post('/plans/add', async (req, res) => {
+  const back = tokenBack(req);
+  const code = String(req.body?.code || '').trim().toLowerCase().slice(0, 50);
+  const title = String(req.body?.title || '').trim().slice(0, 100);
+  const tagline = String(req.body?.tagline || '').trim().slice(0, 160);
+  const period = String(req.body?.period || '').trim().slice(0, 40) || 'شهرياً';
+  const price = Number.parseInt(String(req.body?.price ?? '0'), 10);
+  const tokens = Number.parseInt(String(req.body?.tokens ?? ''), 10);
+  const features = String(req.body?.features || '')
+    .split('\n')
+    .map((line) => line.trim().slice(0, 300))
+    .filter(Boolean)
+    .slice(0, 40)
+    .join('\n');
+  const popular = req.body?.popular === '1';
+  const isActive = req.body?.is_active === '1';
+
+  const fail = (message) => {
+    res.redirect(302, back('/admin/plans', { error: message }));
+  };
+
+  if (!/^[a-z0-9_-]{2,50}$/.test(code)) return fail('كود الباقة: حروف صغيرة وأرقام و _ و - فقط (من 2 إلى 50 حرفاً).');
+  if (code === FREE_PLAN_CODE) return fail('كود باقة التجربة محجوز — اختر كوداً آخر.');
+  if (!title) return fail('اسم الباقة مطلوب.');
+  if (!Number.isInteger(price) || price < 0 || price > 10000000) {
+    return fail('السعر يجب أن يكون رقماً صحيحاً بين 0 و10000000.');
+  }
+  if (!Number.isInteger(tokens) || tokens < 0 || tokens > 100000000) {
+    return fail('النقاط يجب أن تكون رقمًا صحيحاً بين 0 و100000000.');
+  }
+
+  try {
+    const exists = await pool.query('SELECT 1 FROM plans WHERE code = $1', [code]);
+    if (exists.rows.length) return fail('هذا الكود مستخدم لباقة أخرى — اختر كوداً مختلفاً.');
+
+    await pool.query(
+      `INSERT INTO plans (code, title, tagline, period, price, tokens, features, popular, is_active, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
+      [code, title, tagline, period, price, tokens, features, popular, isActive]
+    );
+    res.redirect(302, back('/admin/plans', { saved: code }));
+  } catch (error) {
+    return fail(hintForDatabaseError(error));
   }
 });
 

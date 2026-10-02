@@ -14,6 +14,7 @@ import { notificationsRouter } from './src/routes/notifications.js';
 import { workspaceRouter } from './src/routes/workspace.js';
 import { attachAccount } from './src/middleware/auth.js';
 import { freeTrialTokens, listPublicPlans } from './src/services/plans.js';
+import { loadCustomLinks } from './src/services/ai.js';
 import { renderLandingPage } from './src/views/landing.js';
 import { renderNotFoundPage, renderStatusPage } from './src/views/home.js';
 
@@ -143,6 +144,9 @@ app.use(chatRouter);
 
 // لوحة الإدارة (صفحات HTML مولَّدة على الخادم) — بديل واجهة Next.js القديمة
 app.use('/admin', adminRouter);
+
+// روابط الموديلات المخصّصة (من /admin/providers) تُقرأ مرة عند الإقلاع إلى كاش الذاكرة
+loadCustomLinks().catch((error) => console.warn('تعذّر تحميل الروابط المخصّصة:', error.message));
 
 app.use((req, res) => {
   // مسارات الـ API تبقى JSON، وبقية المسارات تحصل على صفحة 404 عربية واضحة

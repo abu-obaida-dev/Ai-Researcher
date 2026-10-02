@@ -1,4 +1,4 @@
-import { FREE_PLAN_CODE } from '../constants.js';
+import { FREE_PLAN_CODE, TOKEN_COSTS } from '../constants.js';
 import { escapeHtml, renderLayout, renderStat, renderTable } from './layout.js';
 import { formatDate, formatDateTime, formatNumber, formatPrice } from './format.js';
 
@@ -19,10 +19,13 @@ const OK_TEXT = {
   notified: 'أُرسل الإشعار إلى الباحث (داخل الموقع + push لمن فعّل هاتفه).',
   user_deleted: 'تم حذف الحساب — أُلغي دخوله فوراً وبقيت سجلاته في القاعدة.',
   admin_added: 'أُضيف المدير — تُمنح الصلاحية في الطلب التالي لذلك الحساب.',
-  admin_removed: 'أُزيل المدير من الجدول (وإن كان إيميله في .env تبقى صلاحيته ثابتة).',
-  permission_added: 'أُضيفت الصلاحية — من جدول role_permissions في القاعدة.',
-  permission_removed: 'حُذفت الصلاحية من الجدول.',
-  plan_saved: 'حُفظت الباقة — تسري على صفحة الهبوط وكل نصوص الموقع فوراً.'
+  admin_updated: 'حُدّث بريد المدير في الجدول.',
+  admin_removed: 'أُزيل المدير من الجدول — لن يستطيع دخول لوحة الإدارة بعد طلبه القادم.',
+  permission_added: 'أُضيفت الصلاحية — تسري على الحسابات في طلباتها القادمة.',
+  permission_removed: 'حُذفت الصلاحية من الدور.',
+  plan_saved: 'حُفظت الباقة — تسري على صفحة الهبوط وكل نصوص الموقع فوراً.',
+  link_added: 'حُفظ الرابط — المفتاح والنموذج دخلا الدوران فوراً بلا إعادة تشغيل.',
+  link_removed: 'حُذف الرابط — عاد المفتاح لوضعه الطبيعي (مفاتيح .env فقط إن لم يبقَ رابط).'
 };
 
 /** بطاقة مؤشر بقيمة نصية غير رقمية (اسم قاعدة البيانات، إصدار Node... إلخ). */
@@ -54,7 +57,121 @@ function renderActivityBars(days = []) {
     })
     .join('');
 
-  return `<div class="bars" role="img" aria-label="النقاط المستهلكة في آخر سبعة أيام">${bars}</div>`;
+  return `<div class="bars" role="img" aria-label="النقاط المستهلكة يومياً">${bars}</div>`;
+}
+
+/** ألوان مخططات لوحة الإدارة — من هوية المنصة (نفس درجات صفحة الاستهلاك). */
+const CHART_COLORS = ['#0d8e93', '#19b5a5', '#f4a261', '#7ecfc4', '#526777', '#0a6f73', '#c98b4b'];
+
+/** تسمية عربية لنوع عملية الاستهلاك — الأنواع غير المعروفة تبقى بكودها المفهوم. */
+function usageLabel(type) {
+  const known = TOKEN_COSTS.find((item) => item.type === type);
+  if (known) return known.label;
+  return { chat_failed: 'رسالة فشلت (بلا خصم)', admin_adjust: 'تعديل إداري' }[type] || String(type);
+}
+
+/**
+ * مخطط دائري (Donut) لتوزيع النقاط على الأنواع — conic-gradient مرسوم من
+ * الخادم بلا سكربتات، مع وسيلة إيضاح بالنقاط والنسب.
+ */
+function renderDonut(rows, { total, unit = 'نقطة' }) {
+  const clean = rows.filter((row) => Number(row.tokens) > 0);
+  if (!clean.length || !total) return '<div class="empty">لا توجد نقاط مستهلكة بعد لتوزيعها على الأنواع.</div>';
+
+  let accumulated = 0;
+  const stops = [];
+  const legend = clean.map((row, index) => {
+    const color = CHART_COLORS[index % CHART_COLORS.length];
+    const share = Number(row.tokens) / total;
+    const start = accumulated * 100;
+    accumulated += share;
+    stops.push(`${color} ${start.toFixed(2)}% ${(accumulated * 100).toFixed(2)}%`);
+
+    return `<li class="legend-item">
+  <span class="legend-dot" style="background:${color}"></span>
+  <span class="legend-label">${escapeHtml(row.label)}</span>
+  <span class="legend-value">${escapeHtml(formatNumber(row.tokens))} ${escapeHtml(unit)} · ${Math.round(share * 100)}%</span>
+</li>`;
+  });
+
+  return `<div class="donut-wrap">
+  <div class="donut" style="background:conic-gradient(${stops.join(', ')})" role="img" aria-label="توزيع النقاط على أنواع العمليات">
+    <span class="donut-hole"><b>${escapeHtml(formatNumber(total))}</b><em>${escapeHtml(unit)} موزّعة</em></span>
+  </div>
+  <ul class="legend">${legend.join('')}</ul>
+</div>`;
+}
+
+/** خيارات عدد العمليات المعروضة في فلتر الجداول. */
+const LIMIT_CHOICES = [8, 25, 50, 100, 250, 500];
+
+/**
+ * شريط فلترة عمليات الاستهلاك: بحث (اختياري) + تاريخ + من/إلى ساعة + عدد
+ * النتائج، كنموذج GET يرفع على الصفحة نفسها. الرمز الإداري يُرسل حقلًا
+ * مخفياً لأن نموذج GET يستبدل سلسلة الاستعلام في الرابط.
+ */
+function operationsFilterBar({ action, adminToken = '', q = null, date = '', h1 = '', h2 = '', limit = 8 }) {
+  const hourSelect = (id, name, current, blank) => `<select id="${id}" name="${name}">
+    <option value=""${String(current) === '' ? ' selected' : ''}>${blank}</option>
+    ${Array.from(
+      { length: 24 },
+      (_, hour) =>
+        `<option value="${hour}"${String(current) === String(hour) ? ' selected' : ''}>${String(hour).padStart(2, '0')}:00</option>`
+    ).join('')}
+  </select>`;
+
+  return `
+  <form class="filter-bar" method="get" action="${escapeHtml(action)}">
+    ${
+      q === null
+        ? ''
+        : `<div class="field">
+      <label for="op-q">بحث</label>
+      <input type="search" id="op-q" name="q" value="${escapeHtml(q)}" placeholder="إيميل أو نوع أو ملخص" />
+    </div>`
+    }
+    <div class="field">
+      <label for="op-date">التاريخ</label>
+      <input type="date" id="op-date" name="date" value="${escapeHtml(date)}" />
+    </div>
+    <div class="field">
+      <label for="op-h1">من الساعة</label>
+      ${hourSelect('op-h1', 'h1', h1, 'بداية اليوم')}
+    </div>
+    <div class="field">
+      <label for="op-h2">إلى الساعة</label>
+      ${hourSelect('op-h2', 'h2', h2, 'نهاية اليوم')}
+    </div>
+    <div class="field">
+      <label for="op-limit">عدد النتائج</label>
+      <select id="op-limit" name="limit">
+        ${LIMIT_CHOICES.map((value) => `<option value="${value}"${String(limit) === String(value) ? ' selected' : ''}>${value}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">تصفية</button>
+      <a class="btn btn-quiet" href="${escapeHtml(action)}">عرض الكل</a>
+    </div>
+    ${adminToken ? `<input type="hidden" name="token" value="${escapeHtml(adminToken)}" />` : ''}
+  </form>`;
+}
+
+/** تسميات عربية لصلاحيات الأدوار — يقرأها المدير بدل تخمين الكود. */
+const PERMISSION_LABELS = {
+  '*': 'كل الصلاحيات',
+  'dashboard:view': 'لوحة الإحصائية',
+  'chat:use': 'المشرف الذكي',
+  'journey:edit': 'مسار البحث',
+  'library:browse': 'مكتبة الملفات',
+  'students:view': 'ملفات الطلاب'
+};
+
+/** الصلاحيات المتاحة للإضافة من القائمة (بلا «كل الصلاحيات» — حماية دور المدير). */
+const PERMISSION_CHOICES = Object.keys(PERMISSION_LABELS).filter((code) => code !== '*');
+
+/** تسمية الصلاحية مع بقاء الكود الأصلي في تلميح title للمراجعة. */
+function permissionLabel(code) {
+  return PERMISSION_LABELS[code] || String(code);
 }
 
 /**
@@ -64,9 +181,11 @@ function renderActivityBars(days = []) {
 export function renderAdminHome({
   counts,
   days = [],
+  typeShare = [],
   latestUsers,
   recent = [],
   sent = 0,
+  filter = {},
   adminToken = '',
   account = null
 }) {
@@ -104,6 +223,12 @@ export function renderAdminHome({
       ? `<div class="alert"><b>تنبيه:</b> ${escapeHtml(formatNumber(counts.ai_failed))} طلباً فشل عند المزوّدين — <a href="/admin/providers">راجع صفحة المزوّدين</a> لمعرفة السبب والمفتاح المتعطّل.</div>`
       : '';
 
+  // ملخص الأسبوع للمخطط الدائري + هل الفلتر مفعّل الآن؟
+  const weekTokens = days.reduce((total, day) => total + (Number(day.tokens) || 0), 0);
+  const weekEvents = days.reduce((total, day) => total + (Number(day.events) || 0), 0);
+  const shareTotal = typeShare.reduce((total, row) => total + (Number(row.tokens) || 0), 0);
+  const isFiltered = Boolean(filter.date) || String(filter.h1 ?? '') !== '' || String(filter.h2 ?? '') !== '';
+
   const recentRows = recent.map(
     (item) => `
     <td>${escapeHtml(formatDateTime(item.created_at))}</td>
@@ -121,29 +246,48 @@ export function renderAdminHome({
       ? `<div class="alert"><b>تم الإرسال:</b> أُرسل الإشعار إلى ${escapeHtml(String(sent))} حساباً — حُفظ داخل موقع كل باحث فوراً، ووصل push لمن فعّل هاتفه.</div>`
       : ''
   }
-  <div class="card mt-16">
-    <h2>نشاط آخر ٧ أيام</h2>
-    <p class="muted">النقاط المستهلكة يومياً — الأقدم يمين والأحدث يسار، والعمود المميّز هو اليوم.</p>
-    ${renderActivityBars(days)}
-  </div>
-  <div class="card mt-16">
-    <div class="card-head">
-      <h2>أحدث الباحثين</h2>
-      <a class="btn btn-sm" href="/admin/users">إدارة كل الباحثين</a>
+  <div class="duo mt-16">
+    <div class="card">
+      <h2>نشاط آخر ٧ أيام</h2>
+      <p class="muted">
+        النقاط المستهلكة يومياً — الأقدم يمين والأحدث يسار، والعمود المميّز هو اليوم.
+        هذا الأسبوع: ${escapeHtml(formatNumber(weekTokens))} نقطة في ${escapeHtml(formatNumber(weekEvents))} عملية.
+      </p>
+      ${renderActivityBars(days)}
     </div>
-    ${renderTable({
-      columns: ['الباحث', 'الجامعة', 'الباقة', 'الرصيد', 'التسجيل'],
-      rows,
-      emptyMessage: 'لا يوجد باحثون مسجّلون بعد.'
-    })}
+    <div class="card">
+      <h2>توزيع استهلاك الأسبوع</h2>
+      <p class="muted">أي أنواع العمليات استهلكت نقاط الأسبوع — النسبة من إجمالي ${escapeHtml(formatNumber(weekTokens))} نقطة.</p>
+      ${renderDonut(typeShare.map((row) => ({ label: usageLabel(row.type), tokens: row.tokens })), { total: shareTotal })}
+    </div>
   </div>
-  <div class="card">
-    <h2>آخر العمليات على المنصة</h2>
-    ${renderTable({
-      columns: ['التاريخ', 'الباحث', 'النوع', 'النقاط', 'الملخص'],
-      rows: recentRows,
-      emptyMessage: 'لا توجد عمليات مسجّلة بعد.'
-    })}
+  <div class="duo mt-16">
+    <div class="card">
+      <div class="card-head">
+        <h2>أحدث الباحثين</h2>
+        <a class="btn btn-sm" href="/admin/users">إدارة كل الباحثين</a>
+      </div>
+      ${renderTable({
+        columns: ['الباحث', 'الجامعة', 'الباقة', 'الرصيد', 'التسجيل'],
+        rows,
+        emptyMessage: 'لا يوجد باحثون مسجّلون بعد.'
+      })}
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>آخر العمليات${isFiltered ? ' (مُصفّاة)' : ''}</h2>
+        <a class="btn btn-sm" href="/admin/usage">سجل الاستهلاك الكامل</a>
+      </div>
+      ${operationsFilterBar({ action: '/admin', adminToken, date: filter.date || '', h1: filter.h1 ?? '', h2: filter.h2 ?? '', limit: filter.limit || 8 })}
+      <div class="table-scroll">${renderTable({
+        columns: ['التاريخ', 'الباحث', 'النوع', 'النقاط', 'الملخص'],
+        rows: recentRows,
+        emptyMessage: isFiltered
+          ? 'لا توجد عمليات مطابقة لهذه التصفية — جرّب تاريخاً أو ساعات أخرى.'
+          : 'لا توجد عمليات مسجّلة بعد.'
+      })}</div>
+      <p class="muted mt-12">عرض ${escapeHtml(formatNumber(recent.length))} عملية — مرّر داخل الجدول للأسفل، أو افتح «سجل الاستهلاك الكامل» للبحث والتفاصيل.</p>
+    </div>
   </div>
   <div class="card">
     <h2>إرسال إشعار للباحثين</h2>
@@ -179,7 +323,16 @@ export function renderAdminHome({
  * صفحة حالة المزوّدين: جدول يوضّح لكل مزوّد حالته وسبب تعطّله،
  * وزر «فحص الآن» يرسل نداءً صغيراً لكل مفتاح ليرى المدير الخطأ الحقيقي.
  */
-export function renderAdminProviders({ status = [], probed = false, adminToken = '', account = null }) {
+export function renderAdminProviders({
+  status = [],
+  probed = false,
+  links = [],
+  catalog = { providers: [], models: [] },
+  saved = '',
+  error = '',
+  adminToken = '',
+  account = null
+}) {
   const query = adminToken ? `?token=${encodeURIComponent(adminToken)}` : '';
   const live = probed ? `${query ? '&' : '?'}probe=1` : `${query}${query ? '&' : '?'}probe=1`;
 
@@ -215,7 +368,32 @@ export function renderAdminProviders({ status = [], probed = false, adminToken =
     <td>${probe ? `${probe.ms}ms` : '—'}</td>`;
   });
 
+  const notice = saved && OK_TEXT[saved] ? `<div class="notice">${escapeHtml(OK_TEXT[saved])}</div>` : '';
+  const errorNotice = error ? `<div class="alert"><b>تعذّر:</b> ${escapeHtml(error)}</div>` : '';
+
+  const providerOptions = catalog.providers
+    .map((provider) => `<option value="${escapeHtml(provider.key)}">${escapeHtml(provider.label)}</option>`)
+    .join('');
+  const modelOptions = catalog.models.map((model) => `<option value="${escapeHtml(model)}"></option>`).join('');
+
+  const linkRows = links.map(
+    (link) => `
+    <td class="strong">${escapeHtml(
+      catalog.providers.find((provider) => provider.key === link.provider)?.label || link.provider
+    )}</td>
+    <td><span class="mono">${escapeHtml(link.model)}</span></td>
+    <td><span class="mono small">•••• ${escapeHtml(link.last4)}</span></td>
+    <td class="row-actions">
+      <form class="inline-form" method="post" action="/admin/providers/link/delete${query}"
+        data-confirm="حذف رابط النموذج ${escapeHtml(link.model)}؟ سيعود المفتاح لوضعه بلا رابط مخصّص.">
+        <input type="hidden" name="index" value="${escapeHtml(String(link.index))}" />
+        <button class="btn btn-sm btn-danger" type="submit">حذف</button>
+      </form>
+    </td>`
+  );
+
   const body = `
+  ${notice}${errorNotice}
   <div class="card">
     <h2>حالة مزوّدي الذكاء الاصطناعي</h2>
     <p class="muted">
@@ -233,6 +411,50 @@ export function renderAdminProviders({ status = [], probed = false, adminToken =
       rows,
       emptyMessage: 'لا يوجد مزوّدات.'
     })}
+  </div>
+  <div class="card mt-16">
+    <h2>ربط موديل بمفتاح خاص</h2>
+    <p class="muted">
+      تريد نموذجاً بعينه بمفتاحك؟ اختر المزوّد واكتب اسم النموذج والصق المفتاح — يُحفظ الرابط في قاعدة
+      البيانات ويدخل الاستخدام فوراً: المفتاح ينضمّ لسباق هذا المزوّد والنموذج يظهر في قوائم النماذج،
+      بلا تعديل .env وبلا إعادة تشغيل الخادم.
+    </p>
+    <form method="post" action="/admin/providers/link${query}">
+      <div class="field-row">
+        <div class="field">
+          <label for="link-provider">المزوّد</label>
+          <select id="link-provider" name="provider" required>${providerOptions}</select>
+        </div>
+        <div class="field">
+          <label for="link-model">اسم النموذج</label>
+          <input type="text" id="link-model" name="model" list="link-models" required maxlength="100"
+            placeholder="gemini-3.6-flash" />
+          <datalist id="link-models">${modelOptions}</datalist>
+          <p class="form-hint">اختر من القائمة أو اكتب أي اسم تعرفه عند المزوّد.</p>
+        </div>
+        <div class="field">
+          <label for="link-key">مفتاح API</label>
+          <input type="password" id="link-key" name="api_key" required minlength="8" maxlength="400"
+            autocomplete="off" placeholder="الصق المفتاح هنا" />
+          <p class="form-hint">يُحفظ في قاعدة البيانات ولا يُطبع كاملاً في أي صفحة — تظهر آخر 4 أحرف فقط.</p>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">ربط النموذج</button>
+        <span class="muted">يسري فوراً على أول طلب — هذا المفتاح يجرّب هذا النموذج وحده.</span>
+      </div>
+    </form>
+  </div>
+  <div class="card mt-16">
+    <div class="card-head">
+      <h2>الروابط المخصّصة (${escapeHtml(formatNumber(links.length))})</h2>
+    </div>
+    ${renderTable({
+      columns: ['المزوّد', 'النموذج', 'المفتاح', 'إجراء'],
+      rows: linkRows,
+      emptyMessage: 'لا توجد روابط مخصّصة — المزوّدين يعملون الآن بمفاتيح .env ونماذجها فقط.'
+    })}
+    <p class="muted mt-12">حذف الرابط يُخرج المفتاح من السباق فوراً (يبقى المفتاح في .env لو كان منها).</p>
   </div>
   <div class="card">
     <h2>معاني الأخطاء</h2>
@@ -259,11 +481,23 @@ export function renderAdminProviders({ status = [], probed = false, adminToken =
   });
 }
 
-/** سجل الاستهلاك: ملخص حسب النوع + آخر العمليات. */
-export function renderAdminUsage({ summary, recent, totalTokens, account = null }) {
+/**
+ * سجل الاستهلاك الكامل: بحث `?q=` + فلترة تاريخ/ساعات/عدد نتائج + أعمدة
+ * ١٤ يوماً + مخطط دائري للأنواع + عمليات داخل صندوق تمرير.
+ */
+export function renderAdminUsage({
+  summary = [],
+  recent = [],
+  totalTokens = 0,
+  days14 = [],
+  q = '',
+  filter = {},
+  adminToken = '',
+  account = null
+}) {
   const summaryRows = summary.map(
     (row) => `
-    <td class="strong">${escapeHtml(row.type)}</td>
+    <td class="strong">${escapeHtml(usageLabel(row.type))}</td>
     <td>${escapeHtml(formatNumber(row.events))}</td>
     <td>${escapeHtml(formatNumber(row.tokens))}</td>`
   );
@@ -277,31 +511,62 @@ export function renderAdminUsage({ summary, recent, totalTokens, account = null 
     <td class="muted">${escapeHtml(row.summary || '—')}</td>`
   );
 
+  const shareTotal = summary.reduce((total, row) => total + (Number(row.tokens) || 0), 0);
+  const totalEvents = summary.reduce((total, row) => total + Number(row.events || 0), 0);
+  const isFiltered =
+    Boolean(filter.date) || Boolean(q) || String(filter.h1 ?? '') !== '' || String(filter.h2 ?? '') !== '';
+
   const body = `
   <div class="grid">${renderStat('إجمالي النقاط المستهلكة', totalTokens)}${renderStat(
     'عدد العمليات',
-    summary.reduce((total, row) => total + Number(row.events), 0)
+    totalEvents
   )}</div>
-  <div class="card mt-16">
-    <h2>الاستهلاك حسب النوع</h2>
-    ${renderTable({
-      columns: ['النوع', 'عدد العمليات', 'النقاط'],
-      rows: summaryRows,
-      emptyMessage: 'لا يوجد استهلاك مسجّل بعد.'
-    })}
+  <div class="duo mt-16">
+    <div class="card">
+      <h2>نشاط آخر ١٤ يوماً</h2>
+      <p class="muted">النقاط المستهلكة يومياً — الأقدم يمين والأحدث يسار، والعمود المميّز هو اليوم.</p>
+      ${renderActivityBars(days14)}
+    </div>
+    <div class="card">
+      <h2>توزيع الاستهلاك حسب النوع</h2>
+      <p class="muted">من أين جاءت النقاط المحسوبة كلها (${escapeHtml(formatNumber(shareTotal))} نقطة) — لكل نوع نسبته.</p>
+      ${renderDonut(summary.map((row) => ({ label: usageLabel(row.type), tokens: row.tokens })), { total: shareTotal })}
+      ${renderTable({
+        columns: ['النوع', 'عدد العمليات', 'النقاط'],
+        rows: summaryRows,
+        emptyMessage: 'لا يوجد استهلاك مسجّل بعد.'
+      })}
+    </div>
   </div>
-  <div class="card">
-    <h2>آخر 100 عملية</h2>
-    ${renderTable({
+  <div class="card mt-16">
+    <div class="card-head">
+      <h2>العمليات${isFiltered ? ' (مُصفّاة)' : ''}</h2>
+    </div>
+    ${operationsFilterBar({
+      action: '/admin/usage',
+      adminToken,
+      q,
+      date: filter.date || '',
+      h1: filter.h1 ?? '',
+      h2: filter.h2 ?? '',
+      limit: filter.limit || 100
+    })}
+    <div class="table-scroll">${renderTable({
       columns: ['التاريخ', 'الباحث', 'النوع', 'النقاط', 'الملخص'],
       rows: recentRows,
-      emptyMessage: 'لا توجد عمليات مسجّلة بعد.'
-    })}
+      emptyMessage: isFiltered
+        ? 'لا توجد عمليات مطابقة لهذه التصفية — جرّب بحثاً أو تاريخاً آخر.'
+        : 'لا توجد عمليات مسجّلة بعد.'
+    })}</div>
+    <p class="muted mt-12">
+      عرض ${escapeHtml(formatNumber(recent.length))} عملية من الأحدث — مرّر داخل الجدول للمزيد.
+      التصفية بالساعات تُحسم على وقت التسجيل في قاعدة البيانات (بتوقيت الخادم).
+    </p>
   </div>`;
 
   return renderLayout({
     title: 'سجل الاستهلاك',
-    subtitle: 'متابعة استهلاك النقاط لكل عملية ولكل باحث',
+    subtitle: 'بحث وفلترة ومخططات استهلاك النقاط لكل عملية ولكل باحث',
     activeKey: 'usage',
     account,
     scripts: ['/js/app-shell.js'],
@@ -387,6 +652,14 @@ export function renderAdminUsers({
         <input type="hidden" name="return" value="users" />
         <button class="btn btn-sm ${user.is_active ? 'btn-danger' : 'btn-quiet'}" type="submit">${user.is_active ? 'إيقاف' : 'تفعيل'}</button>
       </form>
+      ${
+        user.role === 'admin' || (account && account.id === user.id)
+          ? ''
+          : `<form class="inline-form" method="post" action="/admin/users/${user.id}/delete${tokenQuery}"
+            data-confirm="حذف حساب ${escapeHtml(user.email || '')}؟ يُمنع دخوله فوراً من كل الأجهزة، ويبقى في السجلات. لا تراجع.">
+        <button class="btn btn-sm btn-danger" type="submit">حذف</button>
+      </form>`
+      }
     </td>`
   );
 
@@ -452,10 +725,14 @@ export function renderAdminPlans({ plans, totalSubscribers, saved = '', error = 
       const code = escapeHtml(plan.code);
       const isFree = plan.code === FREE_PLAN_CODE;
       return `
-  <div class="card mt-16" id="edit-${code}">
+  <div class="modal" id="edit-${code}">
+   <div class="card">
     <div class="card-head">
       <h2>تعديل: ${escapeHtml(plan.title)} <span class="muted mono">(${code})</span></h2>
-      <span class="badge badge-plan">${escapeHtml(formatNumber(plan.subscribers))} مشترك</span>
+      <div class="links">
+        <span class="badge badge-plan">${escapeHtml(formatNumber(plan.subscribers))} مشترك</span>
+        <a class="btn btn-sm" href="#" title="إغلاق">إغلاق ✕</a>
+      </div>
     </div>
     <p class="muted">كل تعديل هنا يُحفظ في جدول plans ويسري فوراً على صفحة الهبوط ونصوص المنصة — بلا إعادة تشغيل.</p>
     <form method="post" action="/admin/plans/${encodeURIComponent(plan.code)}${token}">
@@ -496,6 +773,7 @@ export function renderAdminPlans({ plans, totalSubscribers, saved = '', error = 
         <span class="muted">يُطبَّق فوراً — لا يحتاج إعادة تشغيل الخادم.</span>
       </div>
     </form>
+   </div>
   </div>`;
     })
     .join('');
@@ -503,18 +781,75 @@ export function renderAdminPlans({ plans, totalSubscribers, saved = '', error = 
   const notice = saved ? `<div class="notice">${escapeHtml(OK_TEXT.plan_saved)} (${escapeHtml(saved)})</div>` : '';
   const errorNotice = error ? `<div class="alert"><b>تعذّر الحفظ:</b> ${escapeHtml(error)}</div>` : '';
 
+  // مودال إضافة باقة جديدة — يفتح برابط #add-plan بلا سكربتات (نفس أسلوب التعديل).
+  const addForm = `
+  <div class="modal" id="add-plan">
+    <div class="card">
+      <div class="card-head">
+        <h2>إضافة باقة جديدة</h2>
+        <a class="btn btn-sm" href="#" title="إغلاق">إغلاق ✕</a>
+      </div>
+      <p class="muted">تظهر فوراً في صفحة الهبوط وكل نصوص الموقع بعد الحفظ — بلا إعادة تشغيل.</p>
+      <form method="post" action="/admin/plans/add${token}">
+        <div class="field-row">
+          <div class="field">
+            <label for="new-code">كود الباقة</label>
+            <input type="text" id="new-code" name="code" required maxlength="50"
+              pattern="[a-z0-9_-]{2,50}" title="حروف صغيرة وأرقام و _ و - فقط" placeholder="pro_annual" />
+            <p class="form-hint">حروف صغيرة وأرقام و _ و - فقط (مثال: pro_annual).</p>
+          </div>
+          <div class="field">
+            <label for="new-title">اسم الباقة</label>
+            <input type="text" id="new-title" name="title" maxlength="100" required placeholder="باقة المحترفين" />
+          </div>
+          <div class="field">
+            <label for="new-period">الفترة</label>
+            <input type="text" id="new-period" name="period" maxlength="40" value="شهرياً" />
+          </div>
+          <div class="field">
+            <label for="new-price">السعر</label>
+            <input type="number" id="new-price" name="price" min="0" max="10000000" step="1" value="0" />
+            <p class="form-hint">صفر = باقة مجانية (كود التجربة المجانية يبقى وحده السعر صفر).</p>
+          </div>
+          <div class="field">
+            <label for="new-tokens">النقاط</label>
+            <input type="number" id="new-tokens" name="tokens" min="0" max="100000000" step="1" required value="1000" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="new-tagline">الوصف المختصر</label>
+          <input type="text" id="new-tagline" name="tagline" maxlength="160" />
+        </div>
+        <div class="field">
+          <label for="new-features">المزايا (ميزة واحدة في كل سطر)</label>
+          <textarea id="new-features" name="features" rows="5" maxlength="4000"></textarea>
+        </div>
+        <label class="check"><input type="checkbox" name="popular" value="1" /> باقة مميّزة (شريط «الأكثر طلباً»)</label>
+        <label class="check"><input type="checkbox" name="is_active" value="1" checked /> مفعّلة (تظهر في صفحة الهبوط)</label>
+        <div class="form-actions">
+          <button class="btn btn-primary" type="submit">إضافة الباقة</button>
+          <a class="btn btn-quiet" href="#">إلغاء</a>
+        </div>
+      </form>
+    </div>
+  </div>`;
+
   const body = `
   ${notice}${errorNotice}
   <div class="grid">${renderStat('عدد الباقات', plans.length)}${renderStat('إجمالي المشتركين', totalSubscribers)}</div>
   <div class="card mt-16">
-    <h2>الباقات</h2>
+    <div class="card-head">
+      <h2>الباقات</h2>
+      <a class="btn btn-primary" href="#add-plan">إضافة باقة</a>
+    </div>
     ${renderTable({
       columns: ['الكود', 'الاسم', 'السعر', 'النقاط', 'الحالة', 'المشتركون', 'تحرير'],
       rows,
       emptyMessage: 'لا توجد باقات بعد — شغّل npm run db:seed لإضافة الباقات الافتراضية.'
     })}
   </div>
-  ${forms}`;
+  ${forms}
+  ${addForm}`;
 
   return renderLayout({
     title: 'الباقات',
@@ -558,22 +893,19 @@ export function renderAdminSettings({
     .map(([label, value]) => renderStat(label, value))
     .join('');
 
+  const notice = saved ? '<div class="notice">حُفظت حدود التخزين — تسري على كل الباحثين فوراً.</div>' : '';
+  const errorNotice = error ? `<div class="alert"><b>تعذّر الحفظ:</b> ${escapeHtml(error)}</div>` : '';
+
   const body = `
   <div class="grid">${stats}</div>
-  ${
-    saved
-      ? '<div class="notice">حُفظت حدود التخزين — تسري على كل الباحثين فوراً.</div>'
-      : ''
-  }
-  ${error ? `<div class="alert"><b>تعذّر الحفظ:</b> ${escapeHtml(error)}</div>` : ''}
-  <div class="card mt-16">
-    <h2>حدود رفع الملفات</h2>
-    <p class="muted">
-      حجم الملف الواحد: أقصى حجم لملف يرفعه الباحث. المساحة الكلية: مجموع ما يمكن أن يرفعه
-      باحث واحد (لو ملأها لن يستطيع الرفع حتى يحذف ملفاً). يجب أن تكون المساحة الكلية
-      أكبر من أو تساوي حجم الملف الواحد.
-    </p>
-    <form method="post" action="/admin/settings/storage${token}" class="form-card">
+  ${notice}${errorNotice}
+  <div class="duo mt-16">
+    <div class="card">
+      <div class="card-head">
+        <h2>حدود رفع الملفات</h2>
+        <a class="btn btn-sm" href="#limits-help">ماذا تعني؟</a>
+      </div>
+      <form method="post" action="/admin/settings/storage${token}" class="form-card">
       <div class="field-row">
         <div class="field">
           <label for="max_upload_mb">أقصى حجم للملف الواحد (MB)</label>
@@ -592,12 +924,15 @@ export function renderAdminSettings({
         <button class="btn btn-primary" type="submit">حفظ الحدود</button>
         <span class="muted">يُطبَّق فوراً — لا يحتاج إعادة تشغيل الخادم.</span>
       </div>
-    </form>
-  </div>
-  <div class="card mt-16">
-    <h2>حالة النظام</h2>
-    <p class="muted">كل ما يلي يُقرأ لحظياً من الخادم وقاعدة البيانات — يتحدث بعد كل تحديث للصفحة.</p>
-    <div class="grid">
+      </form>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>حالة النظام</h2>
+        <a class="btn btn-sm" href="#system-help">ماذا تعني؟</a>
+      </div>
+      <p class="muted">كل ما يلي يُقرأ لحظياً من الخادم وقاعدة البيانات — يتحدث بعد كل تحديث للصفحة.</p>
+      <div class="grid">
       ${statRaw('قاعدة البيانات', system?.database || '—')}
       ${statRaw('Node.js', system?.node || '—')}
       ${statRaw('مدة تشغيل الخادم', system?.uptime || '—')}
@@ -608,6 +943,28 @@ export function renderAdminSettings({
       ${statRaw('عمليات استهلاك', system?.usage_events ?? '—')}
       ${statRaw('إشعارات', system?.notifications ?? '—')}
       ${statRaw('إعدادات محفوظة', system?.settings_rows ?? '—')}
+      </div>
+    </div>
+  </div>
+  <div class="modal" id="limits-help">
+    <div class="card">
+      <div class="card-head"><h2>حدود التخزين</h2><a class="btn btn-sm" href="#" title="إغلاق">إغلاق ✕</a></div>
+      <ul class="muted">
+        <li><b>حجم الملف الواحد</b> — أقصى حجم لملف يرفعه الباحث (بين 1 و2048 MB).</li>
+        <li><b>المساحة الكلية</b> — مجموع ما يرفعه باحث واحد؛ لو ملأها لا يستطيع الرفع حتى يحذف ملفاً، ويجب ألا تقل عن حجم الملف الواحد.</li>
+        <li>كل تعديل يُحفظ في جدول settings ويسري فوراً على كل الحسابات بلا إعادة تشغيل.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="modal" id="system-help">
+    <div class="card">
+      <div class="card-head"><h2>حالة النظام</h2><a class="btn btn-sm" href="#" title="إغلاق">إغلاق ✕</a></div>
+      <ul class="muted">
+        <li><b>قاعدة البيانات و Node.js ومدة التشغيل</b> — قراءة لحظية من الخادم وقاعدة البيانات.</li>
+        <li><b>رمز ADMIN_TOKEN</b> — هل اللوحة محمية برمز يصل من أي جهاز، أم متاحة محلياً فقط.</li>
+        <li><b>المزوّدون المعدّون</b> — كم مزوّداً لديه مفتاح واحد على الأقل (من .env أو روابط اللوحة).</li>
+        <li><b>باحثون وباقات وإشعارات وإعدادات محفوظة</b> — عدّادات أسطر في الجداول، تتحدث مع كل تحديث.</li>
+      </ul>
     </div>
   </div>`;
 
@@ -816,7 +1173,6 @@ export function renderAdminUserDetail({
 
 /** إدارة قائمة المديرين: جدول admins في القاعدة + إيميلات .env الثابتة. */
 export function renderAdminAdmins({
-  envAdmins = [],
   dbAdmins = [],
   saved = '',
   error = '',
@@ -827,52 +1183,80 @@ export function renderAdminAdmins({
   const notice = saved && OK_TEXT[saved] ? `<div class="notice">${escapeHtml(OK_TEXT[saved])}</div>` : '';
   const errorNotice = error ? `<div class="alert"><b>تعذّر:</b> ${escapeHtml(error)}</div>` : '';
 
-  const rows = dbAdmins.map((row) => {
+  const rows = dbAdmins.map((row, index) => {
     const email = String(row.email || '').toLowerCase();
-    const isSelf = account && String(account.email || '').toLowerCase() === email;
+    const isSelf = account && String(account.email || '').trim().toLowerCase() === email;
     return `
     <td class="strong">${escapeHtml(row.email)}</td>
     <td>${escapeHtml(row.added_by || '—')}</td>
     <td>${escapeHtml(formatDate(row.created_at))}</td>
-    <td>${
-      isSelf
-        ? '<span class="muted">حسابك الحالي</span>'
-        : `<form class="inline-form" method="post" action="/admin/admins/delete${token}">
+    <td class="row-actions">
+      <a class="btn btn-sm" href="#edit-admin-${index}">تعديل</a>
+      ${
+        isSelf
+          ? '<span class="muted">حسابك الحالي</span>'
+          : `<form class="inline-form" method="post" action="/admin/admins/delete${token}"
+            data-confirm="إزالة ${escapeHtml(row.email)} من المديرين؟ سيفقد صلاحية اللوحة في طلبه القادم.">
             <input type="hidden" name="email" value="${escapeHtml(row.email)}" />
             <button class="btn btn-sm btn-danger" type="submit">إزالة</button>
           </form>`
-    }</td>`;
+      }
+    </td>`;
   });
 
-  const envChips = envAdmins.length
-    ? `<div class="chips">${envAdmins.map((email) => `<span class="chip">${escapeHtml(email)}</span>`).join('')}</div>`
-    : '<p class="muted">لا توجد إيميلات في ADMIN_EMAILS داخل .env — تُدار الإدارة كاملةً من جدول admins أدناه.</p>';
+  // مودال تعديل بريد لكل مدير — يفتح برابط #edit-admin-N بلا سكربتات
+  const editModals = dbAdmins
+    .map(
+      (row, index) => `
+  <div class="modal" id="edit-admin-${index}">
+    <div class="card">
+      <div class="card-head">
+        <h2>تعديل بريد مدير</h2>
+        <a class="btn btn-sm" href="#" title="إغلاق">إغلاق ✕</a>
+      </div>
+      <form method="post" action="/admin/admins/edit${token}">
+        <input type="hidden" name="email" value="${escapeHtml(row.email)}" />
+        <div class="field">
+          <label for="edit-admin-email-${index}">البريد الإلكتروني الجديد</label>
+          <input type="email" id="edit-admin-email-${index}" name="new_email" maxlength="255" required
+            value="${escapeHtml(row.email)}" />
+          <p class="form-hint">يجب أن يكون نفس البريد المستخدم في تسجيل الدخول بجوجل.</p>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" type="submit">حفظ البريد</button>
+          <a class="btn btn-quiet" href="#">إلغاء</a>
+        </div>
+      </form>
+    </div>
+  </div>`
+    )
+    .join('');
 
   const body = `
   ${notice}${errorNotice}
   <div class="card">
-    <h2>مصدر صلاحية المدير</h2>
+    <h2>من يدخل اللوحة؟</h2>
     <p class="muted">
-      لمن يدخل لوحة الإدارة مصدران: جدول <b>admins</b> في القاعدة (يُدار من هذه الصفحة) +
-      قائمة <b>ADMIN_EMAILS</b> في ملف .env (ثابتة على الخادم ولا تُحذف من اللوحة).
-      أي حساب جوجل يحمل أحد هذه الإيميلات يصبح «مدير المنصة» فوراً في طلبه القادم.
+      مصدر واحد فقط: جدول <b>admins</b> في قاعدة البيانات. أي حساب جوجل يحمل أحد هذه
+      البريدات يصبح «مدير المنصة» فوراً في طلبه القادم. الإضافة والتعديل والإزالة كلها
+      من هذه الصفحة — يسري التغيير بعد الطلب التالي للمدير دون أي إعداد آخر.
     </p>
   </div>
   <div class="card mt-16">
-    <h2>مديرو جدول admins (${escapeHtml(formatNumber(dbAdmins.length))})</h2>
+    <div class="card-head">
+      <h2>المديرون (${escapeHtml(formatNumber(dbAdmins.length))})</h2>
+      <a class="btn btn-primary" href="#add-admin">إضافة مدير</a>
+    </div>
     ${renderTable({
       columns: ['الإيميل', 'أُضيف بواسطة', 'التاريخ', 'إجراء'],
       rows,
       emptyMessage: 'لا يوجد مديرون في الجدول بعد — أضِف أول إيميل من النموذج أدناه.'
     })}
   </div>
-  <div class="card mt-16">
-    <h2>إيميلات .env (ADMIN_EMAILS)</h2>
-    <p class="muted">ثابتة على الخادم — تُضاف وتُحذف من ملف .env وحده.</p>
-    ${envChips}
-  </div>
-  <div class="card mt-16">
-    <h2>إضافة مدير جديد</h2>
+  <div class="card mt-16" id="add-admin">
+    <div class="card-head">
+      <h2>إضافة مدير جديد</h2>
+    </div>
     <form method="post" action="/admin/admins/add${token}">
       <div class="field">
         <label for="admin-email">بريد جوجل للمدير</label>
@@ -883,11 +1267,12 @@ export function renderAdminAdmins({
         <button class="btn btn-primary" type="submit">إضافة المدير</button>
       </div>
     </form>
-  </div>`;
+  </div>
+  ${editModals}`;
 
   return renderLayout({
     title: 'المديرون',
-    subtitle: 'من يملك صلاحية لوحة الإدارة — من جدول admins في القاعدة ومن .env',
+    subtitle: 'من يملك صلاحية لوحة الإدارة — من جدول admins في القاعدة مباشرة',
     activeKey: 'admins',
     account,
     scripts: ['/js/app-shell.js'],
@@ -902,13 +1287,16 @@ export function renderAdminRoles({ roles = [], saved = '', error = '', adminToke
   const errorNotice = error ? `<div class="alert"><b>تعذّر:</b> ${escapeHtml(error)}</div>` : '';
 
   const cards = roles
+    // دور المدير غير معروض هنا: صلاحيته «*» محمية في المسارات وتُدار من صفحة المديرين
+    .filter((role) => role.code !== 'admin')
     .map((role) => {
       const permissions = role.permissions || [];
       const chips = permissions.length
         ? permissions
             .map(
-              (perm) => `<span class="chip">${escapeHtml(perm)}
-        <form method="post" action="/admin/roles/${encodeURIComponent(role.code)}/permissions/delete${token}">
+              (perm) => `<span class="chip" title="${escapeHtml(perm)}">${escapeHtml(permissionLabel(perm))}
+        <form method="post" action="/admin/roles/${encodeURIComponent(role.code)}/permissions/delete${token}"
+          data-confirm="حذف صلاحية «${escapeHtml(permissionLabel(perm))}» من دور «${escapeHtml(role.title)}»؟">
           <input type="hidden" name="permission" value="${escapeHtml(perm)}" />
           <button type="submit" title="حذف الصلاحية" aria-label="حذف الصلاحية ${escapeHtml(perm)}">×</button>
         </form>
@@ -916,6 +1304,17 @@ export function renderAdminRoles({ roles = [], saved = '', error = '', adminToke
             )
             .join('')
         : '<span class="muted">لا توجد صلاحيات لهذا الدور بعد.</span>';
+
+      // الإضافة من قائمة مسدلة بالصلاحيات المعروفة بأسمائها العربية — بلا كتابة كود يدوياً
+      const available = PERMISSION_CHOICES.filter((code) => !permissions.includes(code));
+      const options = available.length
+        ? available
+            .map(
+              (code) =>
+                `<option value="${escapeHtml(code)}">${escapeHtml(permissionLabel(code))} — ${escapeHtml(code)}</option>`
+            )
+            .join('')
+        : '<option value="">كل الصلاحيات المعروفة مضافة لهذا الدور</option>';
 
       return `
   <div class="card mt-16">
@@ -927,8 +1326,10 @@ export function renderAdminRoles({ roles = [], saved = '', error = '', adminToke
     </div>
     <div class="chips">${chips}</div>
     <form class="toolbar mt-12" method="post" action="/admin/roles/${encodeURIComponent(role.code)}/permissions${token}">
-      <input type="text" name="permission" maxlength="100" required placeholder="مثال: library:manage"
-        pattern="[A-Za-z0-9:_-]+" title="حروف لاتينية وأرقام و«:» و«_» و«-» فقط" />
+      <select name="permission" required title="اختر صلاحية لإضافتها إلى الدور">
+        <option value="" disabled selected>اختر صلاحية...</option>
+        ${options}
+      </select>
       <button class="btn btn-primary" type="submit">إضافة صلاحية</button>
     </form>
   </div>`;
@@ -938,11 +1339,12 @@ export function renderAdminRoles({ roles = [], saved = '', error = '', adminToke
   const body = `
   ${notice}${errorNotice}
   <div class="card">
-    <h2>من أين تأتي هذه الصلاحيات؟</h2>
+    <h2>كيف تعمل هذه الصفحة؟</h2>
     <p class="muted">
       كل ما تراه هنا يُقرأ ويُكتب مباشرةً في جدولي <b>roles</b> و<b>role_permissions</b> في قاعدة البيانات —
-      لا شيء مكتوب في الكود. الصلاحية <span class="mono">*</span> تعني «كل الصلاحيات» (دور المدير) ولا يمكن حذفها.
-      تُطبَّق الصلاحيات في الجلسات القادمة للحسابات المعنية فور حفظها.
+      لا شيء مكتوب في الكود. كل صلاحية معروضة باسمها العربي، وكودها الأصلي يظهر عند التمرير فوقها،
+      ويمكن إضافتها من القائمة المنسدلة بأسمائها العربية. تُطبَّق الصلاحيات في طلبات الحسابات
+      المعنية التالية فور حفظها.
     </p>
   </div>
   ${cards}`;

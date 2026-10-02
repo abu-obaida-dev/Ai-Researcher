@@ -68,6 +68,14 @@
   // قائمة صورة الحساب: تعمل دائماً (حتى بلا جرس) في الشريط العلوي والترويسة العامة
   wireDropdown('user-toggle', 'user-menu');
 
+  // تأكيد قبل إرسال أي نموذج يحمل data-confirm (حذف وإجراءات خطيرة).
+  // يُثبَّت هنا قبل فحص الجرس ليعمل على كل الصفحات حتى بلا جلسة.
+  document.addEventListener('submit', function (event) {
+    var form = event.target;
+    var question = form && form.getAttribute ? form.getAttribute('data-confirm') : null;
+    if (question && !window.confirm(question)) event.preventDefault();
+  });
+
   var toggle = document.getElementById('bell-toggle');
   var menu = document.getElementById('bell-menu');
   var list = document.getElementById('bell-list');

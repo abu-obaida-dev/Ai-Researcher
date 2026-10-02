@@ -29,6 +29,23 @@ async function writeSetting(key, value) {
   );
 }
 
+/** يقرأ إعداداً مخزَّناً كـ JSON ويعيد قيمة افتراضية عند أي خلل (لا يفشل المستدعي أبداً). */
+export async function readJsonSetting(key, fallback = null) {
+  try {
+    const stored = await readSetting(key);
+    if (stored === null || stored === '') return fallback;
+    const parsed = JSON.parse(stored);
+    return parsed === null || parsed === undefined ? fallback : parsed;
+  } catch {
+    return fallback;
+  }
+}
+
+/** يحفظ قيمة إعداداً على هيئة JSON (upsert). */
+export async function writeJsonSetting(key, value) {
+  await writeSetting(key, JSON.stringify(value));
+}
+
 /** يحول نصًّا إلى عدد موجب صحيح ضمن [min, max] (سقوط آمن على default). */
 function toPositiveInt(value, { min, max, fallback }) {
   const n = Number.parseInt(String(value ?? '').trim(), 10);

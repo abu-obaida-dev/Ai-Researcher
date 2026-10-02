@@ -597,13 +597,16 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .choice input:focus-visible + span { outline: 2px solid var(--fresh); outline-offset: 2px; }
 .field { margin-top: 16px; }
 .field label, .field-label { display: block; margin-bottom: 7px; font-size: 12.5px; font-weight: 700; color: var(--ink); }
-.field input[type=text], .field select, .field textarea {
+.field input[type=text], .field input[type=number], .field input[type=email],
+.field input[type=date], .field input[type=password], .field select, .field textarea {
   width: 100%; padding: 11px 13px; border: 1px solid var(--mist); border-radius: 12px; background: #fff;
   color: var(--ink); font-family: inherit; font-size: 13px; outline: none;
   transition: border-color .15s ease, box-shadow .15s ease;
 }
 .field textarea { min-height: 88px; line-height: 1.8; resize: vertical; }
-.field input[type=text]:focus, .field select:focus, .field textarea:focus { border-color: var(--fresh); box-shadow: 0 0 0 3px var(--fresh-12); }
+.field input[type=text]:focus, .field input[type=number]:focus, .field input[type=email]:focus,
+.field input[type=date]:focus, .field input[type=password]:focus,
+.field select:focus, .field textarea:focus { border-color: var(--fresh); box-shadow: 0 0 0 3px var(--fresh-12); }
 
 /* منتقي ملف مخصّص: input مخفي + label منسّق يدعم السحب والإفلات */
 .file-picker { position: relative; }
@@ -1000,6 +1003,26 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .info-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
 .info-grid .card { margin: 0; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+/* ==== لوحة الإدارة: عمودان متجاوبان + جدول بتمرير داخلي + مودال بـ :target (بلا JS) ==== */
+.duo { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); align-items: start; }
+.duo .card { margin: 0; }
+/* جدول داخل صندوق بارتفاع محدود: شريط تمرير رأسي + رأس جدول ملتصق */
+.table-scroll { max-height: 420px; overflow-y: auto; border: var(--line); border-radius: 12px; background: #fff; }
+.table-scroll > table { margin: 0; }
+.table-scroll thead th { position: sticky; top: 0; background: #fff; z-index: 1; box-shadow: inset 0 -1px 0 var(--mist); }
+/* مودال يظهر عند مطابقة #معرّف في الرابط — نفس أزرار التعديل القديمة تعمل بلا سكربت */
+.modal { display: none; position: fixed; inset: 0; z-index: 80; background: rgba(16, 42, 67, 0.5); padding: 40px 16px; overflow-y: auto; }
+.modal:target { display: block; }
+.modal .card { max-width: 760px; margin: 0 auto; }
+.modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.modal-close { font-size: 24px; line-height: 1; color: var(--slate); text-decoration: none; }
+.modal-close:hover { color: var(--ink); }
+/* شريط فلترة (تاريخ + ساعات + عدد النتائج) فوق جداول العمليات */
+.filter-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 12px; }
+.filter-bar .field { margin: 0; min-width: 132px; }
+.filter-bar label { font-size: 11.5px; font-weight: 700; }
+.filter-bar .form-actions { margin: 0; }
 
 /* ============ مساحة عمل الباحث: مسار البحث والمراجع والمفكرة والملفات والشات ============ */
 /* ترويسة بطاقة: العنوان يمين وزر إجراء يسار (مثل «إضافة نقاط» في الإحصائية) */
@@ -1510,15 +1533,8 @@ export function renderLayout({
   </div>
 </header>`;
 
-  const footer =
-    area === 'public'
-      ? renderPublicFooter()
-      : area === 'auth' || area === 'app'
-        ? ''
-        : `<footer class="footer">
-  <span class="footer-brand"><img src="${BRAND.icon}" alt="" width="18" height="18" />${escapeHtml(APP_NAME)}</span>
-  <span>Node.js + PostgreSQL · النسخة البرمجية نفسها متاحة كـ JSON على مسارات /api</span>
-</footer>`;
+  // تذييل الموقع للصفحات العامة فقط — لوحة الإدارة بلا تذييل (مساحتها أثقل من محتواها)
+  const footer = area === 'public' ? renderPublicFooter() : '';
 
   const headBlock = pageHead
     ? `<div class="page-head">
