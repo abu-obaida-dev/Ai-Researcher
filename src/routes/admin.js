@@ -18,6 +18,7 @@ import {
   renderAdminUsers
 } from '../views/admin.js';
 import { probeProvider, providerStatus, addCustomLink, customLinks, linkCatalog, removeCustomLink } from '../services/ai.js';
+import { deleteFile } from '../services/files.js';
 
 /**
  * لوحة الإدارة: صفحات HTML مولَّدة على الخادم بديلاً عن واجهة /admin القديمة (React).
@@ -689,7 +690,7 @@ router.post('/users/:id/notify', async (req, res) => {
   }
 });
 
-/** حذف حساب (soft delete): يمنع الدخول فوراً ويبقى السجل في القاعدة. */
+/** حذف حساب نهائياً من قاعدة البيانات: بايتات الملفات أولاً ثم صف المستخدم — وكل سجلاته بـ CASCADE. */
 router.post('/users/:id/delete', async (req, res) => {
   const id = String(req.params.id);
   const back = tokenBack(req);
@@ -717,7 +718,13 @@ router.post('/users/:id/delete', async (req, res) => {
       return;
     }
 
-    await pool.query('UPDATE users SET deleted = true, is_active = false, updated_at = NOW() WHERE id = $1', [id]);
+    // البايتات أولاً حتى لا تبقى ملفات يتيمة على القرص (deleteFile يحذف صف الملف أيضاً)
+    const files = await pool.query('SELECT id FROM files WHERE user_id = $1', [id]);
+    for (const file of files.rows) {
+      await deleteFile(id, file.id);
+    }
+    // حذف فعلي من جدول users — كل الجداول المرتبطة تمشي معها بـ ON DELETE CASCADE
+    await pool.query('DELETE FROM users WHERE id = $1', [id]);
     res.redirect(302, back('/admin/users', { ok: 'user_deleted' }));
   } catch (error) {
     res.redirect(302, back('/admin/users', { error: hintForDatabaseError(error) }));

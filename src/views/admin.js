@@ -17,7 +17,7 @@ const OK_TEXT = {
   points_adjusted: 'تم تعديل رصيد النقاط وتسجيل العملية في سجل الاستهلاك.',
   plan_updated: 'تم تغيير الباقة — تسري الجديد فوراً.',
   notified: 'أُرسل الإشعار إلى الباحث (داخل الموقع + push لمن فعّل هاتفه).',
-  user_deleted: 'تم حذف الحساب — أُلغي دخوله فوراً وبقيت سجلاته في القاعدة.',
+  user_deleted: 'حُذف الحساب نهائياً من قاعدة البيانات — زالت بياناته وملفاته ومحادثاته كلها.',
   admin_added: 'أُضيف المدير — تُمنح الصلاحية في الطلب التالي لذلك الحساب.',
   admin_updated: 'حُدّث بريد المدير في الجدول.',
   admin_removed: 'أُزيل المدير من الجدول — لن يستطيع دخول لوحة الإدارة بعد طلبه القادم.',
@@ -656,7 +656,7 @@ export function renderAdminUsers({
         user.role === 'admin' || (account && account.id === user.id)
           ? ''
           : `<form class="inline-form" method="post" action="/admin/users/${user.id}/delete${tokenQuery}"
-            data-confirm="حذف حساب ${escapeHtml(user.email || '')}؟ يُمنع دخوله فوراً من كل الأجهزة، ويبقى في السجلات. لا تراجع.">
+            data-confirm="حذف حساب ${escapeHtml(user.email || '')}؟ يُحذف نهائياً من قاعدة البيانات مع كل بياناته وملفاته ومحادثاته. لا تراجع.">
         <button class="btn btn-sm btn-danger" type="submit">حذف</button>
       </form>`
       }
@@ -1143,7 +1143,7 @@ export function renderAdminUserDetail({
     : `
   <div class="card mt-16">
     <h2>منطقة الخطر</h2>
-    <p class="muted">الحذف يُخفي الحساب فوراً ويمنع دخوله من كل الأجهزة، مع بقاء سجلاته في القاعدة. لا يمكن التراجع.</p>
+    <p class="muted">الحذف يزيل الحساب من قاعدة البيانات نهائياً مع كل ما يخصه: ملفات ومحادثات وملاحظات ومراجع وإشعارات ورصيد. لا يمكن التراجع.</p>
     <form method="post" action="${base}/delete${token}">
       <button class="btn btn-danger" type="submit">حذف الحساب نهائياً</button>
     </form>
