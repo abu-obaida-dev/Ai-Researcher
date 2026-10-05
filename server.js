@@ -25,11 +25,53 @@ import { renderLandingPage } from './src/views/landing.js';
 import { listPaymentMethods, siteCurrency } from './src/services/payments.js';
 import { renderNotFoundPage, renderStatusPage } from './src/views/home.js';
 import { renderNotice } from './src/views/layout.js';
+import { isGoogleAuthConfigured } from './src/auth/google.js';
 
 dotenv.config();
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
+
+/**
+ * تشخيص متغيّرات البيئة عند الإقلاع — **أسماء فقط، بلا أي قيمة**.
+ *
+ * لماذا: أكثر أسباب فشل النشر أن يُضاف متغيّر في لوحة Vercel بعد النشر،
+ * فلا يدخل في النشر الحالي، أو يُضاف لـ Preview بدل Production، أو تحمل
+ * قيمته مسافات. الرسالة تُطبع في سجل النشر فتُجيب عن كل هذه الأسئلة فوراً
+ * بلا كشف أي سرّ.
+ */
+const REQUIRED_ENV = [
+  'DATABASE_URL',
+  'SESSION_SECRET',
+  'ADMIN_TOKEN',
+  'APP_BASE_URL',
+  'SITE_URL',
+  'ADMIN_EMAILS',
+  'GOOGLE_CLIENT_ID',
+  'GOOGLE_CLIENT_SECRET'
+];
+
+const AI_ENV_KEYS = ['OPENROUTER_API_KEYS', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'GROQ_API_KEY'];
+
+function envPresenceReport() {
+  const missing = REQUIRED_ENV.filter((key) => !String(process.env[key] ?? '').trim());
+  const aiReady = AI_ENV_KEYS.some((key) => String(process.env[key] ?? '').trim());
+
+  const lines = ['── فحص متغيّرات البيئة ──'];
+  lines.push(
+    missing.length ? `  ✖ ناقص: ${missing.join(' · ')}` : '  ✓ كل المتغيّرات الإلزامية موجودة'
+  );
+  lines.push(aiReady ? '  ✓ مفتاح ذكاء اصطناعي موجود' : '  ✖ لا مفتاح ذكاء اصطناعي (الشات لن يعمل)');
+
+  // سببان شائعان: مسافات زائدة أو علامات اقتباس جُرّرت مع القيمة من لوحة Vercel
+  const suspicious = REQUIRED_ENV.filter((key) => {
+    const raw = process.env[key];
+    return typeof raw === 'string' && raw !== raw.trim();
+  });
+  if (suspicious.length) lines.push(`  ⚠️  قيم بمسافات زائدة (انسخها من جديد): ${suspicious.join(' · ')}`);
+
+  return { missing, aiReady, lines };
+}
 
 /**
  * الوكيل العكسي (Nginx / Caddy / Cloudflare …):
@@ -158,6 +200,9 @@ const BRAND_ICON = path.join(PUBLIC_DIR, 'zena-ai-icon.svg');
 // CSP: نضيف فقط ما تحتاجه إشعارات Firebase — سكربتات gstatic (مكتبة الإشعارات)
 // ونقاط اتصال FCM، مع السماح بصور الحسابات الخارجية. باقي الافتراضات تبقى كما هي
 // (سكربتات self فقط، بدون أي inline scripts). وCOEP يُعطّل حتى لا يمنع تحميل مكتبة Firebase.
+// تشخيص البيئة: يُطبع في سجل النشر بأسماء المتغيّرات الناقصة فقط (بلا أي قيمة).
+for (const line of envPresenceReport().lines) console.log(line);
+
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -252,6 +297,32 @@ app.get('/', async (req, res) => {
 // صفحة حالة الخدمة للمطوّرين (روابط الـ API ولوحة الإدارة)
 app.get('/status', (req, res) => {
   res.type('html').send(renderStatusPage({ account: req.account }));
+});
+
+/**
+ * تشخيص متغيّرات البيئة للمدير — **أسماء وحالات فقط، بلا أي قيمة**.
+ *
+ * لماذا هو آمن: لا يُعيد أي جزء من السرّ (لا طولاً ولا بادئة)، فحتى لو
+ * وصل الرابط لطرف غير مخوَّل لا يحصل على معلومة مفيدة. محميٌّ بمعرّف المدير.
+ */
+app.get('/api/env-check', async (req, res) => {
+  if (req.account?.role !== 'admin') {
+    res.status(403).json({ message: 'هذا المسار متاح لمدير المنصة فقط.' });
+    return;
+  }
+
+  const status = (key) => {
+    const value = String(process.env[key] ?? '').trim();
+    return { set: value.length > 0, length: value.length, padded: typeof process.env[key] === 'string' && process.env[key] !== String(process.env[key]).trim() };
+  };
+
+  res.json({
+    ok: true,
+    googleAuthReady: isGoogleAuthConfigured(),
+    aiReady: AI_ENV_KEYS.some((key) => String(process.env[key] ?? '').trim()),
+    variables: Object.fromEntries(REQUIRED_ENV.map((key) => [key, status(key)])),
+    hint: 'الخطأ الشائع: إضافة متغيّر بعد النشر ⇒ يلزم Redeploy، أو إضافته لـ Preview بدل Production.'
+  });
 });
 
 app.get('/api/health', async (_req, res) => {

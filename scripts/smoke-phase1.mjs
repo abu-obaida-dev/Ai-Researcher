@@ -844,6 +844,14 @@ async function testStorageLimits() {
     homeMeta.text.includes('og:title') && homeMeta.text.includes('og:image') && homeMeta.text.includes('twitter:card') && homeMeta.text.includes('rel="canonical"')
   );
 
+  /* ---------- تشخيص البيئة + حماية /api/env-check ---------- */
+  const envDenied = await call('/api/env-check');
+  check(
+    'أمان: /api/env-check محميّ (403 لغير المدير)',
+    envDenied.status === 403,
+    `status=${envDenied.status}`
+  );
+
   /* ---------- إشعارات الهاتف (Firebase) ---------- */
   const pushConfig = await (await fetch(`${BASE}/api/firebase-config`)).json();
   check(
