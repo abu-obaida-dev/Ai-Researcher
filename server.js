@@ -547,15 +547,25 @@ process.on('uncaughtException', (error) => {
   console.error('استثناء غير ملتقَط:', error?.stack || error);
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`AI Researcher API is running on http://localhost:${PORT}`);
-});
+// تشغيل الإقلاع: محلياً (npm run dev/start) نبدأ خادماً حقيقياً على منفذ.
+// أمّا على Vercel فيستورد `api/index.js` هذا الملف ويصدّر `app` وحده،
+// فلا يقلع الخادم هنا ولا يفتح منفذ (سلوك Functions).
+const isServerless = isServerlessPlatform();
+export { app };
+
+let server = null;
+if (!isServerless) {
+  server = app.listen(PORT, () => {
+    console.log(`AI Researcher API is running on http://localhost:${PORT}`);
+  });
+}
 
 /**
  * المنفذ مشغول: نعطي رسالة عربية تشرح الحل بدل انهيار بطباعة أثر المكدس.
  * غالباً السبب تشغيل نسختين (مثلاً `npm run dev` وخادم قديم في الخلفية).
+ * (على Vercel لا يوجد `server` أصلاً ⇒ لا نربط المستمع.)
  */
-server.on('error', (error) => {
+server?.on('error', (error) => {
   if (error.code === 'EADDRINUSE') {
     console.error(
       [
@@ -581,7 +591,7 @@ server.on('error', (error) => {
 async function shutdown(signal) {
   console.log(`\n${signal}: إيقاف الخادم...`);
 
-  server.close(async () => {
+  const close = async () => {
     try {
       await pool.end();
     } catch (error) {
@@ -589,7 +599,13 @@ async function shutdown(signal) {
     } finally {
       process.exit(0);
     }
-  });
+  };
+
+  if (!server) {
+    await close();
+    return;
+  }
+  server.close(close);
 }
 
 process.on('SIGINT', () => shutdown('SIGINT'));
