@@ -1,5 +1,6 @@
 import express from 'express';
 import { requireAccount } from '../middleware/auth.js';
+import { rateLimitUser } from '../middleware/security.js';
 import { availableProviders } from '../services/ai.js';
 import {
   askSupervisor,
@@ -105,7 +106,7 @@ router.get('/chat', requireAccount, async (req, res) => {
 });
 
 /** إرسال رسالة للمشرف الذكي. */
-router.post('/chat', requireAccount, async (req, res) => {
+router.post('/chat', requireAccount, rateLimitUser('chat_message', { limit: 30, windowMs: 5 * 60 * 1000 }), async (req, res) => {
   const body = req.body || {};
   const stepKey = String(body.step || '').trim().slice(0, 100);
   const conversationId = String(body.conversation_id || '').trim();

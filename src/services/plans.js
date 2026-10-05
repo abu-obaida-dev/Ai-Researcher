@@ -1,10 +1,25 @@
 import { pool } from '../db/client.js';
-import { DEFAULT_PLANS, FREE_PLAN_CODE, FREE_TRIAL_TOKENS } from '../constants.js';
+import {
+  DEFAULT_PLANS,
+  FREE_PLAN_CODE,
+  FREE_TRIAL_TOKENS,
+  PLAN_STORAGE_DEFAULT_MB,
+  PLAN_STORAGE_MAX_MB,
+  PLATFORM_SERVICES
+} from '../constants.js';
+import { permissionsForRoles } from './access.js';
+import { maxStorageBytes } from './settings.js';
 
 /**
  * باقة/باقات المنصة من PostgreSQL (جدول plans) — بدون أي Firestore.
  * كل الصفحات العامة تقرأ من هنا، والسقوط الآمن هو القيم الافتراضية في src/constants.js
  * حتى تعمل صفحة الهبوط قبل تهيئة قاعدة البيانات.
+ *
+ * مصدران حقيقيان لبيانات البطاقة:
+ *   - role_code  → صلاحيات الدور في role_permissions ⇒ الخدمات المفتوحة فعلياً.
+ *   - storage_mb → حصة التخزين التي يمنحها المدير لهذه الباقة.
+ * لذلك تُولَّد «المزايا» المعروضة من الصلاحيات نفسها (planFeatures) فلا تُخالف
+ * الواجهة ما يفتحه الباحث فعلاً باقته.
  */
 
 /** يفصل نص المزايا المخزّن بأسطر متعددة إلى قائمة. */
@@ -16,10 +31,68 @@ export function splitFeatures(value) {
     .filter(Boolean);
 }
 
-/** يحوّل صف جدول plans إلى شكل جاهز لعرض بطاقات الأسعار. */
+/** يحوّل أي قيمة إلى ميجابايت صالحة ضمن [0, PLAN_STORAGE_MAX_MB] مع سقوط آمن. */
+export function normalizeStorageMb(value, fallback = PLAN_STORAGE_DEFAULT_MB) {
+  const n = Number.parseInt(String(value ?? '').trim(), 10);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.min(n, PLAN_STORAGE_MAX_MB);
+}
+
+/** فاصل آلاف بنفس صيغة الواجهة (بدون استيراد views لتفادي دورة). */
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString('en-US');
+}
+
+/** 500 → «500 MB» ، 2048 → «2 GB» (للحصة الكبيرة فقط). */
+export function formatStorageMb(mb) {
+  const value = Number(mb) || 0;
+  if (value >= 1024 && value % 1024 === 0) return `${value / 1024} GB`;
+  return `${formatNumber(value)} MB`;
+}
+
+/** سطر الميزة الخاص بحصة التخزين (يُعرض في بطاقة الباقة). */
+export function storageLabel(mb) {
+  return `${formatStorageMb(mb)} مساحة تخزين لملفاتك (رفع · معاينة · تحميل)`;
+}
+
+/**
+ * مزايا الباقة كما تُعرض للباحث: تُولَّد من صلاحيات دورها في قاعدة البيانات
+ * (كل خدمة مفتوحة سطر واحد بنصها من PLATFORM_SERVICES.planFeature)،
+ * ثم تُضاف الأسطر الاختيارية التي كتبها المدير في plans.features.
+ */
+export function planFeaturesFromPermissions(permissions, { extras = [] } = {}) {
+  const set = permissions instanceof Set ? permissions : new Set(permissions || []);
+  const open = (service) => set.has('*') || set.has(service.permission);
+
+  return [...PLATFORM_SERVICES.filter(open).map((service) => service.planFeature || service.label), ...extras];
+}
+
+/**
+ * يقرأ صلاحيات أدوار الباقات دفعة واحدة ثم يبني features + services لكل باقة،
+ * فلا يحتاج عرض صفحة الهبوط أكثر من استعلام واحد لكل دور (مع كاش 30 ثانية).
+ */
+export async function decoratePlans(plans) {
+  const roles = await permissionsForRoles(plans.map((plan) => plan.roleCode));
+
+  return plans.map((plan) => {
+    const permissions = roles.get(plan.roleCode) || new Set();
+    const services = PLATFORM_SERVICES.filter(
+      (service) => permissions.has('*') || permissions.has(service.permission)
+    );
+
+    return {
+      ...plan,
+      services: services.map((service) => service.key),
+      features: [...planFeaturesFromPermissions(permissions), storageLabel(plan.storageMb), ...plan.extraFeatures]
+    };
+  });
+}
+
+/** يحوّل صف جدول plans إلى شكل جاهز لعرض بطاقات الأسعار (قبل توليد المزايا). */
 export function normalizePlan(row) {
   const price = Number(row.price ?? 0);
   const tokens = Number(row.tokens ?? 0);
+  const extraFeatures = splitFeatures(row.features);
 
   return {
     code: row.code,
@@ -27,42 +100,52 @@ export function normalizePlan(row) {
     tagline: row.tagline || '',
     price,
     tokens,
+    storageMb: normalizeStorageMb(row.storage_mb),
     period: row.period || 'شهرياً',
     cta: row.cta || (price > 0 ? 'اشترك الآن' : 'ابدأ مجاناً'),
     popular: Boolean(row.popular),
     isActive: row.is_active !== false,
-    features: splitFeatures(row.features)
+    roleCode: String(row.role_code || '').trim(),
+    extraFeatures,
+    //Features تُبنى من الصلاحيات الحقيقية في decoratePlans (القيمة هنا فقط احتياط).
+    features: extraFeatures
   };
 }
 
 /** الباقات الافتراضية بنفس شكل صفوف قاعدة البيانات (سقوط آمن). */
 export function fallbackPlans() {
-  return DEFAULT_PLANS.map((plan) => ({
-    code: plan.code,
-    title: plan.title,
-    tagline: plan.tagline,
-    price: plan.price,
-    tokens: plan.tokens,
-    period: plan.period,
-    cta: plan.cta,
-    popular: plan.popular,
-    isActive: true,
-    features: [...plan.features]
-  }));
+  return decoratePlans(
+    DEFAULT_PLANS.map((plan) =>
+      normalizePlan({
+        code: plan.code,
+        title: plan.title,
+        tagline: plan.tagline,
+        price: plan.price,
+        tokens: plan.tokens,
+        storage_mb: plan.storageMb,
+        period: plan.period,
+        cta: plan.cta,
+        popular: plan.popular,
+        is_active: true,
+        role_code: plan.roleCode || 'free',
+        features: (plan.features || []).join('\n')
+      })
+    )
+  );
 }
 
 /** الباقات المعروضة في الموقع: المجانية أولاً ثم المدفوعة بترتيب العرض. */
 export async function listPublicPlans() {
   try {
     const { rows } = await pool.query(
-      `SELECT code, title, tagline, price, tokens, period, features, cta, popular, is_active
+      `SELECT code, title, tagline, price, tokens, storage_mb, period, features, cta, popular, is_active, role_code
          FROM plans
         WHERE is_active = true
         ORDER BY (price = 0) DESC, display_order ASC, price ASC`
     );
 
     if (!rows.length) return fallbackPlans();
-    return rows.map(normalizePlan);
+    return decoratePlans(rows.map(normalizePlan));
   } catch (error) {
     console.warn(`تعذّرت قراءة الباقات من قاعدة البيانات (${error.code || error.message}) — سيتم استخدام الباقات الافتراضية.`);
     return fallbackPlans();
@@ -73,12 +156,31 @@ export async function listPublicPlans() {
 export async function getPlanByCode(code) {
   try {
     const { rows } = await pool.query('SELECT * FROM plans WHERE code = $1', [code]);
-    if (rows.length) return normalizePlan(rows[0]);
+    if (rows.length) {
+      const [plan] = await decoratePlans([normalizePlan(rows[0])]);
+      return plan;
+    }
   } catch (error) {
     console.warn(`تعذّرت قراءة الباقة ${code}: ${error.code || error.message}`);
   }
 
-  return fallbackPlans().find((plan) => plan.code === code) || null;
+  const [fallback] = (await fallbackPlans()).filter((plan) => plan.code === code);
+  return fallback || null;
+}
+
+/**
+ * حصة التخزين بالبايت لباقة — تُقرأ من plans.storage_mb وتُطبَّق عند رفع الملفات.
+ * السقوط المتدرّج: قيمة الباقة ← حدّ المنصة العام (settings.max_storage_mb).
+ */
+export async function planStorageBytes(planCode) {
+  const code = String(planCode || '').trim() || FREE_PLAN_CODE;
+  try {
+    const { rows } = await pool.query('SELECT storage_mb FROM plans WHERE code = $1', [code]);
+    if (rows.length) return normalizeStorageMb(rows[0].storage_mb) * 1024 * 1024;
+  } catch (error) {
+    console.warn(`تعذّرت قراءة حصة التخزين للباقة ${code}: ${error.code || error.message}`);
+  }
+  return maxStorageBytes();
 }
 
 /**

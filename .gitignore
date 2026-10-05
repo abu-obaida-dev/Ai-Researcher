@@ -34,3 +34,5 @@ client_secret_*.json
 /logs
 *.log
 
+# مفتاح Firebase الخاص (Service Account) — لا يُرفع أبداً
+*firebase-adminsdk*.json

@@ -1,6 +1,7 @@
 import { pool } from '../db/client.js';
 import { FREE_PLAN_CODE } from '../constants.js';
 import { freeTrialTokens } from './plans.js';
+import { isSupervisorEmail, planRoles } from './access.js';
 
 /**
  * كل بيانات المستخدمين تُقرأ وتُكتب في PostgreSQL (جدولا users وprofiles) — لا Firestore.
@@ -35,7 +36,11 @@ export function adminEmailsFromEnv() {
     .filter(Boolean);
 }
 
-/** مصدرا الصلاحية: ADMIN_EMAILS في .env + جدول admins في قاعدة البيانات. */
+/**
+ * مصدر صلاحية لوحة الإدارة: ADMIN_EMAILS في .env (خطة نجاة) + جدول admins
+ * الذي يعدّله **المدير نفسه** من الإعدادات (إضافة بريده الجديد أو إزالته).
+ * لا يستطيع أي مشرف أو باحث لمس هذا الجدول.
+ */
 export async function isAdminEmail(email) {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) return false;
@@ -49,6 +54,30 @@ export async function isAdminEmail(email) {
   }
 }
 
+/** إيميلات المديرين: من .env + جدول admins (لعرضها في الإعدادات). */
+export async function adminEmails() {
+  const fromEnv = adminEmailsFromEnv();
+  try {
+    const { rows } = await pool.query('SELECT email, added_by, created_at FROM admins ORDER BY created_at DESC');
+    const merged = [...fromEnv.map((email) => ({ email, source: '.env', created_at: null }))];
+    for (const row of rows) {
+      const email = String(row.email || '').toLowerCase();
+      if (!merged.some((item) => item.email === email)) {
+        merged.push({ email, source: 'اللوحة', created_at: row.created_at, added_by: row.added_by });
+      }
+    }
+    return merged;
+  } catch (error) {
+    console.warn(`تعذّرت قراءة إيميلات المديرين: ${error.code || error.message}`);
+    return fromEnv.map((email) => ({ email, source: '.env', created_at: null }));
+  }
+}
+
+/**
+ * المدير يغيّر بريده: ينقل دوره admin إلى بريده الجديد ويحدّث الجدول.
+ * `oldEmail` بريده الحالي، `newEmail` الجديد. لا تغيير لدور أي حساب آخر.
+ */
+
 /**
  * إنشاء حساب جديد بعد تسجيل الدخول بجوجل (مع منح نقاط التجربة المجانية)
  * أو تحديث الحساب الموجود بنفس البريد — البيانات في PostgreSQL فقط.
@@ -59,7 +88,14 @@ export async function ensureUserFromGoogle({ googleSub, email, name, picture }) 
   if (!normalizedEmail) throw new Error('حساب جوجل لا يحتوي بريداً إلكترونياً.');
 
   const isAdmin = await isAdminEmail(normalizedEmail);
-  const role = isAdmin ? 'admin' : 'user';
+  const isSupervisor = !isAdmin && (await isSupervisorEmail(normalizedEmail));
+  // الدور يُشتق من المصدر: مدير (.env) ← مشرف (جدول supervisors) ← دور الباقة.
+  // أثناء التسجيل فقط تكون الباقة هي المجانية، بعدها يستقر الدور على plans.role_code.
+  let role = 'free';
+  if (isAdmin) role = 'admin';
+  else if (isSupervisor) role = 'supervisor';
+  else role = (await planRoles()).get(FREE_PLAN_CODE) || 'free';
+
   // حساب المدير لا يحتاج ملفاً بحثياً، فيبدأ الخطوة مكتملة
   const onboardingComplete = isAdmin;
   const sub = googleSub ? String(googleSub) : null;
@@ -103,14 +139,29 @@ export async function ensureUserFromGoogle({ googleSub, email, name, picture }) 
   }
 }
 
-/** يزامن الدور والحالة مع قائمة المديرين (يُستدعى عند كل تحميل جلسة). */
+/**
+ * يزامن دور الحساب مع مصدره الحقيقي (يُستدعى عند كل تحميل جلسة):
+ *   مدير (ADMIN_EMAILS في .env) ← مشرف (جدول supervisors) ← دور باقته.
+ * الباقة تربطه بدوره عبر plans.role_code، فتغيير الباقة يغيّر الخدمات المفتوحة فوراً.
+ */
 export async function syncUserRole(user) {
   if (!user) return null;
 
   const isAdmin = await isAdminEmail(user.email);
-  const expectedRole = isAdmin ? 'admin' : 'user';
-  const completeOnboarding = isAdmin && !user.onboarding_complete;
+  const isSupervisor = !isAdmin && (await isSupervisorEmail(user.email));
+  let expectedRole = 'researcher';
 
+  if (isAdmin) {
+    expectedRole = 'admin';
+  } else if (isSupervisor) {
+    expectedRole = 'supervisor';
+  } else {
+    const map = await planRoles();
+    expectedRole = map.get(user.plan_code) || 'free';
+  }
+
+  // المدير لا يحتاج ملفاً بحثياً، فيبدأ الخطوة مكتملة
+  const completeOnboarding = isAdmin && !user.onboarding_complete;
   if (user.role === expectedRole && !completeOnboarding) return user;
 
   try {

@@ -11,12 +11,7 @@
  * أول من يردّ بنجاح هو المعتمد، وكل محاولة (ناجحة أو فاشلة) تُسجَّل في جدول
  * ai_requests. لا مفاتيح سرية في الواجهة إطلاقاً — الواجهة تعرض أسماء المزوّدين
  * المفعّلة وعدد مفاتيحها فقط.
- *
- * روابط المدير المخصّصة (1I): من /admin/providers يمكن ربط نموذج بمفتاح API
- * يضيفه المدير — تُحفظ في جدول settings (مفتاح ai_custom_links) وتُقرأ إلى كاش
- * في الذاكرة، فيدخل المفتاح في السباق والنموذج في قوائم العرض فوراً بلا تشغيل.
  */
-import { readJsonSetting, writeJsonSetting } from './settings.js';
 
 const TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 60000);
 // حدّ طول الردّ المطلوب: يقلّل استهلاك رصيد المزوّد ويجنّب خطأ «requires more credits».
@@ -39,122 +34,9 @@ const HARD_STATUS = new Set([400, 401, 402, 403, 404, 422]);
 /** حالة المزوّدين في هذه العملية: من هو خارج الدوران الآن ولماذا. */
 const HEALTH = new Map();
 
-/**
- * روابط الموديلات المخصّصة التي أضافها المدير من صفحة المزوّدين:
- * كل عنصر { provider, model, api_key, added_at }. الكاش في الذاكرة يُملأ من
- * جدول settings عند تشغيل الخادم (loadCustomLinks) ويُحدَّث فور أي إضافة/حذف.
- */
-let CUSTOM_LINKS = [];
-const CUSTOM_LINKS_KEY = 'ai_custom_links';
-
-/** يكتب الكاش الحالي إلى جدول settings (upsert). */
-async function persistLinks() {
-  await writeJsonSetting(CUSTOM_LINKS_KEY, CUSTOM_LINKS);
-}
-
-/**
- * يقرأ الروابط المحفوظة من قاعدة البيانات إلى الكاش — تُستدعى مرة عند تشغيل
- * الخادم. أي خلل يعيد قائمة فارغة ولا يُسقط الخادم.
- */
-export async function loadCustomLinks() {
-  try {
-    const stored = await readJsonSetting(CUSTOM_LINKS_KEY, []);
-    CUSTOM_LINKS = (Array.isArray(stored) ? stored : [])
-      .filter((item) => item && typeof item === 'object' && item.provider && item.model && item.api_key)
-      .map((item) => ({
-        provider: String(item.provider),
-        model: String(item.model),
-        api_key: String(item.api_key),
-        added_at: item.added_at || new Date().toISOString()
-      }));
-    if (CUSTOM_LINKS.length) console.log(`روابط موديلات مخصّصة محمّلة: ${CUSTOM_LINKS.length}`);
-  } catch (error) {
-    CUSTOM_LINKS = [];
-    console.warn('تعذّر قراءة الروابط المخصّصة من الإعدادات:', error.message);
-  }
-  return CUSTOM_LINKS.length;
-}
-
-/**
- * قائمة الروابط للعرض في لوحة الإدارة: بلا مفتاح كاملاً — فقط آخر 4 أحرف
- * (لا تُسجَّل مفتاح سرية أبداً في HTML). الحفظ والحذف يتعاملان بفهرس مطابق.
- */
-export function customLinks() {
-  return CUSTOM_LINKS.map((item, index) => {
-    const { api_key: _key, ...rest } = item;
-    return { ...rest, index, last4: String(item.api_key || '').slice(-4) };
-  });
-}
-
-/** يضيف رابطاً جديداً (مزوّد + نموذج + مفتاح) ويحفظه فوراً في قاعدة البيانات. */
-export async function addCustomLink({ provider, model, api_key }) {
-  const key = String(provider || '').trim();
-  if (!PROVIDERS.some((item) => item.key === key)) return { ok: false, error: 'مزوّد غير معروف' };
-
-  const cleanModel = String(model || '').trim();
-  if (!/^[A-Za-z0-9][A-Za-z0-9:._/-]{0,99}$/.test(cleanModel)) {
-    return { ok: false, error: 'اسم النموذج غير صالح — حروف وأرقام و ( - _ . / : ) فقط' };
-  }
-
-  const cleanKey = String(api_key || '').trim();
-  if (!/^[^\s,]{8,400}$/.test(cleanKey)) {
-    return { ok: false, error: 'مفتاح API غير صالح: 8 أحرف على الأقل بلا مسافات أو فواصل' };
-  }
-
-  if (CUSTOM_LINKS.length >= 20) return { ok: false, error: 'بلغت حدّ الروابط (20) — احذف رابطاً قديماً أولاً' };
-
-  CUSTOM_LINKS.push({ provider: key, model: cleanModel, api_key: cleanKey, added_at: new Date().toISOString() });
-  try {
-    await persistLinks();
-    return { ok: true };
-  } catch {
-    CUSTOM_LINKS.pop(); // نُرجِع الكاش ليطابق القاعدة إن فشل الحفظ
-    return { ok: false, error: 'تعذّر حفظ الرابط في قاعدة البيانات' };
-  }
-}
-
-/** يحذف رابطاً بفهرسه ويحفظ القائمة المتبقي. */
-export async function removeCustomLink(index) {
-  const at = Number(index);
-  if (!Number.isInteger(at) || at < 0 || at >= CUSTOM_LINKS.length) return { ok: false, error: 'رابط غير موجود' };
-  const [removed] = CUSTOM_LINKS.splice(at, 1);
-  try {
-    await persistLinks();
-    return { ok: true };
-  } catch {
-    CUSTOM_LINKS.splice(at, 0, removed);
-    return { ok: false, error: 'تعذّر حفظ التغيير في قاعدة البيانات' };
-  }
-}
-
-/**
- * نماذج مزوّد: بلا مفتاح = كل ما يستطيع المزوّد (للعرض في الواجهات)، ومع مفتاح
- * = ما يجرّبه فعله ذلك المفتاح: رابط مخصّص يجرّب نموذجه وحده، ومفتاح .env يجرّب
- * نماذج المزوّد المهيّأة.
- */
-export function modelsFor(provider, apiKey = null) {
-  const base = Array.isArray(provider.models) ? provider.models : [];
-  const customModels = CUSTOM_LINKS.filter((item) => item.provider === provider.key && item.model);
-
-  if (apiKey === null || apiKey === undefined) {
-    return [...new Set([...base, ...customModels.map((item) => String(item.model))])];
-  }
-
-  const link = customModels.find((item) => String(item.api_key) === String(apiKey));
-  if (link) return [String(link.model)];
-  return base;
-}
-
-/** كتالوج الربط للوحة: المزوّدون وسماؤهم مع نماذجهم + قائمة موحّدة لكل النماذج. */
-export function linkCatalog() {
-  return {
-    providers: PROVIDERS.map((provider) => ({
-      key: provider.key,
-      label: PROVIDER_LABELS[provider.key] || provider.key,
-      models: modelsFor(provider)
-    })),
-    models: [...new Set(PROVIDERS.flatMap((provider) => modelsFor(provider)))]
-  };
+/** نماذج مزوّد: ما يستطيع تشغيله، بالترتيب (الأول هو الافتراضي). */
+export function modelsFor(provider) {
+  return Array.isArray(provider.models) ? [...provider.models] : [];
 }
 
 /** وصف عربي لخطأ المزوّد + هل هو دائم أم مؤقّت + مدة التهدئة. */
@@ -209,16 +91,10 @@ export const PROVIDER_LABELS = {
  */
 function keysOf(provider) {
   const raw = process.env[`${provider.envKey}S`] ?? process.env[provider.envKey] ?? '';
-  const fromEnv = String(raw)
+  return String(raw)
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
-  // مفاتيح روابط المدير المخصّصة تدخل آخر القائمة بترتيب إضافتها (مع منع التكرار)
-  const custom = CUSTOM_LINKS.filter((link) => link.provider === provider.key).map((link) =>
-    String(link.api_key || '').trim()
-  );
-  const seen = new Set();
-  return [...fromEnv, ...custom].filter((item) => item && !seen.has(item) && seen.add(item));
 }
 
 /**
@@ -229,9 +105,7 @@ function activeTargets() {
   const targets = [];
   for (const provider of PROVIDERS) {
     keysOf(provider).forEach((apiKey, position) => {
-      // مفتاح رابط مخصّص يجرّب نموذجه هو فقط (اقتران صريح: هذا المفتاح لهذا النموذج)،
-      // ومفتاح .env يجرّب نماذج المزوّد المهيّأة.
-      targets.push({ provider, apiKey, models: modelsFor(provider, apiKey), id: `${provider.key}#${position + 1}`, position });
+      targets.push({ provider, apiKey, models: modelsFor(provider), id: `${provider.key}#${position + 1}`, position });
     });
   }
   return targets;

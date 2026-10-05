@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+
+  "//": "المشروع خادم Node.js واحد يستدعي server.listen() في server.js ← يكتشفه Vercel تلقائياً. لا rewrites ولا buildCommand: أي إضافة هنا تكسر تقديم ملفات public/ الثابتة.",
+
+  "installCommand": "npm install --omit=dev",
+
+  "functions": {
+    "api/index.js": {
+      "memory": 2048,
+      "maxDuration": 300,
+      "regions": ["iad1"]
+    }
+  }
+}

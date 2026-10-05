@@ -1,5 +1,5 @@
 import { pool } from '../db/client.js';
-import { READING_STATUSES } from '../constants.js';
+import { READING_STATUSES, isUuid } from '../constants.js';
 import { isValidStepKeyForUser } from './journey.js';
 
 /**
@@ -15,6 +15,21 @@ const REFERENCE_LIMIT = 200;
 const NOTE_LIMIT = 200;
 
 /** نص ببليوغرافي جاهز للعرض (APA مبسّط من الحقول نفسها — بدون توليد ذكي). */
+/**
+ * يوحّد الهمزات والتاء المربوطة ويزيل التشكيل ⇒ «أسماء» و«اسماء» كلمة واحدة،
+ * و«التعليم» و«التعليم» تتطابقان في الترشيح.
+ */
+export function normalizeArabic(text) {
+  return String(text || '')
+    .replace(/[\u064B-\u0652\u0640]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ؤ/g, 'و')
+    .replace(/ئ/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .toLowerCase();
+}
+
 export function citationText(row) {
   const title = String(row.title || '').trim();
   if (!title) return '—';
@@ -62,6 +77,9 @@ function normalizeReference(row) {
     authors,
     year,
     source,
+    // الوصول إلى أصل المرجع: كتاب في مكتبة المنصة (ملف) أو رابط المصدر.
+    hasFile: Boolean(row.stored_path),
+    externalUrl: row.external_url || '',
     citation: row.citation_text || citationText({ title, authors, year, source })
   };
 }
@@ -70,23 +88,60 @@ function normalizeReference(row) {
  * بحث في المكتبة العلمية المركزية + إشارة «في مراجعي» لكل نتيجة.
  * البحث ILIKE على العنوان/المؤلف/المصدر/الملخص (FTS الكامل في المرحلة الثالثة).
  */
-export async function searchLibraryItems({ userId, q = '', limit = 30 } = {}) {
+export async function searchLibraryItems({ userId, q = '', limit = 30, match = 'all' } = {}) {
   const term = String(q || '').trim().slice(0, 120);
   const max = Math.min(Math.max(Number(limit) || 30, 1), 60);
 
+  // نبحث في النصّ المطبَّع أولاً (يتسامح مع الهمزات والتاء المربوطة والتشكيل)،
+  // ثم في الأعمدة الأصلية احتياطاً للعناصر القديمة التي لا تحمل نصّ بحث.
+  const COLUMNS = [
+    'li.search_text',
+    'li.title',
+    'li.authors',
+    'li.source',
+    'li.abstract',
+    'li.subjects',
+    'li.field',
+    'li.external_url'
+  ];
+  const needsNormalized = normalizeArabic(term);
+
+  // كلمات مفاتيح مفصولة (ومطبَّعة): يجب أن تحويها كلّها (AND) لا العبارة كاملة،
+  // وإلا لم يطابق «تكنولوجيا المعلومات إدارة التغير» عنصراً عنوانه جزء منه.
+  const words = needsNormalized.split(/\s+/).filter((word) => word.length > 2).slice(0, 6);
+  const terms = words.length >= 2 ? words : needsNormalized ? [needsNormalized] : [];
+  const joiner = match === 'any' ? ' OR ' : ' AND ';
+
+  const values = [userId];
+  const like = (value) => `%${String(value).replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`;
+
+  // نحسب قيمة كل كلمة مرة، ثم نجمع الشروط: AND (دقيق) أو OR (تساهلي).
+  const params = terms.map(like);
+  values.push(...params);
+
+  const clauses = params.map((_, position) => {
+    const index = values.length - params.length + position + 1;
+    return `(${COLUMNS.map((column) => `${column} ILIKE $${index}`).join(' OR ')})`;
+  });
+
+  const where = [
+    'WHERE li.is_active = true',
+    ...(clauses.length ? [`AND (${clauses.join(match === 'any' ? ' OR ' : ' AND ')})`] : [])
+  ].join('\n         ');
+
+  values.push(max);
+
   const { rows } = await pool.query(
-    `SELECT li.id, li.title, li.authors, li.year, li.source, li.field, li.degree_level,
-            li.citation_text,
+    `SELECT li.id, li.title, li.authors, li.year, li.source, li.field, li.degree_level, li.subjects,
+            li.citation_text, li.stored_path, li.file_name, li.mime, li.size_bytes, li.external_url,
             (ur.id IS NOT NULL) AS added,
             COALESCE(ur.status, '') AS my_status
        FROM library_items li
-       LEFT JOIN user_references ur ON ur.library_item_id = li.id AND ur.user_id = $2
-      WHERE li.is_active = true
-        AND ($1 = '' OR li.title ILIKE '%' || $1 || '%' OR li.authors ILIKE '%' || $1 || '%'
-             OR li.source ILIKE '%' || $1 || '%' OR li.abstract ILIKE '%' || $1 || '%')
+       LEFT JOIN user_references ur ON ur.library_item_id = li.id AND ur.user_id = $1
+      ${where}
       ORDER BY li.year DESC NULLS LAST, li.created_at DESC
-      LIMIT $3`,
-    [term, userId, max]
+      LIMIT $${values.length}`,
+    values
   );
 
   return rows.map((row) => ({
@@ -96,9 +151,16 @@ export async function searchLibraryItems({ userId, q = '', limit = 30 } = {}) {
     year: row.year,
     source: row.source || '',
     field: row.field || '',
+    subjects: row.subjects || '',
     degreeLevel: row.degree_level || '',
     added: Boolean(row.added),
     myStatus: row.my_status || '',
+    // الوصول: hasFile للمعاينة/التحميل، externalUrl للعناصر بلا ملف.
+    hasFile: Boolean(row.stored_path),
+    fileName: row.file_name || '',
+    mime: row.mime || '',
+    sizeBytes: Number(row.size_bytes || 0),
+    externalUrl: row.external_url || '',
     citation: row.citation_text || citationText(row)
   }));
 }
@@ -213,6 +275,7 @@ export async function addCustomReference(
 
 /** تغيير حالة قراءة مرجع (مرشّح/قيد القراءة/مقروء/مستخدم في البحث). */
 export async function updateReferenceStatus(userId, referenceId, status) {
+  if (!isUuid(referenceId)) return null;
   if (!REFERENCE_STATUSES.has(status)) {
     const error = new Error('حالة القراءة غير صالحة.');
     error.code = 'BAD_STATUS';
@@ -235,6 +298,7 @@ export async function updateReferenceStatus(userId, referenceId, status) {
 
 /** حذف مرجع من مراجع الباحث (بيانات المكتبة نفسها لا تتأثر). */
 export async function deleteReference(userId, referenceId) {
+  if (!isUuid(referenceId)) return false;
   const { rowCount } = await pool.query('DELETE FROM user_references WHERE id = $2 AND user_id = $1', [
     userId,
     referenceId
@@ -303,6 +367,7 @@ export async function listNotes(userId, { q = '', step = '', referenceId = '', p
 
 /** ملاحظة واحدة بملكيتها (null إن لم تكن له). */
 export async function getNote(userId, noteId) {
+  if (!isUuid(noteId)) return null;
   const { rows } = await pool.query('SELECT * FROM notes WHERE id = $2 AND user_id = $1', [userId, noteId]);
 
   return rows.length ? normalizeNote(rows[0]) : null;
@@ -354,6 +419,7 @@ export async function createNote(
 
 /** تعديل ملاحظة قائمة (العنوان/النص/الوسوم/التثبيت/الخطوة). */
 export async function updateNote(userId, noteId, { title, body, tags, pinned, step } = {}) {
+  if (!isUuid(noteId)) return null;
   const existing = await getNote(userId, noteId);
   if (!existing) {
     const error = new Error('الملاحظة غير موجودة.');
@@ -379,6 +445,7 @@ export async function updateNote(userId, noteId, { title, body, tags, pinned, st
 
 /** تبديل تثبيت الملاحظة (قائمة الوصول السريع أعلى المفكرة). */
 export async function toggleNotePin(userId, noteId) {
+  if (!isUuid(noteId)) return null;
   const { rows } = await pool.query(
     'UPDATE notes SET pinned = NOT pinned, updated_at = NOW() WHERE id = $2 AND user_id = $1 RETURNING *',
     [userId, noteId]
@@ -395,6 +462,7 @@ export async function toggleNotePin(userId, noteId) {
 
 /** حذف ملاحظة. */
 export async function deleteNote(userId, noteId) {
+  if (!isUuid(noteId)) return false;
   const { rowCount } = await pool.query('DELETE FROM notes WHERE id = $2 AND user_id = $1', [userId, noteId]);
 
   return rowCount > 0;

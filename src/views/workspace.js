@@ -68,16 +68,48 @@ function renderReferenceRow(reference, stepTitles) {
     </form>
   </td>
   <td>
-    <a class="btn btn-quiet" href="/notes?ref=${escapeHtml(reference.id)}">ملاحظات (${reference.notesCount})</a>
-    <form method="post" action="/references/${escapeHtml(reference.id)}/delete" class="inline-form">
-      <button class="btn btn-danger" type="submit">حذف</button>
-    </form>
+    <div class="links">
+    ${
+      reference.hasFile
+        ? `<a class="btn btn-sm" href="/library/${encodeURIComponent(reference.libraryItemId)}/file?inline=1" target="_blank" rel="noopener">${icon(
+            'book',
+            'icon-sm'
+          )} الكتاب</a>
+           <a class="btn btn-sm" href="/library/${escapeHtml(reference.libraryItemId)}/file">${icon(
+             'download',
+             'icon-sm'
+           )} تحميل</a>`
+        : reference.externalUrl
+          ? `<a class="btn btn-sm" href="${escapeHtml(reference.externalUrl)}" target="_blank" rel="noopener">المصدر ↗</a>`
+          : ''
+    }
+      <a class="btn btn-quiet" href="/notes?ref=${escapeHtml(reference.id)}">ملاحظات (${escapeHtml(
+    reference.notesCount || 0
+  )})</a>
+      <form method="post" action="/references/${escapeHtml(reference.id)}/delete" class="inline-form">
+        <button class="btn btn-danger" type="submit">حذف</button>
+      </form>
+    </div>
   </td>
 </tr>`;
 }
 
-/** بطاقة نتيجة من المكتبة مع زر الإضافة إلى «مراجعي». */
+/** بطاقة نتيجة من المكتبة مع زر الإضافة إلى «مراجعي» + الوصول إلى الكتاب نفسه. */
 function renderLibraryItem(item, stepKey) {
+  // الوصول للكتاب: ملف للمعاينة + ملف للتحميل، أو رابط المصدر الأصلي إن لم يكن ملف.
+  const access = item.hasFile
+    ? `<a class="btn btn-sm" href="/library/${encodeURIComponent(item.id)}/file?inline=1" target="_blank" rel="noopener">${icon(
+        'book',
+        'icon-sm'
+      )} معاينة</a>
+       <a class="btn btn-sm" href="/library/${encodeURIComponent(item.id)}/file">${icon('download', 'icon-sm')} تحميل</a>`
+    : item.externalUrl
+      ? `<a class="btn btn-sm" href="${escapeHtml(item.externalUrl)}" target="_blank" rel="noopener">${icon(
+          'book',
+          'icon-sm'
+        )} فتح المصدر ↗</a>`
+      : '<span class="badge">بيانات فقط</span>';
+
   return `<article class="lib-item">
   <h3>${escapeHtml(item.title)}</h3>
   <p class="muted">${escapeHtml(item.citation)}</p>
@@ -91,14 +123,117 @@ function renderLibraryItem(item, stepKey) {
       <button class="btn btn-primary" type="submit">${icon('plus', 'icon-sm')} أضف إلى مراجعي</button>
     </form>`
     }
+    ${access}
+    ${item.hasFile && item.sizeBytes ? `<span class="badge">${escapeHtml(formatFileSize(item.sizeBytes))}</span>` : ''}
     ${item.year ? `<span class="badge">${escapeHtml(String(item.year))}</span>` : ''}
     ${item.field ? `<span class="badge">${escapeHtml(item.field)}</span>` : ''}
   </div>
 </article>`;
 }
 
+/**
+ * نتيجة بحث الويب (قاعدة بيانات علمية) — تُعرض بكل بيانات الاستشهاد ورابط
+ * المصدر ورابط النسخة المفتوحة، مع زر «أضف إلى مراجعي» يحمل البيانات جاهزة.
+ */
+function renderWebReference(item, stepKey) {
+  const bits = [
+    item.authorText || 'بلا مؤلف محدد',
+    item.year ? String(item.year) : '',
+    item.venue || item.publisher || '',
+    item.doi ? `DOI: ${item.doi}` : ''
+  ].filter(Boolean);
+
+  const link = item.pdfUrl || item.url || '';
+
+  return `<article class="lib-item lib-card">
+  <div class="lib-card-head">
+    <h3>${escapeHtml(item.title)}</h3>
+    <div class="lib-badges">
+      ${item.isOpenAccess ? `<span class="badge badge-active">${escapeHtml(item.sources[0] || 'مفتوح')}</span>` : `<span class="badge">${escapeHtml(item.sources[0] || 'مصدر')}</span>`}
+      ${item.citations ? `<span class="badge">${escapeHtml(formatNumber(item.citations))} استشهاد</span>` : ''}
+    </div>
+  </div>
+  <p class="lib-meta">${bits.map((part) => `<span>${escapeHtml(part)}</span>`).join('<span>·</span>')}</p>
+  ${item.abstract ? `<p class="lib-abs">${escapeHtml(item.abstract.slice(0, 260))}${item.abstract.length > 260 ? '…' : ''}</p>` : ''}
+  <div class="lib-actions">
+    <form class="inline-form" method="post" action="/references/web">
+      <input type="hidden" name="title" value="${escapeHtml(item.title)}" />
+      <input type="hidden" name="authors" value="${escapeHtml(item.authorText)}" />
+      <input type="hidden" name="year" value="${escapeHtml(String(item.year || ''))}" />
+      <input type="hidden" name="venue" value="${escapeHtml(item.venue || item.publisher || '')}" />
+      <input type="hidden" name="doi" value="${escapeHtml(item.doi)}" />
+      <input type="hidden" name="url" value="${escapeHtml(item.url || '')}" />
+      <input type="hidden" name="step" value="${escapeHtml(stepKey || '')}" />
+      <button class="btn btn-primary btn-sm" type="submit">${icon('plus', 'icon-sm')} أضف إلى مراجعي</button>
+    </form>
+    ${link ? `<a class="btn btn-sm" href="${escapeHtml(link)}" target="_blank" rel="noopener">${item.pdfUrl ? 'تحميل PDF' : 'فتح المصدر'} ↗</a>` : ''}
+    ${item.doi ? `<a class="btn btn-quiet btn-sm" href="https://doi.org/${escapeHtml(item.doi)}" target="_blank" rel="noopener">DOI ↗</a>` : ''}
+  </div>
+</article>`;
+}
+
+/**
+ * لوحة «ابحث في قواعد البيانات العلمية» — تحلّ أكبر مشكلة عند الباحثين:
+ * نموذج بحث عام + نموذج «لديّ DOI أو رابط» للحلّ المباشر.
+ */
+function renderWebSearchPanel({ web, webQuery, webSource, webSources = [], stepKey, resolved = null, resolveError = '', resolveQuery = '' }) {
+  const options = [
+    `<option value=""${!webSource ? ' selected' : ''}>كل المصادر (الأسرع والأغنى)</option>`,
+    ...webSources
+      .filter((source) => ['crossref', 'openalex', 'ieee', 'acm', 'semantic', 'arxiv', 'europepmc', 'doaj', 'openlibrary'].includes(source.id))
+      .map((source) => `<option value="${escapeHtml(source.id)}"${source.id === webSource ? ' selected' : ''}>${escapeHtml(source.label)}</option>`)
+  ].join('');
+
+  const results = web?.items || [];
+  const errors = (web?.errors || []).filter((entry) => entry.error);
+
+  const resolvedCard = resolved
+    ? `<div class="notice mt-16">استخرجنا بيانات هذا المرجع كاملة — راجعها قبل الاستشهاد.</div>
+       ${renderWebReference({ ...resolved, sources: ['Crossref'], isOpenAccess: Boolean(resolved.pdfUrl) }, stepKey)}`
+    : resolveError
+      ? `<div class="alert mt-16">${escapeHtml(resolveError)}</div>`
+      : '';
+
+  return `<section class="card">
+  <div class="card-head">
+    <h2>${icon('book', 'icon-sm')} ابحث في قواعد البيانات العلمية</h2>
+    <span class="muted">مرجع كامل برابطه خلال ثوانٍ</span>
+  </div>
+  <p class="muted">
+    ابحث بالكلمات المفتاحية (عنوان · مفهوم · كلمات مفتاحية إنجليزية) في Crossref وIEEE Xplore وACM
+    Digital Library وOpenAlex وSemantic Scholar وarXiv وEurope PMC — فتحصل على المؤلفين والمجلة
+    والسنة وDOI ورابط المصدر ونسخة PDF مفتوحة إن وُجدت.
+  </p>
+  <form class="toolbar" method="get" action="/references">
+    ${stepKey ? `<input type="hidden" name="step" value="${escapeHtml(stepKey)}" />` : ''}
+    <input type="hidden" name="q" value="" />
+    <input type="search" name="wq" value="${escapeHtml(webQuery || '')}" placeholder="مثال: machine learning in higher education" />
+    <select name="wsrc" aria-label="المصدر">${options}</select>
+    <button class="btn btn-primary" type="submit">${icon('searchCheck', 'icon-sm')} ابحث</button>
+  </form>
+
+  <form class="toolbar mt-12" method="get" action="/references">
+    <h3 class="field-label">لديّ DOI أو رابط مرجع — استخرجه لي</h3>
+    ${stepKey ? `<input type="hidden" name="step" value="${escapeHtml(stepKey)}" />` : ''}
+    <input type="hidden" name="q" value="" />
+    <input type="search" name="resolve" value="${escapeHtml(resolveQuery || '')}" placeholder="ألصق DOI أو رابط المجلة (10.xxxx/… أو https://doi.org/…)" />
+    <button class="btn" type="submit">${icon('searchCheck', 'icon-sm')} استخراج البيانات</button>
+  </form>
+  ${resolvedCard}
+
+  ${
+    results.length
+      ? `<div class="lib-list mt-16">${results.map((item) => renderWebReference(item, stepKey)).join('')}</div>
+         ${web?.tried?.length ? `<p class="muted mt-8">بحثنا في: ${web.tried.map((entry) => `${escapeHtml(entry.source)} (${entry.count})`).join(' · ')}</p>` : ''}`
+      : webQuery
+        ? `<div class="empty mt-16">لا نتائج${errors.length ? ` — ${escapeHtml(errors[0].error)}` : ''}. جرّب كلمات إنجليزية أدق أو مصدراً آخر.</div>`
+        : '<div class="empty mt-16">اكتب كلمة بحث وستظهر لك المراجع مع روابطها وبياناتها كاملة.</div>'
+  }
+</section>`;
+}
+
 /** صفحة المراجع: بحث في المكتبة + إضافة يدوية + «مراجعي» مع تغيير الحالة. */
-export function renderReferencesPage({ account, unread = 0, query = '', results = [], references = [], counts = {}, stepKey = '', stepOptions = [], stepTitles = {}, flash = null }) {
+export function renderReferencesPage({ account, unread = 0, query = '', results = [], references = [], counts = {}, stepKey = '', stepOptions = [], stepTitles = {}, flash = null, web = null, webQuery = '', webSource = '', webSources = [], resolved = null, resolveError = '', resolveQuery = '' }) {
   const libraryHtml = query
     ? results.length
       ? `<div class="lib-list">${results.map((item) => renderLibraryItem(item, stepKey)).join('')}</div>`
@@ -138,6 +273,8 @@ export function renderReferencesPage({ account, unread = 0, query = '', results 
     </form>
   </section>
 </div>
+
+${renderWebSearchPanel({ web, webQuery, webSource, webSources, stepKey, resolved, resolveError, resolveQuery })}
 
 ${flashBox(flash)}
 
@@ -344,7 +481,7 @@ function renderStorageBar(summary) {
 function renderSheetPreview({ sheetData, sheetError = '' }) {
   if (sheetError) return `<div class="alert">${escapeHtml(sheetError)}</div>`;
   if (!sheetData?.sheets?.length) {
-    return '<div class="notice"><b>الملف فارغ.</b><p>لا توجد بيانات لعرضها في هذا الجدول.</p></div>';
+    return '<div class="notice"><b>الملف فارغ.</b><p>لا توجد بيانات لعرضها هنا.</p></div>';
   }
 
   const sheets = sheetData.sheets;

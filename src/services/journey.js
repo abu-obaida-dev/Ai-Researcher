@@ -191,6 +191,70 @@ export async function getJourney(userId, degreeLevel) {
 }
 
 /** ملخص تقدّم مختصر لصفحة الإحصائية — لا يفشل أبداً (يعيد null عند الخطأ). */
+/**
+ * **موضوع البحث المُسجَّل**: مصدر واحد موثوق تعتمد عليه كل أدوات المراجع.
+ * ترتيب القراءة:
+ *   1) ما كتبه الباحث في خطوة «اختيار الموضوع» (output_note) — هذا هو المعتمد.
+ *   2) عنوان البحث في ملفه البحثي (profiles.research_title).
+ *   3) لا شيء ⇒ الموضوع غير مسجَّل بعد.
+ * لا نستخدم «التخصص» العام هنا عمداً: تخصص عام ⇒ مراجع عشوائية.
+ */
+export async function registeredTopic(userId, profile = {}) {
+  let fromJourney = '';
+  try {
+    const { rows } = await pool.query(
+      `SELECT output_note FROM user_step_progress
+        WHERE user_id = $1 AND step_key = 'topic' AND COALESCE(output_note, '') <> ''
+        LIMIT 1`,
+      [userId]
+    );
+    fromJourney = String(rows[0]?.output_note || '').trim();
+  } catch (error) {
+    console.warn(`تعذّرت قراءة موضوع البحث المسجّل: ${error?.code || error?.message}`);
+  }
+
+  const fromProfile = String(profile.research_title || '').trim();
+  return {
+    topic: (fromJourney || fromProfile).slice(0, 200),
+    origin: fromJourney ? 'journey' : fromProfile ? 'profile' : 'none'
+  };
+}
+
+/**
+ * يسجّل موضوع البحث الذي اختاره الباحث (بالكلمات التي كتبها هو) في خطوة
+ * «اختيار الموضوع»، ويعيده للواجهة. لا نضع الخطوة «تم» — الباحث وحده يقرّر ذلك —
+ * بل «جاري» مع ملاحظة تحتوي الموضوع المختار.
+ */
+export async function recordTopic(userId, topic, { degreeLevel = '', stepKey = 'topic' } = {}) {
+  const text = String(topic || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
+
+  if (text.length < 4) {
+    const error = new Error('اكتب عنوان الموضوع ليُسجَّل (٤ أحرف على الأقل).');
+    error.code = 'BAD_TOPIC';
+    throw error;
+  }
+
+  const path = await resolvePathForDegree(degreeLevel);
+  if (!path.steps.some((step) => step.key === stepKey)) {
+    const error = new Error('خطوة اختيار الموضوع غير موجودة في مسارك.');
+    error.code = 'BAD_STEP';
+    throw error;
+  }
+
+  await setStepStatus(userId, stepKey, { status: 'in_progress', outputNote: text });
+
+  // ولا نكتب فوق عنوان بحثه إن كان قد حفظه بنفسه (نترك قراره).
+  await pool.query(
+    "UPDATE profiles SET research_title = $2 WHERE user_id = $1 AND COALESCE(research_title, '') = ''",
+    [userId, text]
+  );
+
+  return text;
+}
+
 export async function getJourneySummary(userId, degreeLevel) {
   try {
     const journey = await getJourney(userId, degreeLevel);

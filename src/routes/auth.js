@@ -10,6 +10,7 @@ import {
   isGoogleAuthConfigured,
   newOAuthState
 } from '../auth/google.js';
+import { rateLimit } from '../middleware/security.js';
 import {
   ACADEMIC_YEARS,
   CITATION_STYLES,
@@ -90,7 +91,7 @@ function redirectAfterLogin(res, user, nextPath) {
 }
 
 /** صفحة الدخول — إن وُجدت جلسة فعّالة تُحوَّل مباشرة إلى الحساب. */
-router.get('/login', async (req, res) => {
+router.get('/login', rateLimit('login_page', { limit: 60, windowMs: 5 * 60 * 1000 }), async (req, res) => {
   if (req.account) {
     res.redirect(302, homePathFor(req.account));
     return;
@@ -111,7 +112,7 @@ router.get('/login', async (req, res) => {
 });
 
 /** بدء دخول جوجل: state عشوائي في كوكي قصير العمر + تحويل إلى شاشة جوجل. */
-router.get('/auth/google', (req, res) => {
+router.get('/auth/google', rateLimit('oauth_start', { limit: 20, windowMs: 5 * 60 * 1000 }), (req, res) => {
   if (!isGoogleAuthConfigured()) {
     res.status(503).type('html').send(
       renderAuthNotice({
@@ -133,7 +134,7 @@ router.get('/auth/google', (req, res) => {
 });
 
 /** العودة من جوجل: تحقق من الحالة، ثم إنشاء/تحديث المستخدم في PostgreSQL وفتح جلسة. */
-router.get('/auth/google/callback', async (req, res) => {
+router.get('/auth/google/callback', rateLimit('oauth_callback', { limit: 30, windowMs: 5 * 60 * 1000 }), async (req, res) => {
   const [expectedState, nextPath = ''] = readCookie(req, OAUTH_STATE_COOKIE).split('|');
   clearCookie(res, OAUTH_STATE_COOKIE);
 

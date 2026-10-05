@@ -20,7 +20,12 @@
     "verify:dashboard": "node --env-file=.env scripts/verify-dashboard.mjs",
     "fonts:fetch": "node scripts/fetch-fonts.mjs",
     "doctor": "node --env-file=.env scripts/doctor.mjs",
-    "set-admin": "node --env-file=.env scripts/set-admin.mjs"
+    "set-admin": "node --env-file=.env scripts/set-admin.mjs",
+    "storage:clean": "node scripts/clean-storage.mjs",
+    "test:unit": "node --test scripts/unit-tests.mjs",
+    "test:smoke": "node scripts/smoke-phase1.mjs",
+    "check:deploy": "node --env-file=.env scripts/check-deploy-env.mjs",
+    "test": "npm run test:unit"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",
@@ -29,10 +34,12 @@
     "exceljs": "^4.4.0",
     "express": "^4.21.2",
     "express-session": "^1.19.0",
-    "firebase-admin": "^12.7.0",
+    "firebase-admin": "^14.5.0",
     "google-auth-library": "^9.15.1",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.3",
+    "jszip": "^3.10.2",
+    "pdfjs-dist": "^4.10.38",
     "pg": "^8.16.0"
   }
 }

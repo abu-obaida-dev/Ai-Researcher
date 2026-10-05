@@ -1,13 +1,22 @@
-import { APP_NAME, PAYMENT_METHODS, SUPPORT_EMAIL, SUPPORT_WHATSAPP } from '../constants.js';
+import {
+  APP_NAME,
+  PAYMENT_METHODS,
+  PLATFORM_SERVICES,
+  SITE_CURRENCIES,
+  SUPPORT_EMAIL,
+  SUPPORT_WHATSAPP
+} from '../constants.js';
+import { whatsappLink } from './layout.js';
 import { formatNumber } from './format.js';
+import { formatStorageMb } from '../services/plans.js';
 import { icon } from './icons.js';
 import { BRAND, escapeHtml, renderLayout } from './layout.js';
 
 /**
- * الصفحة الرئيسية للمنصة (صفحة الهبوط) — نفس أقسام ومحتوى النسخة القديمة
- * (Navbar / Hero / Features / HowItWorks / Pricing / FAQ / CtaBand / Footer)
- * لكن مولَّدة على الخادم بدون React، وبهوية Zena AI، وبباقات مقروءة من جدول plans
- * في PostgreSQL (مع سقوط آمن على الباقات الافتراضية).
+ * الصفحة الرئيسية للمنصة (صفحة الهبوط) — مولَّدة على الخادم بدون React، وبهوية Zena AI،
+ * وبباقات مقروءة من جدول plans في PostgreSQL (مع سقوط آمن على الباقات الافتراضية).
+ * الأقسام بالترتيب: Hero (بالشعار والشعار النصي) · Features · Services · HowItWorks ·
+ * Audience (لمن المنصة + الأمانة العلمية) · Pricing · FAQ · CtaBand، ثم الفوتر المشترك.
  */
 
 const FEATURES = [
@@ -71,8 +80,10 @@ function renderHero(freeTokens) {
   return `<section class="landing-hero">
   <div class="hero-grid">
     <div class="hero-copy">
+      <img class="hero-logo" src="${BRAND.mark}" alt="${escapeHtml(APP_NAME)}" width="190" height="52" />
       <span class="eyebrow-pill">${icon('sparkles', 'icon-sm')} إشراف بحثي ذكي مدعوم بالذكاء الاصطناعي</span>
       <h1>مشرف بحثي ذكي يرافقك من <span class="accent">الفكرة الأولى</span> إلى فصل متماسك</h1>
+      <p class="hero-slogan">ابحث بعمق. اكتب بوضوح.</p>
       <p class="lead">
         منصة عربية تساعد طلاب الدراسات العليا والباحثين في اختيار العنوان، بناء هيكل الرسالة، مراجعة
         الفصول، واقتراح المصادر وتوثيقها — بملف بحثي مخصص يعرف مجالك وجامعتك ومرحلتك.
@@ -146,6 +157,69 @@ function renderFeatures() {
 </section>`;
 }
 
+/** قسم الخدمات: كل ما تُفتح عليه المنصة فعلياً (من PLATFORM_SERVICES) لا الدردشة فقط. */
+function renderServices() {
+  const cards = PLATFORM_SERVICES.map(
+    (service) => `<article class="service-card">
+  <span class="feature-icon">${icon(service.icon)}</span>
+  <h3>${escapeHtml(service.label)}</h3>
+  <p>${escapeHtml(service.note || '')}</p>
+</article>`
+  ).join('');
+
+  return `<section class="slab" id="services">
+  <div class="slab-inner">
+    <div class="center">
+      <span class="eyebrow">الخدمات</span>
+      <h2 class="section-title">أدوات متكاملة داخل حساب واحد</h2>
+      <p class="section-lead">
+        كل خدمة تُفتح حسب باقتك وتُدار من لوحة واحدة: مسار بحث متسلسل، مكتبة علمية، مفكرة،
+        مساحة ملفات، ومعها التدريب على المناقشة — بلا تنقّل بين مواقع متفرقة.
+      </p>
+    </div>
+    <div class="service-grid">${cards}</div>
+    <div class="center services-cta">
+      <a class="btn btn-primary" href="/login">أنشئ حسابك وابدأ ${icon('arrow', 'icon-sm')}</a>
+    </div>
+  </div>
+</section>`;
+}
+
+/** قسم «لمن هذه المنصة» + «الأمانة العلمية والخصوصية»: بطاقتان تقوّيان ثقة الباحث. */
+function renderAudience() {
+  const audience = [
+    'باحث ماجستير يعمل على الفصول الأولى',
+    'باحث دكتوراه يبني الإطار النظري والمنهجية',
+    'طالب تخرّج يحضّر مشروع بحث',
+    'باحث مستقل يقود بحثه بنفسه'
+  ];
+  const ethics = [
+    'نستخدم بيانات ملفك البحثي لتخصيص ردود المشرف فقط — لا لتدريب النماذج ولا تُشارك مع أي جهة.',
+    'المنصة أداة إشراف: تساعدك على البناء والمراجعة، والنصّ النهائي ومسؤوليته العلمية عليك.',
+    'المراجع اقتراحات أولية: راجع كل مرجع في قاعدة علمية وتحقق منه قبل الاستشهاد به.',
+    'دخول آمن بحساب جوجل بدون كلمات مرور، وجلسة موقّعة على الخادم.'
+  ];
+
+  return `<section class="slab slab-alt" id="audience">
+  <div class="slab-inner">
+    <div class="center">
+      <span class="eyebrow">لمن هذه المنصة</span>
+      <h2 class="section-title">مصمّمة لأي باحث، وبمسؤولية علمية واضحة</h2>
+    </div>
+    <div class="split-band">
+      <article class="info-card">
+        <h3>${icon('graduation', 'icon-sm')} تناسب مرحلتك الدراسية</h3>
+        <ul class="info-list">${audience.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>
+      </article>
+      <article class="info-card">
+        <h3>${icon('shield', 'icon-sm')} الأمانة العلمية والخصوصية</h3>
+        <ul class="info-list">${ethics.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>
+      </article>
+    </div>
+  </div>
+</section>`;
+}
+
 /** قسم «كيف تعمل» — ثلاث خطوات فقط (جدول استهلاك النقاط حُذف بقرار المحتوى). */
 function renderHowItWorks(freeTokens) {
   const steps = buildSteps(freeTokens)
@@ -171,31 +245,46 @@ function renderHowItWorks(freeTokens) {
 </section>`;
 }
 
-/** بطاقة باقة واحدة — تُبنى من صف جدول plans أو من الباقة الافتراضية. */
-function renderPlanCard(plan) {
+/**
+ * بطاقة باقة واحدة — تُبنى من صف جدول plans بعد توليد المزايا من صلاحيات
+ * دور الباقة (services/plans.js)، فالمزايا المعروضة = ما يفتحه الباحث فعلاً.
+ */
+function renderPlanCard(plan, currency) {
   const isFree = Number(plan.price) === 0;
   const features = plan.features.map((feature) => `<li>${escapeHtml(feature)}</li>`).join('');
+  const symbol = SITE_CURRENCIES.find((item) => item.code === currency)?.symbol || 'د.ل';
 
   return `<article class="plan${plan.popular ? ' featured' : ''}">
   ${plan.popular ? '<span class="plan-flag">الأكثر اختياراً</span>' : ''}
   <h3>${escapeHtml(plan.title)}</h3>
   <p class="tagline">${escapeHtml(plan.tagline)}</p>
   <div class="plan-price">
-    <b>${escapeHtml(isFree ? 'مجاناً' : formatNumber(plan.price))}</b>${isFree ? '' : '<span>ج.م</span>'}
+    <b>${escapeHtml(isFree ? 'مجاناً' : formatNumber(plan.price))}</b>${isFree ? '' : `<span>${escapeHtml(symbol)}</span>`}
   </div>
   <p class="plan-period">${escapeHtml(plan.period)}</p>
   <span class="plan-tokens">${icon('coin', 'icon-sm')} ${escapeHtml(formatNumber(plan.tokens))} نقطة</span>
+  <span class="plan-storage">${icon('clipboard', 'icon-sm')} ${escapeHtml(formatStorageMb(plan.storageMb))} مساحة تخزين</span>
   <ul class="plan-features">${features}</ul>
-  <a class="btn${isFree ? '' : ' btn-primary'}" href="/login">${escapeHtml(plan.cta)}</a>
+  <a class="btn${isFree ? '' : ' btn-primary'}" href="${isFree ? '/login' : `/payments?plan=${encodeURIComponent(plan.code)}`}">${escapeHtml(
+    plan.cta
+  )}</a>
 </article>`;
 }
 
 /** قسم الباقات: البطاقات من قاعدة البيانات + طرق الدفع المتاحة. */
-function renderPricing(plans) {
-  const cards = plans.map(renderPlanCard).join('');
-  const readyMethods = PAYMENT_METHODS.filter((method) => method.ready)
-    .map((method) => `${method.name} (${method.note})`)
-    .join(' · ');
+function renderPricing(plans, currency, methods = PAYMENT_METHODS) {
+  const cards = plans.map((plan) => renderPlanCard(plan, currency)).join('');
+  const list = methods.length ? methods : PAYMENT_METHODS;
+  const readyMethods =
+    list
+      .filter((method) => method.ready !== false && method.isActive !== false)
+      .map((method) => {
+        const name = method.name || method.label || '';
+        const note = String(method.note || '').trim();
+        return note ? `${name} (${note})` : name;
+      })
+      .filter(Boolean)
+      .join(' · ') || 'الدفع اليدوي عبر الإدارة';
 
   return `<section class="slab" id="pricing">
   <div class="slab-inner">
@@ -211,8 +300,9 @@ function renderPricing(plans) {
 
     <p class="plans-note">
       تحتاج باقة مخصصة لجامعة أو كلية أو مجموعة باحثين؟ راسلنا على
-      <a href="mailto:${escapeHtml(SUPPORT_EMAIL)}">${escapeHtml(SUPPORT_EMAIL)}</a>
-      أو واتساب ${escapeHtml(SUPPORT_WHATSAPP)}.
+      <a href="mailto:${escapeHtml(SUPPORT_EMAIL)}">${escapeHtml(SUPPORT_EMAIL)}</a>${
+        whatsappLink() ? ` أو واتساب ${escapeHtml(process.env.SUPPORT_WHATSAPP || SUPPORT_WHATSAPP)}.` : '.'
+      }
     </p>
     <p class="plans-note">طرق الدفع المتاحة: ${escapeHtml(readyMethods)} — وبطاقة بنكية قريباً.</p>
   </div>
@@ -265,12 +355,14 @@ function renderCtaBand(freeTokens) {
  * plans: باقات الموقع (من listPublicPlans)، freeTokens: رصيد التجربة المجانية،
  * account: الحساب الحالي إن وُجدت جلسة (لتغيير أزرار الترويسة).
  */
-export function renderLandingPage({ plans, freeTokens, account = null }) {
+export function renderLandingPage({ plans, freeTokens, account = null, currency = 'LYD', paymentMethods = [] }) {
   const body = [
     renderHero(freeTokens),
     renderFeatures(),
+    renderServices(),
     renderHowItWorks(freeTokens),
-    renderPricing(plans),
+    renderAudience(),
+    renderPricing(plans, currency, paymentMethods),
     renderFaq(freeTokens),
     renderCtaBand(freeTokens)
   ].join('\n');

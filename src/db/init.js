@@ -5,6 +5,7 @@ import {
   adminConnectionString,
   describeDatabaseError
 } from './errors.js';
+import { DEFAULT_PAYMENT_METHODS } from '../constants.js';
 
 dotenv.config();
 
@@ -66,7 +67,8 @@ const PROFILES_TABLE = `
   );
 `;
 
-/** الباقات المتاحة — تُدار من جدول plans كما كانت تُدار من مجموعة plans في Firestore. */
+/** الباقات المتاحة — تُدار من جدول plans كما كانت تُدار من مجموعة plans في Firestore.
+ *  storage_mb = حصة التخزين التي يمنحها المدير لهذه الباقة (تعديله من لوحة الباقات فقط). */
 const PLANS_TABLE = `
   CREATE TABLE IF NOT EXISTS plans (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -75,6 +77,7 @@ const PLANS_TABLE = `
     tagline TEXT,
     price DECIMAL(10,2) DEFAULT 0,
     tokens INTEGER NOT NULL DEFAULT 0,
+    storage_mb INTEGER NOT NULL DEFAULT 500,
     period VARCHAR(100) DEFAULT 'شهرياً',
     features TEXT,
     cta VARCHAR(100) DEFAULT 'اشترك الآن',
@@ -183,6 +186,19 @@ const LIBRARY_ITEMS_TABLE = `
   );
 `;
 
+/** ترقيات آمنة لجدول المكتبة (ملف الكتاب + مصدر الاستيراد) — idempotent. */
+const LIBRARY_EXTRA_COLUMNS = `
+  ALTER TABLE library_items ADD COLUMN IF NOT EXISTS file_name TEXT;
+  ALTER TABLE library_items ADD COLUMN IF NOT EXISTS mime VARCHAR(100);
+  ALTER TABLE library_items ADD COLUMN IF NOT EXISTS size_bytes BIGINT NOT NULL DEFAULT 0;
+  ALTER TABLE library_items ADD COLUMN IF NOT EXISTS external_url TEXT;
+  ALTER TABLE library_items ADD COLUMN IF NOT EXISTS source_system VARCHAR(50) NOT NULL DEFAULT 'upload';
+  ALTER TABLE library_items ADD COLUMN IF NOT EXISTS subjects TEXT;
+  -- نصّ بحث مطبَّع (بلا همزات/تاء مربوطة) ليجد الباحث العنصر بأي إملاء:
+  -- «اداره التغير» و«إدارة التغيير» و«ادارة التغيير» كلها تُطابق.
+  ALTER TABLE library_items ADD COLUMN IF NOT EXISTS search_text TEXT NOT NULL DEFAULT '';
+`;
+
 /** مراجع الباحث: رابط لعنصر المكتبة أو مرجع يدوي — مع حالة القراءة وربط اختياري بخطوة. */
 const USER_REFERENCES_TABLE = `
   CREATE TABLE IF NOT EXISTS user_references (
@@ -240,9 +256,15 @@ const CONVERSATIONS_TABLE = `
     title VARCHAR(255),
     step_id UUID REFERENCES research_path_steps(id) ON DELETE SET NULL,
     provider VARCHAR(100),
+    references_found JSONB,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
   );
+`;
+
+/** ترقية جدول المحادثات: نتائج أداة المراجع (JSONB) لعرضها تحت الرد. */
+const CONVERSATIONS_REFERENCES_UPGRADE = `
+  ALTER TABLE conversations ADD COLUMN IF NOT EXISTS references_found JSONB;
 `;
 
 const MESSAGES_TABLE = `
@@ -347,9 +369,155 @@ const NOTIFICATION_INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(user_id) WHERE enabled = true;
 `;
 
-/** قائمة إيميلات المديرين القابلة للإدارة من لوحة الإدارة (بديل admins/config). */
+/**
+ * إيميلات المديرين (يعدّلها المدير بنفسه من الإعدادات فقط).
+ * تُقرأ مع ADMIN_EMAILS من .env (خطة نجاة ثابتة لا تُحذف).
+ */
 const ADMINS_TABLE = `
   CREATE TABLE IF NOT EXISTS admins (
+    email VARCHAR(255) PRIMARY KEY,
+    added_by VARCHAR(255),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`;
+
+/**
+ * طرق الدفع اليدوية — يضيفها المدير ويعدّلها من صفحة الإعدادات.
+ * كل طريقة تحمل عملتها (LYD/USD) وتفاصيل التحويل (رقم الحساب/الIBAN) التي
+ * يراها الباحث عند تقديم طلب الدفع، والمدير عند التأكيد.
+ */
+const PAYMENT_METHODS_TABLE = `
+  CREATE TABLE IF NOT EXISTS payment_methods (
+    code VARCHAR(50) PRIMARY KEY,
+    label VARCHAR(120) NOT NULL,
+    note VARCHAR(255),
+    details TEXT,
+    currency VARCHAR(10) NOT NULL DEFAULT 'LYD',
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    display_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`;
+
+/**
+ * طلبات الدفع: الباحث يطلب باقة ويدفع خارج المنصة (يدوي)، والمدير يؤكد.
+ * عند التأكيد: يُنقل الب researcher إلى باقته وتُضاف نقاطها (من services/plans).
+ */
+const PAYMENT_REQUESTS_TABLE = `
+  CREATE TABLE IF NOT EXISTS payment_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    plan_code VARCHAR(100),
+    method_code VARCHAR(50),
+    amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+    currency VARCHAR(10) NOT NULL DEFAULT 'LYD',
+    reference_no VARCHAR(120),
+    note TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    admin_note TEXT,
+    handled_by VARCHAR(255),
+    handled_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`;
+
+/** فهارس لطلبات الدفع (أحدث الطلبات + الطلبات المعلّقة للمراجعة). */
+const PAYMENT_INDEXES = `
+  CREATE INDEX IF NOT EXISTS idx_payment_requests_user ON payment_requests (user_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_payment_requests_status ON payment_requests (status, created_at DESC);
+`;
+
+/**
+ * حماية قاعدة بيانات لحساب المدير (طبقة أخيرة — لا تعتمد على الكود وحده):
+ * يمنع إيقاف/تعطيل أي مستخدم دوره admin حتى لو مرّ استعلام مباشر على القاعدة.
+ * مُطبَّق كـ trigger على users. آمن للتشغيل المتكرر (إذا كان غير موجود).
+ */
+const ADMIN_ACCOUNT_GUARD = `
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'guard_admin_account') THEN
+    CREATE OR REPLACE FUNCTION guard_admin_account() RETURNS trigger AS $fn$
+    BEGIN
+      IF OLD.role = 'admin' AND (NEW.is_active IS DISTINCT FROM TRUE OR NEW.deleted IS DISTINCT FROM false) THEN
+        RAISE EXCEPTION 'حساب المدير محمي: لا يمكن إيقافه أو تعطيله.';
+      END IF;
+      IF OLD.role = 'admin' AND NEW.role IS DISTINCT FROM 'admin' THEN
+        RAISE EXCEPTION 'حساب المدير محمي: لا يمكن تغيير دوره إلا بتغيير ADMIN_EMAILS في .env.';
+      END IF;
+      RETURN NEW;
+    END;
+    $fn$ LANGUAGE plpgsql;
+
+    CREATE TRIGGER guard_admin_account
+      BEFORE UPDATE ON users
+      FOR EACH ROW EXECUTE FUNCTION guard_admin_account();
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'guard_admin_delete') THEN
+    CREATE OR REPLACE FUNCTION guard_admin_delete() RETURNS trigger AS $fn$
+    BEGIN
+      IF OLD.role = 'admin' THEN
+        RAISE EXCEPTION 'حساب المدير محمي: لا يمكن حذفه من قاعدة البيانات.';
+      END IF;
+      RETURN OLD;
+    END;
+    $fn$ LANGUAGE plpgsql;
+
+    CREATE TRIGGER guard_admin_delete
+      BEFORE DELETE ON users
+      FOR EACH ROW EXECUTE FUNCTION guard_admin_delete();
+  END IF;
+END $$;
+`;
+/**
+ * يوحّد الهمزات والتاء المربوطة ويزيل التشكيل — نفس التطبيع الذي تستخدمه
+ * خدمة المراجع، حتى يتطابق نصّ البحث المخزَّن مع ما يكتبه الباحث.
+ */
+function normalizeArabic(text) {
+  return String(text || '')
+    .replace(/[\u064B-\u0652\u0640]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ؤ/g, 'و')
+    .replace(/ئ/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .toLowerCase();
+}
+
+/** يبني نصّ البحث المطبَّع لعنصر مكتبة (يُخزَّن في library_items.search_text). */
+async function backfillLibrarySearchText() {
+  const { rows } = await pool.query(
+    `SELECT id, title, authors, source, subjects, field, external_url
+       FROM library_items
+      WHERE search_text = ''`
+  );
+  if (!rows.length) return;
+
+  for (const row of rows) {
+    const searchText = normalizeArabic(
+      [row.title, row.authors, row.source, row.subjects, row.field, row.external_url].filter(Boolean).join(' ')
+    );
+    await pool.query('UPDATE library_items SET search_text = $2 WHERE id = $1', [row.id, searchText]);
+  }
+  console.log(`   · تم تحديث نصّ البحث لـ ${rows.length} عنصر مكتبة.`);
+}
+
+/** مفتاح عملة الموقع في جدول settings (يضبطه المدير من الإعدادات). */
+const SETTINGS_CURRENCY_SEED = `
+  INSERT INTO settings (key, value, updated_at)
+  VALUES ('site_currency', 'LYD', NOW())
+  ON CONFLICT (key) DO NOTHING;
+`;
+
+/**
+ * المشرفون الأكاديميون — بديل صفحة «المديرين».
+ * يُضاف بريد المشرف من صفحة الإعدادات، ويأخذ دور supervisor وصلاحياته في
+ * جدول role_permissions (يضبطها المدير مثل أي باحث). لا يوجد «مدير» إلا
+ * إيميلات ADMIN_EMAILS في .env كخطة نجاة واحدة.
+ */
+const SUPERVISORS_TABLE = `
+  CREATE TABLE IF NOT EXISTS supervisors (
     email VARCHAR(255) PRIMARY KEY,
     added_by VARCHAR(255),
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -366,6 +534,7 @@ const INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_progress_user ON user_step_progress(user_id);
   CREATE INDEX IF NOT EXISTS idx_library_active ON library_items(is_active) WHERE is_active = true;
   CREATE INDEX IF NOT EXISTS idx_library_field ON library_items(field);
+  CREATE INDEX IF NOT EXISTS idx_library_search ON library_items(search_text);
   CREATE INDEX IF NOT EXISTS idx_user_refs_user ON user_references(user_id);
   CREATE INDEX IF NOT EXISTS idx_user_refs_library ON user_references(library_item_id);
   CREATE INDEX IF NOT EXISTS idx_notes_user ON notes(user_id);
@@ -409,6 +578,8 @@ const PLANS_EXTRA_COLUMNS = `
   ALTER TABLE plans ADD COLUMN IF NOT EXISTS cta VARCHAR(100) DEFAULT 'اشترك الآن';
   ALTER TABLE plans ADD COLUMN IF NOT EXISTS popular BOOLEAN DEFAULT false;
   ALTER TABLE plans ADD COLUMN IF NOT EXISTS display_order INTEGER DEFAULT 0;
+  ALTER TABLE plans ADD COLUMN IF NOT EXISTS role_code VARCHAR(50);
+  ALTER TABLE plans ADD COLUMN IF NOT EXISTS storage_mb INTEGER NOT NULL DEFAULT 500;
 `;
 
 /** ترقية جدول الملف البحثي: بقية حقول نموذج التسجيل (onboarding). */
@@ -503,6 +674,11 @@ const SUPERVISOR_UPGRADE = `
   ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS price_multiplier NUMERIC(6,2);
   ALTER TABLE conversations ADD COLUMN IF NOT EXISTS mode VARCHAR(20) NOT NULL DEFAULT 'normal';
   ALTER TABLE conversations ADD COLUMN IF NOT EXISTS defense_state JSONB NOT NULL DEFAULT '{}'::jsonb;
+  -- المشرف صار إدارياً: صلاحياته كلها في اللوحة، فيُسقَط ما تبقّى من صلاحيات الباحث القديمة.
+  DELETE FROM role_permissions WHERE role_code = 'supervisor' AND permission NOT IN ('dashboard:view', 'admin:panel', 'admin:users', 'admin:library', 'admin:usage', 'admin:payments');
+  -- صفحة المزوّدين حُذفت بقرار المنصة ⇒ صلاحيتها وإعدادات روابطها المخصّصة تُنظَّف من القاعدة.
+  DELETE FROM role_permissions WHERE permission = 'admin:providers';
+  DELETE FROM settings WHERE key = 'ai_custom_links';
 `;
 
 /** فهارس المشرف الذكي (استعلامات الذاكرة تكرّر مع كل رسالة). */
@@ -583,20 +759,42 @@ async function initializeDatabase() {
     await pool.query(NOTIFICATIONS_TABLE);
     await pool.query(DEVICE_TOKENS_TABLE);
     await pool.query(ADMINS_TABLE);
+    await pool.query(SUPERVISORS_TABLE);
+    await pool.query(PAYMENT_METHODS_TABLE);
+    await pool.query(PAYMENT_REQUESTS_TABLE);
     await pool.query(SUPERVISOR_MEMORY_TABLE);
     // ترقيات آمنة لقواعد البيانات القائمة (كل عبارة idempotent)
     await pool.query(USERS_EXTRA_COLUMNS);
     await pool.query(USERS_NOTIFICATIONS_COLUMN);
     await pool.query(PROFILES_EXTRA_COLUMNS);
     await pool.query(PLANS_EXTRA_COLUMNS);
+    await pool.query(LIBRARY_EXTRA_COLUMNS);
     await pool.query(USERS_GOOGLE_SUB_UNIQUE);
     await pool.query(USERS_PLAN_FOREIGN_KEY);
     await pool.query(STEP_KEY_UPGRADE);
+    await pool.query(CONVERSATIONS_REFERENCES_UPGRADE);
     await pool.query(SUPERVISOR_UPGRADE);
+    await pool.query(ADMIN_ACCOUNT_GUARD);
     await pool.query(INDEXES);
     await pool.query(STEP_KEY_INDEXES);
     await pool.query(NOTIFICATION_INDEXES);
     await pool.query(SUPERVISOR_INDEXES);
+    await pool.query(PAYMENT_INDEXES);
+
+    // بذرة خفيفة: عملة الموقع + طرق الدفع الافتراضية (مرة واحدة، ولا نلمس تعديلات المدير)
+    await pool.query(SETTINGS_CURRENCY_SEED);
+    for (const [index, method] of DEFAULT_PAYMENT_METHODS.entries()) {
+      await pool.query(
+        `INSERT INTO payment_methods (code, label, note, details, currency, is_active, display_order)
+         VALUES ($1, $2, $3, $4, $5, true, $6)
+         ON CONFLICT (code) DO NOTHING`,
+        [method.code, method.label, method.note, method.details, method.currency, index]
+      );
+    }
+
+    // تعبئة نصّ البحث المطبَّع للعناصر القديمة (مرة واحدة لكل عنصر):
+    // «اداره التغير» يجب أن تجد «إدارة التغيير» — بحث ResearchGate/المنصة متسامح مع الإملاء.
+    await backfillLibrarySearchText();
 
     console.log(`Database initialized successfully on ${target.host}:${target.port}/${target.database}.`);
     console.log('الخطوة التالية (اختيارية): npm run db:seed لإضافة الباقات الافتراضية.');

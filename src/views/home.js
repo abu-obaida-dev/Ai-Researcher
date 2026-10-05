@@ -13,7 +13,6 @@ export function renderStatusPage({ account = null } = {}) {
     </div>
     <div class="links">
       <a class="btn btn-primary" href="/api/health">فحص الحالة /api/health</a>
-      <a class="btn" href="/api/users">/api/users</a>
       <a class="btn" href="/api/plans">/api/plans</a>
       <a class="btn" href="/admin/users">لوحة الإدارة — الباحثون</a>
       <a class="btn" href="/">الصفحة الرئيسية</a>

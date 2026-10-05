@@ -39,9 +39,19 @@ export function googleCallbackUrl(req) {
   return `${baseUrlFromRequest(req)}/auth/google/callback`;
 }
 
-/** سر توقيع الجلسات — يُقرأ من البيئة، ويسقط على JWT_SECRET في التطوير المحلي. */
+/**
+ * سر توقيع الجلسات — يُقرأ من البيئة، ويسقط على JWT_SECRET في التطوير المحلي.
+ * في الإنتاج يرفض الإقلاع بلا سرّ حقيقي (يفحصه server.js أيضاً) لأن القيمة
+ * الثابتة تجعل تزوير كوكي الجلسة ممكناً لمن يقرأ الكود.
+ */
 function sessionSecret() {
-  return process.env.SESSION_SECRET || process.env.JWT_SECRET || 'dev-secret-change-me';
+  const secret = process.env.SESSION_SECRET || process.env.JWT_SECRET;
+  if (secret && String(secret).trim()) return String(secret).trim();
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('SESSION_SECRET مطلوب في الإنتاج — راجع README (متغيّرات البيئة).');
+  }
+  return 'dev-secret-change-me';
 }
 
 /** توقيع HMAC-SHA256 للحمولة — يمنع تزوير كوكي الجلسة. */

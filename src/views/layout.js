@@ -1,4 +1,5 @@
 import { PUBLIC_NAV, SUPPORT_EMAIL, SUPPORT_WHATSAPP } from '../constants.js';
+import { currentSupportWhatsapp } from '../services/settings.js';
 import { formatNumber } from './format.js';
 import { icon } from './icons.js';
 import { homePathFor, needsOnboarding } from '../middleware/auth.js';
@@ -27,11 +28,36 @@ import { homePathFor, needsOnboarding } from '../middleware/auth.js';
 const APP_NAME = 'Zena AI';
 const APP_TAGLINE = 'المشرف البحثي الذكي';
 
+/**
+ * نطاق الموقع العام — لازم لوسوم المشاركة (og:url) وملف sitemap.xml.
+ * من البيئة، ونستعمل مضيف الطلب إن لم يُضبط (sitemap لا يقبل مسارات نسبية).
+ */
+const SITE_URL = String(process.env.SITE_URL || '').replace(/\/+$/, '');
+
+/**
+ * يحوّل مساراً داخلياً إلى رابط لوسوم المشاركة.
+ * مع `SITE_URL` ⇒ رابط مطلق (وهو ما تتطلبه Facebook وWhatsApp وSlack).
+ * بدونه ⇒ مسار نسبي (لا يكسر الصفحة، ويصبح مطلقاً فور ضبط النطاق في البيئة).
+ */
+export function absoluteUrl(pathname = '/') {
+  const path = String(pathname || '/').startsWith('/') ? String(pathname || '/') : `/${pathname}`;
+  return `${SITE_URL}${path}`;
+}
+
+/** رابط sitemap/robots مطلق دائماً — يشتقّ من الطلب عند غياب SITE_URL. */
+export function siteOrigin(req) {
+  if (SITE_URL) return SITE_URL;
+  if (!req) return '';
+  return `${req.protocol}://${req.get('host')}`.replace(/\/+$/, '');
+}
+
 /** ملفات الشعار والخطوط كما هي في مجلد public — تُقدَّم كملفات ثابتة من server.js. */
 const BRAND = {
   icon: '/zena-ai-icon.svg', // أيقونة التطبيق والـ favicon (الأيقونة الأساسية)
   mark: '/logo2.webp', // الشعار الأساسي: كتاب مفتوح + شرارة + فقاعة حوار
-  roundMark: '/logo1.webp', // نسخة دائرية تُستخدم كأيقونة لمس/مشاركة
+  roundMark: '/logo1.webp', // نسخة دائرية تُستخدم لأيقونة التطبيق
+  touchIcon: '/apple-touch-icon.png', // أيقونة لمس بصيغة PNG (المتصفحات لا تدعم webp للأيقونات)
+  shareImage: '/logo2.webp', // صورة المشاركة (og:image)
   fonts: '/fonts.css' // تعريفات خطوط الهوية
 };
 
@@ -43,42 +69,45 @@ const ADMIN_NAV = [
   {
     label: 'الإشراف',
     items: [
-      { href: '/admin', label: 'نظرة عامة', key: 'home', icon: 'sparkles' },
-      { href: '/admin/users', label: 'الباحثون', key: 'users', icon: 'user' },
-      { href: '/admin/admins', label: 'المديرون', key: 'admins', icon: 'shield' },
-      { href: '/admin/roles', label: 'الأدوار والصلاحيات', key: 'roles', icon: 'check' }
+      { href: '/admin', label: 'نظرة عامة', key: 'home', icon: 'sparkles', permission: 'admin:panel' },
+      { href: '/admin/users', label: 'الباحثون', key: 'users', icon: 'user', permission: 'admin:users' },
     ]
   },
   {
     label: 'المنصة',
     items: [
-      { href: '/admin/plans', label: 'الباقات', key: 'plans', icon: 'coins' },
-      { href: '/admin/usage', label: 'الاستهلاك', key: 'usage', icon: 'clipboard' },
-      { href: '/admin/providers', label: 'المزوّدون', key: 'providers', icon: 'refresh' }
+      { href: '/admin/plans', label: 'الباقات وصلاحياتها', key: 'plans', icon: 'coins', permission: 'admin:plans' },
+      { href: '/admin/library', label: 'المكتبة العلمية', key: 'library', icon: 'book', permission: 'admin:library' },
+      { href: '/admin/payments', label: 'طلبات الدفع', key: 'payments', icon: 'coins', permission: 'admin:payments' },
+      { href: '/admin/usage', label: 'الاستهلاك', key: 'usage', icon: 'clipboard', permission: 'admin:usage' }
     ]
   },
   {
     label: 'النظام',
     items: [
-      { href: '/admin/settings', label: 'الإعدادات', key: 'settings', icon: 'edit' }
+      // الإعدادات (حدود التخزين + المشرفون) للمدير وحده — لا تُمنح للمشرف بالمعطيات
+      { href: '/admin/settings', label: 'الإعدادات', key: 'settings', icon: 'edit', adminOnly: true }
     ]
   }
 ];
 
 /**
  * روابط الشريط الجانبي في لوحة الباحث (area: 'app').
- * المصدر الواحد لأدوات المستخدم: الإحصائية، مسار البحث، المشرف الذكي، المراجع، المفكرة، ملفاتى.
+ * المصدر الواحد لأدوات المستخدم: الإحصائية، مسار البحث، المشرف الذكي، المراجع، المفكرة، ملفاتى، المناقشة.
+ * المفتاح service يربط الرابط بخدمة من PLATFORM_SERVICES — ما لا تسمح به باقة الحساب لا يظهر.
  */
 const APP_NAV = [
   { href: '/dashboard', label: 'الإحصائية', key: 'dashboard', icon: 'coins' },
-  { href: '/journey', label: 'مسار البحث', key: 'journey', icon: 'graduation' },
-  { href: '/references', label: 'المراجع', key: 'references', icon: 'book' },
-  { href: '/notes', label: 'المفكرة', key: 'notes', icon: 'list' },
-  { href: '/files', label: 'ملفاتى', key: 'files', icon: 'clipboard' }
+  { href: '/journey', label: 'مسار البحث', key: 'journey', icon: 'graduation', service: 'journey' },
+  { href: '/references', label: 'المراجع', key: 'references', icon: 'book', service: 'library' },
+  { href: '/notes', label: 'المفكرة', key: 'notes', icon: 'list', service: 'notes' },
+  { href: '/files', label: 'ملفاتى', key: 'files', icon: 'clipboard', service: 'files' },
+  { href: '/defense', label: 'المناقشة', key: 'defense', icon: 'graduation', service: 'defense' },
+  { href: '/payments', label: 'الاشتراك والدفع', key: 'payments', icon: 'coins' }
 ];
 
 /** رابط المشرف الذكي منفصلاً: يُعرض أسفل القائمة وفوق سجل الجلسات (ChatGPT/Claude). */
-const APP_CHAT_NAV = { href: '/chat', label: 'المشرف الذكي', key: 'chat', icon: 'message' };
+const APP_CHAT_NAV = { href: '/chat', label: 'المشرف الذكي', key: 'chat', icon: 'message', service: 'chat' };
 
 /**
  * روابط الحساب (legacy): لم تعد تُستخدم في السايدبار — الحساب/الملف البحثي/الخروج
@@ -201,6 +230,25 @@ input[type=search], input[type=text] {
 }
 input::placeholder { color: var(--slate); opacity: .7; }
 input[type=search]:focus, input[type=text]:focus { border-color: var(--fresh); box-shadow: 0 0 0 3px var(--fresh-12); }
+/* القوائم المنسدلة: مظهر موحّد (سهم مرسوم + حدود + تركيز واضح) بدل الشكل الافتراضي للعنصر */
+select {
+  appearance: none; -webkit-appearance: none;
+  padding: 8px 32px 8px 12px; border: var(--line); border-radius: var(--radius-sm);
+  background-color: #fff;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23526777' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: left 10px center; background-size: 13px;
+  color: var(--ink); font-family: inherit; font-size: 12.5px; font-weight: 600;
+  line-height: 1.6; cursor: pointer; outline: none;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+select:hover { border-color: var(--fresh); }
+select:focus { border-color: var(--fresh); box-shadow: 0 0 0 3px var(--fresh-12); }
+select option { color: var(--ink); background: #fff; font-weight: 500; }
+select:disabled { background-color: var(--mist-soft); color: var(--slate); cursor: not-allowed; }
+/* حقول البحث المرفقة بتسمية داخل شريط الأدوات */
+.toolbar .field { margin: 0; flex: 1 1 220px; min-width: 0; }
+.toolbar .field label { font-size: 11.5px; margin-bottom: 5px; }
+.toolbar .field input[type=search], .toolbar .field input[type=text] { width: 100%; padding: 10px 13px; border: 1px solid var(--mist); border-radius: 12px; font-size: 13px; }
 .btn {
   display: inline-flex; align-items: center; gap: 6px; padding: 8px 15px;
   border: var(--line); border-radius: var(--radius-sm); background: #fff;
@@ -430,6 +478,30 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .feature-card h3 { margin-top: 14px; font-size: 15px; }
 .feature-card p { margin-top: 8px; font-size: 12.5px; line-height: 1.95; color: var(--slate); }
 
+/* ==== إضافات الصفحة الرئيسية: شعار الهيرو + الشعار النصي + الخدمات + بطاقات الجمهور ==== */
+.hero-logo { display: block; height: 52px; width: auto; margin-bottom: 18px; }
+.hero-slogan { margin-top: 12px; font-size: 15px; font-weight: 800; color: var(--sea-deep); }
+.service-grid { margin-top: 34px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+.service-card {
+  background: #fff; border: 1px solid var(--mist); border-radius: 18px; padding: 22px; box-shadow: var(--shadow);
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.service-card:hover { transform: translateY(-3px); border-color: var(--fresh); box-shadow: 0 24px 42px -32px var(--ink-10); }
+.service-card h3 { margin-top: 14px; font-size: 15px; }
+.service-card p { margin-top: 8px; font-size: 12.5px; line-height: 1.95; color: var(--slate); }
+.services-cta { margin-top: 30px; }
+.split-band { margin-top: 34px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.info-card { background: #fff; border: 1px solid var(--mist); border-radius: 18px; padding: 24px; box-shadow: var(--shadow); }
+.info-card h3 { display: flex; align-items: center; gap: 9px; font-size: 15px; }
+.info-card h3 svg { color: var(--sea); }
+.info-list { margin: 16px 0 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+.info-list li { position: relative; padding-inline-start: 24px; font-size: 12.5px; line-height: 1.95; color: var(--slate); }
+.info-list li::before {
+  content: "✓"; position: absolute; inset-inline-start: 0; top: 2px; width: 17px; height: 17px;
+  display: grid; place-items: center; border-radius: 50%; background: var(--mist);
+  color: var(--sea-deep); font-size: 10px; font-weight: 800;
+}
+
 .steps-grid { margin-top: 40px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 .step-card { position: relative; background: #fff; border: 1px solid var(--mist); border-radius: 18px; padding: 26px 22px 22px; box-shadow: var(--shadow); }
 /* شارة الرقم في خطوات «كيف تعمل» — مسبوقة بـ step- بدل step-number المتصادمة مع شارة رحلة المستخدم */
@@ -467,6 +539,10 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .plan-tokens {
   margin-top: 14px; display: inline-flex; align-items: center; gap: 6px; width: fit-content;
   padding: 6px 12px; border-radius: 12px; background: var(--mist-soft); color: var(--ink); font-size: 11.5px; font-weight: 800;
+}
+.plan-storage {
+  margin-top: 8px; display: inline-flex; align-items: center; gap: 6px; width: fit-content;
+  padding: 6px 12px; border-radius: 12px; background: var(--mist-soft); color: var(--sea-deep); font-size: 11.5px; font-weight: 800;
 }
 .plan-features { margin: 20px 0 0; padding: 0; list-style: none; display: flex; flex: 1; flex-direction: column; gap: 10px; }
 .plan-features li { display: flex; gap: 8px; font-size: 12.5px; line-height: 1.85; color: var(--slate); }
@@ -559,6 +635,34 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
   border-radius: 14px; background: #fff; color: var(--ink); font-size: 12.5px; line-height: 1.95;
 }
 .alert ul { margin-top: 6px; }
+
+/* ==== زر واتساب العائم (دعم فني) ==== */
+/* مثبّت أسفل الشاشة، لا يغطي المحتوى، ويختفي نصّه على الشاشات الضيقة */
+.wa-float {
+  position: fixed;
+  inset-block-end: 18px;
+  inset-inline-start: 18px;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 15px;
+  border-radius: 999px;
+  background: #128C7E;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: 0 6px 18px rgba(18, 140, 126, 0.32);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.wa-float:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(18, 140, 126, 0.38); }
+.wa-float:focus-visible { outline: 2px solid var(--sea); outline-offset: 2px; }
+.wa-float-icon { width: 20px; height: 20px; }
+@media (max-width: 560px) {
+  .wa-float { inset-block-end: 14px; inset-inline-start: 14px; padding: 11px; }
+  .wa-float-label { display: none; }
+}
 
 /* ==== الإشعارات: جرس الترويسة + قائمة الإشعارات داخل الموقع ==== */
 .nav-bell {
@@ -697,6 +801,32 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .chat-modebar span { display: inline-flex; align-items: center; gap: 6px; }
 .chat-modebar.is-defense { background: rgba(15, 40, 62, 0.08); color: var(--ink); }
 
+/* نتائج أداة المراجع: لوحة قابلة للطي فوق صندوق الكتابة — لا تغطي الحوار أبداً.
+   مطويّة افتراضياً، وعند الفتح لها تمرير داخلي بارتفاع محدود. */
+.chat-refs {
+  flex: 0 0 auto; max-height: 34vh; overflow-y: auto; margin: 0 0 8px;
+  padding: 8px 10px; border: 1px solid var(--mist); border-radius: 14px; background: var(--mist-soft);
+}
+.chat-refs > summary {
+  display: flex; align-items: center; gap: 7px; cursor: pointer; list-style: none;
+  font-size: 12px; font-weight: 800; color: var(--ink);
+}
+.chat-refs > summary::-webkit-details-marker { display: none; }
+.chat-refs > summary::after { content: '▾'; margin-inline-start: auto; color: var(--sea); font-size: 11px; }
+.chat-refs[open] > summary::after { content: '▴'; }
+.chat-refs > summary:hover { color: var(--sea-deep); }
+.chat-refs .chat-refs-hint { margin: 6px 0 8px; font-size: 10.5px; color: var(--slate); }
+.ref-found-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ref-found {
+  display: flex; flex-direction: column; gap: 2px; padding: 8px 10px;
+  border-radius: 10px; background: #fff; border: 1px solid var(--mist);
+}
+.ref-found b { font-size: 11.5px; line-height: 1.7; color: var(--ink); }
+.ref-found-meta { font-size: 10.5px; color: var(--slate); }
+.ref-found-links { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; font-weight: 700; margin-top: 2px; }
+.ref-found-links a { color: var(--sea); }
+.ref-found.is-library { border-inline-start: 3px solid var(--sea); }
+
 .chat-attach {
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
   padding: 8px 12px; border-top: 1px solid var(--mist); background: var(--mist-soft);
@@ -710,6 +840,12 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 }
 .chat-attach-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-attach-chip input { margin: 0; accent-color: var(--sea); }
+.chat-attach-chip .attach-name { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-tag {
+  font-size: 9.5px; font-weight: 800; padding: 1px 5px; border-radius: 5px; flex: 0 0 auto;
+}
+.attach-tag.is-ok { background: var(--mist); color: var(--sea-deep); }
+.attach-tag.is-off { background: #f1f3f6; color: #8a97a6; }
 .chat-attach-chip:has(input:checked) { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 .chat-attach-hint { font-size: 11px; color: var(--slate); margin-inline-start: auto; }
 
@@ -1104,6 +1240,72 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .lib-item { border: 1px solid var(--mist); border-radius: 14px; padding: 11px 13px; background: #fff; }
 .lib-item h3 { font-size: 14px; }
 .lib-item p { font-size: 12.5px; margin: 4px 0 8px; }
+
+/* ==== صفحة المكتبة العلمية (لوحة الإدارة): تخطيط بطل + عمود جلب جانبي ==== */
+/* ترويسة داكنة بأزرار فاتحة: تفصل بين «إدارة المكتبة» و«جلب الجديد» */
+.lib-hero { padding: 0; overflow: hidden; }
+.lib-hero-top {
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: space-between;
+  padding: 20px; background: linear-gradient(135deg, var(--ink) 0%, #164b6e 100%); color: #fff;
+}
+.lib-hero-top h2 { color: #fff; font-size: 17px; margin: 0; }
+.lib-hero-top p { margin-top: 5px; font-size: 12.5px; color: var(--mist); max-width: 64ch; }
+.lib-hero-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.lib-hero-actions .btn { background: rgba(255, 255, 255, .12); border-color: rgba(255, 255, 255, .3); color: #fff; }
+.lib-hero-actions .btn:hover { background: #fff; border-color: #fff; color: var(--ink); }
+.lib-hero-actions .btn-primary { background: var(--fresh); border-color: var(--fresh); color: var(--ink); }
+.lib-hero-actions .btn-primary:hover { background: #fff; border-color: #fff; color: var(--ink); }
+/* شريط الإحصاءات داخل البطل — بمسافة سفلية تنفصل بها عن قائمة العناصر */
+.lib-stats { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); padding: 16px 18px; margin-bottom: 22px; }
+.lib-stats .stat { box-shadow: none; background: var(--paper); border-color: var(--mist); }
+.lib-stats .stat-value { font-size: 20px; }
+.lib-hero-filters { padding: 0 18px; display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 14px; }
+/* عمودان: قائمة العناصر (الواسع) + لوحة الجلب (ثابتة على الشاشات الكبيرة) */
+.lib-layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 336px; align-items: start; }
+.lib-panel { position: sticky; top: 16px; }
+@media (max-width: 1020px) {
+  .lib-layout { grid-template-columns: minmax(0, 1fr); }
+  .lib-panel { position: static; }
+}
+/* بطاقة عنصر: رأس (عنوان + شارات) + توثيق + وسوم + شريط إجراءات */
+.lib-card { display: grid; gap: 8px; padding: 14px 15px; }
+.lib-card-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; justify-content: space-between; }
+.lib-card-head h3 { font-size: 14.5px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.lib-badges { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.lib-citation { font-size: 12px; color: var(--slate); }
+.lib-meta { display: flex; flex-wrap: wrap; gap: 6px; font-size: 11.5px; color: var(--slate); }
+.lib-meta b { color: var(--ink); font-weight: 700; }
+.lib-abs { font-size: 12.5px; color: var(--slate); }
+.lib-actions { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; border-top: 1px dashed var(--mist); padding-top: 9px; }
+.lib-actions .btn { padding: 6px 12px; font-size: 12px; }
+/* منتقي المصادر: بطاقات اختيار بدل قائمة منسدلة (يعمل بلا سكربتات عبر :checked) */
+.source-picker { display: grid; gap: 8px; }
+.source-option { position: relative; display: block; }
+.source-option input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.source-option-body {
+  display: block; cursor: pointer; border: 1px solid var(--mist); border-radius: 12px; padding: 10px 12px;
+  background: #fff; transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+}
+.source-option-body:hover { border-color: var(--fresh); }
+.source-option input:checked + .source-option-body { border-color: var(--sea); background: var(--mist-soft); box-shadow: 0 0 0 3px var(--fresh-12); }
+.source-option input:focus-visible + .source-option-body { outline: 2px solid var(--fresh); outline-offset: 2px; }
+.source-name { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 800; color: var(--ink); }
+.source-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sea); flex: 0 0 auto; }
+.source-hint { margin-top: 4px; font-size: 11.5px; color: var(--slate); }
+/* حقول الجلب وحقول البحث الداخلي */
+.lib-fields { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.lib-fields .field { margin-top: 0; }
+.lib-fields .lib-field-full { grid-column: 1 / -1; }
+.lib-hint { font-size: 11.5px; color: var(--slate); }
+.lib-hint-box {
+  margin-top: 14px; padding: 11px 13px; border-radius: 12px; background: var(--paper);
+  border: 1px dashed var(--mist); font-size: 11.5px; color: var(--slate);
+}
+.lib-hint-box b { color: var(--ink); }
+/* رأس قسم النتائج الخارجية */
+.lib-section-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.lib-section-head h2 { margin: 0; }
+.lib-section-head .lib-section-note { font-size: 11.5px; color: var(--slate); }
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
 .toolbar input[type="search"], .toolbar select { flex: 1 1 200px; max-width: 100%; }
 .chip {
@@ -1169,8 +1371,9 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .bubble-text { white-space: pre-wrap; line-height: 1.9; overflow-wrap: anywhere; }
 .bubble-meta { font-size: 10.5px; color: var(--slate); margin-top: 6px; }
 .chat-composer {
-  display: flex; align-items: flex-end; gap: 8px; border-top: 1px solid var(--mist); padding-top: 11px;
+  display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--mist); padding-top: 11px;
 }
+.chat-composer-row { display: flex; align-items: flex-end; gap: 8px; }
 .chat-composer textarea {
   flex: 1 1 auto; min-height: 46px; max-height: 170px; resize: vertical; line-height: 1.7;
   padding: 12px 14px; border-radius: 14px; border: 1px solid var(--mist); font: inherit; font-size: 13.5px;
@@ -1231,15 +1434,38 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
  * سايدبار لوحة الإدارة: مجموعات أقسام بأيقونات + تمييز الصفحة الحالية،
  * وأسفله رابط زيارة الموقع وتسجيل الخروج (نفس عائلة تنسيقات app-nav).
  */
-function renderAdminSidebar(activeKey) {
+/** هل للحساب حق دخول لوحة الإدارة؟ (المدير دائماً، والمشرف بصلاحية admin:panel). */
+function hasAdminPanel(account) {
+  if (!account) return false;
+  if (account.role === 'admin') return true;
+  return Array.isArray(account.adminPermissions) && account.adminPermissions.includes('admin:panel');
+}
+
+/**
+ * سايدبار لوحة الإدارة: لا يظهر للمشرف إلا ما يملك صلاحيته.
+ * `adminPermissions` تُحمَّل مع الحساب في middleware/auth.js (حساب واحد لكل طلب)،
+ * والصفحات المحجوبة (adminOnly) — كالإعدادات — تبقى للمدير وحده ولا تُمنح.
+ */
+function renderAdminSidebar(activeKey, account = null) {
   const link = (item) =>
     `<a href="${item.href}"${item.key === activeKey ? ' class="active"' : ''}>${icon(item.icon, 'icon-sm')}<span>${escapeHtml(
       item.label
     )}</span></a>`;
 
-  const groups = ADMIN_NAV.map(
-    (group) => `<div class="app-nav-label">${escapeHtml(group.label)}</div>${group.items.map(link).join('')}`
-  ).join('');
+  const isManager = account?.role === 'admin';
+  const granted = Array.isArray(account?.adminPermissions) ? new Set(account.adminPermissions) : null;
+  const visible = (item) => {
+    if (isManager) return true;
+    if (item.adminOnly) return false;
+    return !item.permission || !granted || granted.has(item.permission);
+  };
+
+  const groups = ADMIN_NAV.map((group) => {
+    const items = group.items.filter(visible);
+    return items.length ? `<div class="app-nav-label">${escapeHtml(group.label)}</div>${items.map(link).join('')}` : '';
+  })
+    .filter(Boolean)
+    .join('');
 
   return `<aside class="app-side">
   <nav class="app-nav" aria-label="أقسام لوحة الإدارة">
@@ -1350,9 +1576,10 @@ function renderUserMenu(account) {
         ${email && email !== name ? `<span>${escapeHtml(email)}</span>` : ''}
       </div>
       <a href="/account">${icon('user', 'icon-sm')}<span>حسابي ورصيد النقاط</span></a>
+      <a href="/payments">${icon('coins', 'icon-sm')}<span>الاشتراك والدفع</span></a>
       <a href="/onboarding">${icon('searchCheck', 'icon-sm')}<span>ملفي البحثي</span></a>
       <a href="/#pricing">${icon('coins', 'icon-sm')}<span>الباقات</span></a>
-      ${account?.role === 'admin' ? `<a href="/admin">${icon('shield', 'icon-sm')}<span>لوحة الإدارة</span></a>` : ''}
+      ${hasAdminPanel(account) ? `<a href="/admin">${icon('shield', 'icon-sm')}<span>لوحة الإدارة</span></a>` : ''}
       <a class="danger" href="/logout">${icon('logout', 'icon-sm')}<span>تسجيل الخروج</span></a>
     </div>
   </div>`;
@@ -1401,19 +1628,30 @@ function renderAppSidebar(activeKey, account, navBottom = '') {
       item.label
     )}</span></a>`;
 
-  const admin =
-    account?.role === 'admin'
-      ? `<a href="/admin"${activeKey === 'admin' ? ' class="active"' : ''}>${icon('shield', 'icon-sm')}<span>لوحة الإدارة</span></a>`
-      : '';
+  // الخدمات المفتوحة تُحسب في middleware/auth.js مرة واحدة لكل طلب وحُمّلت على req.account.
+  // غيابها (زائر أو خطأ قراءة) ⇒ نعرض كل الأدوات حتى لا يختفي شيء بالخطأ.
+  const open = Array.isArray(account?.services)
+    ? new Set(
+        account.services
+          .filter((item) => (typeof item === 'string' ? true : item?.enabled !== false))
+          .map((item) => (typeof item === 'string' ? item : item?.key))
+          .filter(Boolean)
+      )
+    : null;
+  const visible = (item) => !item.service || !open || open.has(item.service);
+
+  const admin = hasAdminPanel(account)
+    ? `<a href="/admin"${activeKey === 'admin' ? ' class="active"' : ''}>${icon('shield', 'icon-sm')}<span>لوحة الإدارة</span></a>`
+    : '';
 
   return `<aside class="app-side">
   <nav class="app-nav" aria-label="أدوات الباحث">
     <div class="app-nav-sep first"></div>
-    ${APP_NAV.map(link).join('')}
+    ${APP_NAV.filter(visible).map(link).join('')}
     ${admin}
     <div class="app-nav-foot">
       <div class="app-nav-sep"></div>
-      ${link(APP_CHAT_NAV)}
+      ${visible(APP_CHAT_NAV) ? link(APP_CHAT_NAV) : ''}
       ${navBottom}
     </div>
   </nav>
@@ -1426,7 +1664,7 @@ function renderPublicHeader(account, unread = 0) {
 
   const actions = account
     ? `<a class="link-quiet" href="${needsOnboarding(account) ? '/onboarding' : homePathFor(account)}">${
-        needsOnboarding(account) ? 'أكمل ملفك البحثي' : account.role === 'admin' ? 'لوحة الإدارة' : 'لوحتي'
+        needsOnboarding(account) ? 'أكمل ملفك البحثي' : hasAdminPanel(account) ? 'لوحة الإدارة' : 'لوحتي'
       }</a>
        ${renderUserMenu(account)}`
     : `<a class="link-quiet" href="/login">تسجيل الدخول</a>
@@ -1456,6 +1694,36 @@ function renderPublicHeader(account, unread = 0) {
 </header>`;
 }
 
+/**
+ * رابط واتساب للدعم الفني: يحوّل الرقم (بصيغته المحلية أو الدولية) إلى رابط
+ * `wa.me` برسالة عربية جاهزة، فيفتح المحادثة ويملأ النص للباحث.
+ * الرقم: `SUPPORT_WHATSAPP` في ملف البيئة أولاً ثم الثابت في constants.
+ */
+export function whatsappLink(message = 'مرحباً، لدي مشكلة في المنصة وأحتاج مساعدة.') {
+  // الرقم من صفحة الإعدادات أولاً (ما عدّله المدير)، ثم البيئة، ثم لا شيء.
+  const raw = currentSupportWhatsapp() || SUPPORT_WHATSAPP;
+  if (!raw) return '';
+
+  // نُبقي الأرقام فقط، ثم نضيف رمز الدولة (218) إن كان الرقم محلياً يبدأ بـ 0.
+  let digits = raw.replace(/[^\d+]/g, '').replace(/\+/g, '');
+  if (/^0/.test(digits)) digits = `218${digits.replace(/^0+/, '')}`;
+  if (digits.length < 8) return '';   // رقم ناقص أو افتراضي ⇒ لا نرسل المستخدم إلى رابط مكسور
+
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+}
+
+/** زر واتساب عائم أسفل الشاشة — نقطة وصول واحدة للدعم في كل صفحة. */
+function renderWhatsappFloat() {
+  const href = whatsappLink();
+  if (!href) return '';
+
+  return `<a class="wa-float" href="${escapeHtml(href)}" target="_blank" rel="noopener"
+   aria-label="تواصل معنا على واتساب" title="عند أي مشكلة — راسلنا على واتساب">
+    ${icon('whatsapp', 'wa-float-icon')}
+    <span class="wa-float-label">مشكلة؟ راسلنا</span>
+  </a>`;
+}
+
 /** تذييل الصفحة العامة بمعلومات المنصة والدعم. */
 function renderPublicFooter() {
   const productLinks = PUBLIC_NAV.map(
@@ -1472,7 +1740,13 @@ function renderPublicFooter() {
       </p>
       <div class="footer-contacts">
         <p>البريد: <a href="mailto:${escapeHtml(SUPPORT_EMAIL)}">${escapeHtml(SUPPORT_EMAIL)}</a></p>
-        <p>واتساب: ${escapeHtml(SUPPORT_WHATSAPP)}</p>
+        ${
+          whatsappLink()
+            ? `<p>واتساب: <a href="${escapeHtml(whatsappLink())}" target="_blank" rel="noopener">${escapeHtml(
+                currentSupportWhatsapp()
+              )}</a></p>`
+            : ''
+        }
       </div>
     </div>
     <div>
@@ -1514,7 +1788,8 @@ export function renderLayout({
   unread = 0,
   scripts = [],
   navBottom = '',
-  fitViewport = false
+  fitViewport = false,
+  canonicalPath = ''
 }) {
   const documentTitle = title.includes(APP_NAME) ? title : `${title} — ${APP_NAME}`;
 
@@ -1536,6 +1811,14 @@ export function renderLayout({
   // تذييل الموقع للصفحات العامة فقط — لوحة الإدارة بلا تذييل (مساحتها أثقل من محتواها)
   const footer = area === 'public' ? renderPublicFooter() : '';
 
+  // زر الدعم العائم: مع الزائر والباحث، وبلا إزعاج في لوحة الإدارة (الفريق لا يحتاجه).
+  const whatsappFloat = area === 'admin' ? '' : renderWhatsappFloat();
+
+  // وصف الصفحة للمشاركة ومحركات البحث: نصّ الصفحة إن وُجد، وإلا وسم المنصة.
+  const metaDescription = String(subtitle || '').trim() || `${APP_NAME} — ${APP_TAGLINE}`;
+  // المسار الفعلي للصفحة (يمرّره المسار) — يُستخدم في og:url و link canonical.
+  const currentPath = String(canonicalPath || activeKey || '/');
+
   const headBlock = pageHead
     ? `<div class="page-head">
     <h1>${escapeHtml(title)}</h1>
@@ -1544,7 +1827,15 @@ export function renderLayout({
     : '';
 
   // جرس الإشعارات المنسدل يعمل أيضاً على الصفحات العامة ولوحة الإدارة لمن لديه جلسة
-  const extraScripts = (area === 'public' || area === 'admin') && account ? ['/js/app-shell.js'] : [];
+  // app-shell للجرس والقوائم. الجرس يظهر في «public» و«app» و«admin» ⇒ يُحمَّل في الثلاث،
+  // ويتجاهل نفسه إن لم يجد عناصره (صفحة بلا جرس) فلا أثر زائد.
+  //
+  // ملاحظة: لم نُحمّل /js/push-notifications.js هنا — حُذف زر «تفعيل إشعارات الهاتف»
+  // من قائمة الجرس بقرار المنصة، فصار السكربت بلا نقطة انطلاق (init يتحقق من الزر
+  // ويرجع فوراً). الخدمة نفسها باقية على الخادم، وما فعّل الإشعارات سابقاً ما زال
+  // يستقبلها عبر Service Worker نفسه.
+  const bellAreas = ['public', 'app', 'admin'];
+  const extraScripts = bellAreas.includes(area) && account ? ['/js/app-shell.js'] : [];
   const allScripts = [
     ...new Set([...(Array.isArray(scripts) ? scripts : []), ...extraScripts])
   ];
@@ -1565,7 +1856,8 @@ export function renderLayout({
       )}</div>`
       : area === 'admin'
         ? `<div class="${shellClass}"><div class="app-main">${headBlock}${body}</div>${renderAdminSidebar(
-          activeKey
+          activeKey,
+          account
         )}</div>`
         : `${headBlock}${body}`;
 
@@ -1574,12 +1866,32 @@ export function renderLayout({
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="description" content="${escapeHtml(APP_NAME)} — ${escapeHtml(APP_TAGLINE)}" />
+<meta name="description" content="${escapeHtml(metaDescription)}" />
 <meta name="theme-color" content="#102A43" />
+
+<!-- المشاركة على وسائل التواصل: بلا هذه يظهر الرابط نصاً بلا صورة أو وصف -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="${escapeHtml(APP_NAME)}" />
+<meta property="og:locale" content="ar_LY" />
+<meta property="og:title" content="${escapeHtml(documentTitle)}" />
+<meta property="og:description" content="${escapeHtml(metaDescription)}" />
+<meta property="og:image" content="${escapeHtml(absoluteUrl(BRAND.shareImage))}" />
+<meta property="og:image:alt" content="${escapeHtml(APP_NAME)}" />
+<meta property="og:url" content="${escapeHtml(absoluteUrl(currentPath))}" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="${escapeHtml(documentTitle)}" />
+<meta name="twitter:description" content="${escapeHtml(metaDescription)}" />
+<meta name="twitter:image" content="${escapeHtml(absoluteUrl(BRAND.shareImage))}" />
+<link rel="canonical" href="${escapeHtml(absoluteUrl(currentPath))}" />
+
+<!-- تطبيق ويب: يجعل الإشعارات مثبّتة على الهاتف وتعمل بلا شريط متصفح -->
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="${escapeHtml(APP_NAME)}" />
 <title>${escapeHtml(documentTitle)}</title>
 <link rel="stylesheet" href="${BRAND.fonts}" />
 <link rel="icon" type="image/svg+xml" href="${BRAND.icon}" />
-<link rel="apple-touch-icon" href="${BRAND.roundMark}" />
+<link rel="apple-touch-icon" sizes="180x180" href="${escapeHtml(BRAND.touchIcon)}" />
 <style>${STYLES}</style>
 </head>
 <body>
@@ -1588,6 +1900,7 @@ ${header}
   ${mainInner}
 </main>
 ${footer}
+${whatsappFloat}
 ${scriptTags}
 </body>
 </html>`;
@@ -1604,6 +1917,32 @@ export function renderNotice({ title, message, details = '', status = 200, extra
   </div>`;
 
   return { status, html: renderLayout({ title, subtitle: 'لوحة الإدارة', activeKey: 'home', body }) };
+}
+
+/**
+ * صفحة «الخدمة غير متاحة في باقتك»: تشرح ما تحتاجه الباقة وترى ما هو مفتوح فعلياً.
+ * تُستخدم من requireService في middleware/auth.js.
+ */
+export function renderServiceNotice({ service = 'هذه الخدمة', account = null, services = [] }) {
+  const open = services.filter((item) => item.enabled);
+  const chips = open.length
+    ? open.map((item) => `<a class="chip" href="${escapeHtml(item.href)}">${icon(item.icon, 'icon-sm')} ${escapeHtml(item.short)}</a>`).join(' ')
+    : '<span class="muted">لا خدمات أخرى مفتوحة في باقتك حالياً.</span>';
+
+  const body = `
+  <div class="notice">
+    <h2>${escapeHtml(service)} غير متاحة في باقتك</h2>
+    <p>هذه الخدمة مرتبطة بدور باقتك. كل باقة تحدّد دورها من صفحة «الباقات»، والدور يحدد الخدمات المفتوحة.</p>
+    <p class="muted">الحساب الحالي: ${escapeHtml(account?.email || '—')}${account?.plan_code ? ` · الباقة: ${escapeHtml(account.plan_code)}` : ''}</p>
+    <div class="chips">${chips}</div>
+    <div class="links">
+      <a class="btn btn-primary" href="/#pricing">عرض الباقات</a>
+      <a class="btn" href="/dashboard">رجوع إلى الإحصائية</a>
+      <a class="btn" href="/chat">المشرف الذكي</a>
+    </div>
+  </div>`;
+
+  return { status: 403, html: renderLayout({ title: 'الخدمة غير متاحة', subtitle: service, area: 'app', account, body }) };
 }
 
 export { APP_NAME, APP_TAGLINE, BRAND, ADMIN_NAV, APP_NAV, APP_ACCOUNT_NAV, STYLES };

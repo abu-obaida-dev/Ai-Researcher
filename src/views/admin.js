@@ -1,6 +1,16 @@
-import { FREE_PLAN_CODE, TOKEN_COSTS } from '../constants.js';
-import { escapeHtml, renderLayout, renderStat, renderTable } from './layout.js';
-import { formatDate, formatDateTime, formatNumber, formatPrice } from './format.js';
+import {
+  ADMIN_PERMISSIONS,
+  DEFAULT_ROLES,
+  FREE_PLAN_CODE,
+  PLAN_STORAGE_DEFAULT_MB,
+  SITE_CURRENCIES,
+  TOKEN_COSTS
+} from '../constants.js';
+import { escapeHtml, renderLayout, renderStat, renderTable, whatsappLink } from './layout.js';
+import { formatDate, formatDateTime, formatMoney, formatNumber, formatPrice } from './format.js';
+import { icon } from './icons.js';
+import { LIBRARY_EXTENSIONS } from '../services/library.js';
+import { formatStorageMb, planFeaturesFromPermissions, storageLabel } from '../services/plans.js';
 
 /**
  * صفحات لوحة الإدارة مولَّدة على الخادم (Server-Side Rendering) — بدون React
@@ -17,18 +27,27 @@ const OK_TEXT = {
   points_adjusted: 'تم تعديل رصيد النقاط وتسجيل العملية في سجل الاستهلاك.',
   plan_updated: 'تم تغيير الباقة — تسري الجديد فوراً.',
   notified: 'أُرسل الإشعار إلى الباحث (داخل الموقع + push لمن فعّل هاتفه).',
-  user_deleted: 'حُذف الحساب نهائياً من قاعدة البيانات — زالت بياناته وملفاته ومحادثاته كلها.',
+  user_deleted: 'حُذف الحساب نهائياً — زالت بياناته وملفاته ومحادثاته كلها.',
   admin_added: 'أُضيف المدير — تُمنح الصلاحية في الطلب التالي لذلك الحساب.',
-  admin_updated: 'حُدّث بريد المدير في الجدول.',
-  admin_removed: 'أُزيل المدير من الجدول — لن يستطيع دخول لوحة الإدارة بعد طلبه القادم.',
+  admin_updated: 'حُدّث بريد المدير.',
+  admin_removed: 'أُزيل المدير — لن يستطيع دخول لوحة الإدارة بعد طلبه القادم.',
   permission_added: 'أُضيفت الصلاحية — تسري على الحسابات في طلباتها القادمة.',
   permission_removed: 'حُذفت الصلاحية من الدور.',
   plan_saved: 'حُفظت الباقة — تسري على صفحة الهبوط وكل نصوص الموقع فوراً.',
+  plan_deleted: 'حُذفت الباقة — كل مشتركيها انتقلوا إلى الباقة المجانية.',
   link_added: 'حُفظ الرابط — المفتاح والنموذج دخلا الدوران فوراً بلا إعادة تشغيل.',
-  link_removed: 'حُذف الرابط — عاد المفتاح لوضعه الطبيعي (مفاتيح .env فقط إن لم يبقَ رابط).'
+  link_removed: 'حُذف الرابط — عاد المفتاح لوضعه الطبيعي (مفاتيح .env فقط إن لم يبقَ رابط).',
+  library_added: 'أُضيف الكتاب إلى مكتبة المنصة — يظهر للباحثين في صفحة المراجع فوراً.',
+  library_imported: 'استُورد العنصر إلى المكتبة.',
+  library_updated: 'حُدّثت بيانات العنصر في المكتبة.',
+  library_toggled: 'تغيّرت حالة العنصر (مفعّل/معطّل) في المكتبة.',
+  library_deleted: 'حُذف العنصر وملفّه من المكتبة نهائياً.',
+  supervisor_added: 'أُضيف المشرف — دوره الآن supervisor في طلبه القادم.',
+  supervisor_removed: 'أُزيل المشرف — عاد دوره إلى دور باقته.',
+  supervisor_missing: 'هذا البريد ليس في قائمة المشرفين.'
 };
 
-/** بطاقة مؤشر بقيمة نصية غير رقمية (اسم قاعدة البيانات، إصدار Node... إلخ). */
+/** بطاقة مؤشر بقيمة نصية (تُستعمل في إحصاءات المكتبة: إجمالي · بملف · بيانات فقط). */
 function statRaw(label, value) {
   return `<div class="stat"><p class="stat-label">${escapeHtml(label)}</p><p class="stat-value">${escapeHtml(
     String(value)
@@ -160,10 +179,14 @@ function operationsFilterBar({ action, adminToken = '', q = null, date = '', h1 
 const PERMISSION_LABELS = {
   '*': 'كل الصلاحيات',
   'dashboard:view': 'لوحة الإحصائية',
-  'chat:use': 'المشرف الذكي',
+  'chat:use': 'المشرف الذكي (الدردشة)',
   'journey:edit': 'مسار البحث',
-  'library:browse': 'مكتبة الملفات',
-  'students:view': 'ملفات الطلاب'
+  'library:browse': 'المكتبة العلمية',
+  'notes:use': 'المفكرة',
+  'files:upload': 'رفع الملفات',
+  'defense:train': 'المناقشة والتدريب عليها',
+  'students:view': 'ملفات الطلاب',
+  ...Object.fromEntries(ADMIN_PERMISSIONS.map((item) => [item.key, item.label]))
 };
 
 /** الصلاحيات المتاحة للإضافة من القائمة (بلا «كل الصلاحيات» — حماية دور المدير). */
@@ -185,6 +208,10 @@ export function renderAdminHome({
   latestUsers,
   recent = [],
   sent = 0,
+  push = null,
+  pushFailed = 0,
+  pushNone = 0,
+  pushError = '',
   filter = {},
   adminToken = '',
   account = null
@@ -220,7 +247,7 @@ export function renderAdminHome({
 
   const failedAlert =
     Number(counts.ai_failed) > 0
-      ? `<div class="alert"><b>تنبيه:</b> ${escapeHtml(formatNumber(counts.ai_failed))} طلباً فشل عند المزوّدين — <a href="/admin/providers">راجع صفحة المزوّدين</a> لمعرفة السبب والمفتاح المتعطّل.</div>`
+      ? `<div class="alert"><b>تنبيه:</b> ${escapeHtml(formatNumber(counts.ai_failed))} طلباً فشل عند مزوّدي الذكاء الاصطناعي. راجع <code>سجل الاستهلاك</code> عمود «الحالة»، أو شغّل <code>npm run doctor</code> لفحص المفاتيح من الخادم.</div>`
       : '';
 
   // ملخص الأسبوع للمخطط الدائري + هل الفلتر مفعّل الآن؟
@@ -243,7 +270,21 @@ export function renderAdminHome({
   ${failedAlert}
   ${
     sent
-      ? `<div class="alert"><b>تم الإرسال:</b> أُرسل الإشعار إلى ${escapeHtml(String(sent))} حساباً — حُفظ داخل موقع كل باحث فوراً، ووصل push لمن فعّل هاتفه.</div>`
+      ? (() => {
+          // نقول للمدير ما الذي وصل فعلاً: داخل الموقع دائماً، وعلى الهاتف لمن فعّل،
+          // ومن لم يصله (بلا جهاز · فشل عند المزوّد) حتى لا نظن أن الكل وصل.
+          const reached = Number(push || 0);
+          const parts = [
+            `حُفظ الإشعار داخل موقع <b>${escapeHtml(formatNumber(sent))}</b> باحث.`,
+            `وصل إلى الهاتف: <b>${escapeHtml(formatNumber(reached))}</b>`
+          ];
+          if (Number(pushNone) > 0) parts.push(`${escapeHtml(formatNumber(pushNone))} لم يفعّلوا إشعارات هاتفهم`);
+          if (Number(pushFailed) > 0) {
+            parts.push(`فشل عند <b>${escapeHtml(formatNumber(pushFailed))}</b> عند مزوّد الإشعارات`);
+          }
+          if (pushError) parts.push(`السبب: ${escapeHtml(pushError)}`);
+          return `<div class="alert"><b>تم الإرسال:</b> ${parts.join(' · ')}</div>`;
+        })()
       : ''
   }
   <div class="duo mt-16">
@@ -286,7 +327,7 @@ export function renderAdminHome({
           ? 'لا توجد عمليات مطابقة لهذه التصفية — جرّب تاريخاً أو ساعات أخرى.'
           : 'لا توجد عمليات مسجّلة بعد.'
       })}</div>
-      <p class="muted mt-12">عرض ${escapeHtml(formatNumber(recent.length))} عملية — مرّر داخل الجدول للأسفل، أو افتح «سجل الاستهلاك الكامل» للبحث والتفاصيل.</p>
+      <p class="muted mt-12">عرض ${escapeHtml(formatNumber(recent.length))} عملية — مرّر داخل القائمة للأسفل، أو افتح «سجل الاستهلاك الكامل» للبحث والتفاصيل.</p>
     </div>
   </div>
   <div class="card">
@@ -311,7 +352,7 @@ export function renderAdminHome({
 
   return renderLayout({
     title: 'نظرة عامة',
-    subtitle: 'حالة المنصة كاملةً من قاعدة البيانات — باحثون ونقاط ومحادثات وطلبات ذكاء اصطناعي',
+    subtitle: 'حالة المنصة كاملةً — باحثون ونقاط ومحادثات وطلبات ذكاء اصطناعي',
     activeKey: 'home',
     account,
     scripts: ['/js/app-shell.js'],
@@ -319,167 +360,7 @@ export function renderAdminHome({
   });
 }
 
-/**
- * صفحة حالة المزوّدين: جدول يوضّح لكل مزوّد حالته وسبب تعطّله،
- * وزر «فحص الآن» يرسل نداءً صغيراً لكل مفتاح ليرى المدير الخطأ الحقيقي.
- */
-export function renderAdminProviders({
-  status = [],
-  probed = false,
-  links = [],
-  catalog = { providers: [], models: [] },
-  saved = '',
-  error = '',
-  adminToken = '',
-  account = null
-}) {
-  const query = adminToken ? `?token=${encodeURIComponent(adminToken)}` : '';
-  const live = probed ? `${query ? '&' : '?'}probe=1` : `${query}${query ? '&' : '?'}probe=1`;
 
-  const rows = status.map((item) => {
-    const probe = item.probe;
-    let badge = '<span class="badge badge-active">جاهز</span>';
-    if (!item.configured) badge = '<span class="badge">غير مُعدّ</span>';
-    else if (probe && !probe.ok) badge = `<span class="badge badge-error">متوقّف${probe.status ? ` · ${probe.status}` : ''}</span>`;
-    else if (item.down) badge = '<span class="badge badge-error">خارج الدوران</span>';
-    else if (probe && probe.ok) badge = '<span class="badge badge-active">يعمل الآن</span>';
-
-    const backIn = item.down && item.backInMs ? ` · يعود بعد ${Math.ceil(item.backInMs / 60000)} دقيقة` : '';
-    const models = (item.models || []).map((model) => escapeHtml(model)).join(' ← ');
-    const detail = probe && !probe.ok ? probe.reason : item.reason || '';
-    const keyCount = item.keyCount > 1 ? ` · ${item.keyCount} مفاتيح` : '';
-
-    // سطر لكل مفتاح: المفتاح الثاني قد ينفد رصيده بينما الأول سليم.
-    const keyLines = (item.keyStates || []).map((state) => {
-      const probed = (probe?.keys || []).find((entry) => entry.position === state.position);
-      const mark = probed ? (probed.ok ? '✔' : '✘') : state.down ? '⏸' : '·';
-      const note = probed ? probed.reason : state.reason || '';
-      const tail = state.down && state.backInMs ? ` (يعود بعد ${Math.ceil(state.backInMs / 60000)} د)` : '';
-      return `<li><b>${mark} مفتاح ${state.position}</b> — ${escapeHtml(note || 'لم يُفحص')}${escapeHtml(tail)}</li>`;
-    });
-
-    return `
-    <td class="strong">${escapeHtml(item.label || item.key)}</td>
-    <td>${badge}</td>
-    <td><span class="mono small">${models || '—'}</span></td>
-    <td>${escapeHtml(detail || '—')}${escapeHtml(backIn)}${escapeHtml(keyCount)}
-      ${keyLines.length ? `<ul class="small muted" style="margin:6px 0 0;padding-inline-start:18px">${keyLines.join('')}</ul>` : ''}
-    </td>
-    <td>${probe ? `${probe.ms}ms` : '—'}</td>`;
-  });
-
-  const notice = saved && OK_TEXT[saved] ? `<div class="notice">${escapeHtml(OK_TEXT[saved])}</div>` : '';
-  const errorNotice = error ? `<div class="alert"><b>تعذّر:</b> ${escapeHtml(error)}</div>` : '';
-
-  const providerOptions = catalog.providers
-    .map((provider) => `<option value="${escapeHtml(provider.key)}">${escapeHtml(provider.label)}</option>`)
-    .join('');
-  const modelOptions = catalog.models.map((model) => `<option value="${escapeHtml(model)}"></option>`).join('');
-
-  const linkRows = links.map(
-    (link) => `
-    <td class="strong">${escapeHtml(
-      catalog.providers.find((provider) => provider.key === link.provider)?.label || link.provider
-    )}</td>
-    <td><span class="mono">${escapeHtml(link.model)}</span></td>
-    <td><span class="mono small">•••• ${escapeHtml(link.last4)}</span></td>
-    <td class="row-actions">
-      <form class="inline-form" method="post" action="/admin/providers/link/delete${query}"
-        data-confirm="حذف رابط النموذج ${escapeHtml(link.model)}؟ سيعود المفتاح لوضعه بلا رابط مخصّص.">
-        <input type="hidden" name="index" value="${escapeHtml(String(link.index))}" />
-        <button class="btn btn-sm btn-danger" type="submit">حذف</button>
-      </form>
-    </td>`
-  );
-
-  const body = `
-  ${notice}${errorNotice}
-  <div class="card">
-    <h2>حالة مزوّدي الذكاء الاصطناعي</h2>
-    <p class="muted">
-      يردّ الموقع من أول مزوّد ينجح. عند تعطّل مزوّد يخرج من الدوران مؤقّتاً حتى لا يضيّع وقت الباحث،
-      والطلب يذهب للمزوّد التالي بالتوازي بعد ٣٫٥ ثانية، ومعه قائمة نماذج تُجرَّب بالترتيب.
-    </p>
-    <div class="links">
-      <a class="btn btn-primary" href="/admin/providers${live}">فحص الآن (نداء صغير لكل مفتاح)</a>
-      <a class="btn" href="/admin/providers${query}">تحديث الحالة فقط</a>
-    </div>
-  </div>
-  <div class="card mt-16">
-    ${renderTable({
-      columns: ['المزوّد', 'الحالة', 'النماذج (بترتيب التبديل)', 'السبب + كل مفتاح', 'زمن الرد'],
-      rows,
-      emptyMessage: 'لا يوجد مزوّدات.'
-    })}
-  </div>
-  <div class="card mt-16">
-    <h2>ربط موديل بمفتاح خاص</h2>
-    <p class="muted">
-      تريد نموذجاً بعينه بمفتاحك؟ اختر المزوّد واكتب اسم النموذج والصق المفتاح — يُحفظ الرابط في قاعدة
-      البيانات ويدخل الاستخدام فوراً: المفتاح ينضمّ لسباق هذا المزوّد والنموذج يظهر في قوائم النماذج،
-      بلا تعديل .env وبلا إعادة تشغيل الخادم.
-    </p>
-    <form method="post" action="/admin/providers/link${query}">
-      <div class="field-row">
-        <div class="field">
-          <label for="link-provider">المزوّد</label>
-          <select id="link-provider" name="provider" required>${providerOptions}</select>
-        </div>
-        <div class="field">
-          <label for="link-model">اسم النموذج</label>
-          <input type="text" id="link-model" name="model" list="link-models" required maxlength="100"
-            placeholder="gemini-3.6-flash" />
-          <datalist id="link-models">${modelOptions}</datalist>
-          <p class="form-hint">اختر من القائمة أو اكتب أي اسم تعرفه عند المزوّد.</p>
-        </div>
-        <div class="field">
-          <label for="link-key">مفتاح API</label>
-          <input type="password" id="link-key" name="api_key" required minlength="8" maxlength="400"
-            autocomplete="off" placeholder="الصق المفتاح هنا" />
-          <p class="form-hint">يُحفظ في قاعدة البيانات ولا يُطبع كاملاً في أي صفحة — تظهر آخر 4 أحرف فقط.</p>
-        </div>
-      </div>
-      <div class="form-actions">
-        <button class="btn btn-primary" type="submit">ربط النموذج</button>
-        <span class="muted">يسري فوراً على أول طلب — هذا المفتاح يجرّب هذا النموذج وحده.</span>
-      </div>
-    </form>
-  </div>
-  <div class="card mt-16">
-    <div class="card-head">
-      <h2>الروابط المخصّصة (${escapeHtml(formatNumber(links.length))})</h2>
-    </div>
-    ${renderTable({
-      columns: ['المزوّد', 'النموذج', 'المفتاح', 'إجراء'],
-      rows: linkRows,
-      emptyMessage: 'لا توجد روابط مخصّصة — المزوّدين يعملون الآن بمفاتيح .env ونماذجها فقط.'
-    })}
-    <p class="muted mt-12">حذف الرابط يُخرج المفتاح من السباق فوراً (يبقى المفتاح في .env لو كان منها).</p>
-  </div>
-  <div class="card">
-    <h2>معاني الأخطاء</h2>
-    <ul class="muted">
-      <li><b>402</b> لا يوجد رصيد عند المزوّد — اشحن حساب OpenRouter من settings/credits.</li>
-      <li><b>403</b> لا ترخيص على فريق xAI — اشحنه من console.x.ai/team.</li>
-      <li><b>429</b> تجاوزت حصة المفتاح أو حدّ معدّله.</li>
-      <li><b>503</b> النموذج مزدحم — يتغيّر بين النماذج تلقائياً بقائمة النماذج.</li>
-      </ul>
-      <p class="muted">كل مزوّد يقرأ مفتاحه من <code>NAME_API_KEYS</code> (مفاتيح مفصولة بفواصل) أو
-        <code>NAME_API_KEY</code> (مفتاح واحد). نفاد رصيد مفتاح لا يوقف الموقع: يخرج ذلك المفتاح وحده
-        من الدوران ١٠ دقائق ويعمل الباقي، ثم يعود وحده بعد شحنه بلا إعادة تشغيل.</p>
-      <ul class="muted">
-    </ul>
-  </div>`;
-
-  return renderLayout({
-    title: 'المزوّدون',
-    subtitle: 'من يردّ الآن على المشرف الذكي، ولماذا يتعطّل',
-    activeKey: 'providers',
-    account,
-    scripts: ['/js/app-shell.js'],
-    body
-  });
-}
 
 /**
  * سجل الاستهلاك الكامل: بحث `?q=` + فلترة تاريخ/ساعات/عدد نتائج + أعمدة
@@ -559,8 +440,8 @@ export function renderAdminUsage({
         : 'لا توجد عمليات مسجّلة بعد.'
     })}</div>
     <p class="muted mt-12">
-      عرض ${escapeHtml(formatNumber(recent.length))} عملية من الأحدث — مرّر داخل الجدول للمزيد.
-      التصفية بالساعات تُحسم على وقت التسجيل في قاعدة البيانات (بتوقيت الخادم).
+      عرض ${escapeHtml(formatNumber(recent.length))} عملية من الأحدث — مرّر داخل القائمة للمزيد.
+      التصفية بالساعات تعتمد وقت التسجيل (بتوقيت الخادم).
     </p>
   </div>`;
 
@@ -647,16 +528,20 @@ export function renderAdminUsers({
     <td>${escapeHtml(formatDate(user.created_at))}</td>
     <td class="row-actions">
       <a class="btn btn-sm" href="/admin/users/${user.id}${tokenQuery}">تفاصيل</a>
-      <form class="inline-form" method="post" action="/admin/users/${user.id}/status${tokenQuery}">
+      ${
+        user.role === 'admin'
+          ? '<span class="badge badge-admin">محمي</span>'
+          : `<form class="inline-form" method="post" action="/admin/users/${user.id}/status${tokenQuery}">
         <input type="hidden" name="active" value="${user.is_active ? '0' : '1'}" />
         <input type="hidden" name="return" value="users" />
         <button class="btn btn-sm ${user.is_active ? 'btn-danger' : 'btn-quiet'}" type="submit">${user.is_active ? 'إيقاف' : 'تفعيل'}</button>
-      </form>
+      </form>`
+      }
       ${
         user.role === 'admin' || (account && account.id === user.id)
           ? ''
           : `<form class="inline-form" method="post" action="/admin/users/${user.id}/delete${tokenQuery}"
-            data-confirm="حذف حساب ${escapeHtml(user.email || '')}؟ يُحذف نهائياً من قاعدة البيانات مع كل بياناته وملفاته ومحادثاته. لا تراجع.">
+            data-confirm="حذف حساب ${escapeHtml(user.email || '')}؟ يُحذف نهائياً مع كل بياناته وملفاته ومحادثاته. لا تراجع.">
         <button class="btn btn-sm btn-danger" type="submit">حذف</button>
       </form>`
       }
@@ -702,7 +587,39 @@ export function renderAdminUsers({
 }
 
 /** الباقات: جدول + تحرير فوري لكل باقة يسري على صفحة الهبوط ونصوص الموقع. */
-export function renderAdminPlans({ plans, totalSubscribers, saved = '', error = '', adminToken = '', account = null }) {
+/** خيارات دور الباقة (بدون دور المدير — حماية). */
+function roleOptions(current) {
+  const options = DEFAULT_ROLES.filter((role) => role.code !== 'admin')
+    .map(
+      (role) =>
+        `<option value="${escapeHtml(role.code)}"${role.code === current ? ' selected' : ''}>${escapeHtml(role.title)}</option>`
+    )
+    .join('');
+  return `<option value=""${!current ? ' selected' : ''}>— بدون تحديد (افتراضي: مجاني) —</option>${options}`;
+}
+
+/**
+ * معاينة ما سيظهر للباحث في بطاقة الباقة على صفحة الهبوط: يُبنى بنفس
+ * دالة المزايا العامة (planFeaturesFromPermissions) من صلاحيات دور الباقة،
+ * مضافاً إليها سطر حصة التخزين القادمة من قاعدة البيانات.
+ */
+function rolePermissionsPreview(roleCode, storageMb) {
+  const role = DEFAULT_ROLES.find((item) => item.code === String(roleCode || ''));
+  const permissions = new Set(role?.permissions || []);
+
+  return [...planFeaturesFromPermissions(permissions), storageLabel(storageMb)];
+}
+
+export function renderAdminPlans({
+  plans,
+  totalSubscribers,
+  permissionsByRole = {},
+  saved = '',
+  note = '',
+  error = '',
+  adminToken = '',
+  account = null
+}) {
   const token = adminToken ? `?token=${encodeURIComponent(adminToken)}` : '';
 
   const rows = plans.map(
@@ -711,13 +628,30 @@ export function renderAdminPlans({ plans, totalSubscribers, saved = '', error = 
     <td>${escapeHtml(plan.title)}</td>
     <td>${escapeHtml(formatPrice(plan.price))}</td>
     <td>${escapeHtml(formatNumber(plan.tokens))}</td>
+    <td>${escapeHtml(formatStorageMb(plan.storage_mb))}</td>
+    <td>${escapeHtml(plan.role_code || '—')}</td>
     <td>${
       plan.is_active
         ? '<span class="badge badge-active">مفعّلة</span>'
         : '<span class="badge badge-off">معطّلة</span>'
     }${plan.popular ? ' <span class="badge badge-admin">مميّزة</span>' : ''}</td>
     <td>${escapeHtml(formatNumber(plan.subscribers))}</td>
-    <td><a class="btn btn-sm" href="#edit-${escapeHtml(plan.code)}">تعديل</a></td>`
+    <td class="row-actions">
+      <a class="btn btn-sm" href="#edit-${escapeHtml(plan.code)}">تعديل</a>
+      ${
+        plan.code === FREE_PLAN_CODE
+          ? '<span class="badge">لا تُحذف</span>'
+          : `<form class="inline-form" method="post" action="/admin/plans/${encodeURIComponent(plan.code)}/delete${token}"
+            data-confirm="حذف باقة «${escapeHtml(plan.title)}» نهائياً؟${
+              Number(plan.subscribers) > 0
+                ? ` سينتقل ${Number(plan.subscribers)} مشترك إلى الباقة المجانية.`
+                : ''
+            } لا يمكن التراجع.">
+            <input type="hidden" name="confirm" value="1" />
+            <button class="btn btn-sm btn-danger" type="submit">حذف</button>
+          </form>`
+      }
+    </td>`
   );
 
   const forms = plans
@@ -734,7 +668,7 @@ export function renderAdminPlans({ plans, totalSubscribers, saved = '', error = 
         <a class="btn btn-sm" href="#" title="إغلاق">إغلاق ✕</a>
       </div>
     </div>
-    <p class="muted">كل تعديل هنا يُحفظ في جدول plans ويسري فوراً على صفحة الهبوط ونصوص المنصة — بلا إعادة تشغيل.</p>
+    <p class="muted">كل تعديل هنا يُحفظ فوراً ويسري على صفحة الهبوط ونصوص المنصة — بلا إعادة تشغيل.</p>
     <form method="post" action="/admin/plans/${encodeURIComponent(plan.code)}${token}">
       <div class="field-row">
         <div class="field">
@@ -757,14 +691,39 @@ export function renderAdminPlans({ plans, totalSubscribers, saved = '', error = 
             value="${escapeHtml(String(plan.tokens))}" />
           <p class="form-hint">تظهر فوراً في كل النصوص (منها نقاط التجربة المجانية).</p>
         </div>
+        <div class="field">
+          <label for="storage-${code}">مساحة التخزين (MB)</label>
+          <input type="number" id="storage-${code}" name="storage_mb" min="10" max="102400" step="10" required
+            value="${escapeHtml(String(Number(plan.storage_mb) || PLAN_STORAGE_DEFAULT_MB))}" />
+          <p class="form-hint">تُحفظ لهذه الباقة وتُطبَّق على كل باحثيها عند رفع الملفات.</p>
+        </div>
+      </div>
+      <div class="field">
+        <label for="role-${code}">دور الباقة (يحدد الخدمات المفتوحة)</label>
+        <select id="role-${code}" name="role_code">
+          ${roleOptions(plan.role_code)}
+        </select>
+        <p class="form-hint">الدور يربط الباقة بالصلاحيات — مثلاً «رسائل علمية» يفتح المناقشة والتدريب عليها.</p>
       </div>
       <div class="field">
         <label for="tagline-${code}">الوصف المختصر</label>
         <input type="text" id="tagline-${code}" name="tagline" maxlength="160" value="${escapeHtml(plan.tagline || '')}" />
       </div>
+      ${plan.role_code
+        ? permissionsEditor({
+            permissions: permissionsByRole[plan.role_code] || [],
+            addAction: `/admin/plans/${encodeURIComponent(plan.code)}/permissions${token}`,
+            deleteAction: `/admin/plans/${encodeURIComponent(plan.code)}/permissions/delete${token}`,
+            ownerLabel: plan.title
+          })
+        : '<p class="muted">اختر دور الباقة أولاً لتظهر صلاحياتها هنا.</p>'}
       <div class="field">
-        <label for="features-${code}">المزايا (ميزة واحدة في كل سطر)</label>
-        <textarea id="features-${code}" name="features" rows="6" maxlength="4000">${escapeHtml(String(plan.features ?? ''))}</textarea>
+        <label for="features-${code}">أسطر إضافية تُعرض مع المزايا (سطر لكل ميزة — اختياري)</label>
+        <textarea id="features-${code}" name="features" rows="5" maxlength="4000">${escapeHtml(String(plan.features ?? ''))}</textarea>
+        <p class="form-hint">مزايا الباقة تُولَّد تلقائياً من صلاحيات دور الباقة (كل خدمة مفتوحة سطر). ما تكتبه هنا يظهر بعدها.</p>
+        <ul class="info-list mt-8">
+          ${rolePermissionsPreview(plan.role_code, plan.storage_mb).map((line) => `<li>${escapeHtml(line)}</li>`).join('')}
+        </ul>
       </div>
       <label class="check"><input type="checkbox" name="popular" value="1" ${plan.popular ? 'checked' : ''} /> باقة مميّزة (شريط «الأكثر طلباً»)</label>
       <label class="check"><input type="checkbox" name="is_active" value="1" ${plan.is_active ? 'checked' : ''} /> مفعّلة (تظهر في صفحة الهبوط)</label>
@@ -773,12 +732,29 @@ export function renderAdminPlans({ plans, totalSubscribers, saved = '', error = 
         <span class="muted">يُطبَّق فوراً — لا يحتاج إعادة تشغيل الخادم.</span>
       </div>
     </form>
+    ${
+      isFree
+        ? '<p class="muted mt-12">الباقة المجانية لا تُحذف — كل الحسابات تعود إليها تلقائياً.</p>'
+        : `<form class="mt-12" method="post" action="/admin/plans/${encodeURIComponent(code)}/delete${token}"
+          data-confirm="حذف باقة «${escapeHtml(plan.title)}» نهائياً؟${
+            Number(plan.subscribers) > 0
+              ? ` she'll ${Number(plan.subscribers)} مشترك سينتقلون إلى الباقة المجانية.`
+              : ''
+          } لا يمكن التراجع.">
+          <input type="hidden" name="confirm" value="1" />
+          <button class="btn btn-sm btn-danger" type="submit">${icon('trash', 'icon-sm')} حذف الباقة</button>
+        </form>`
+    }
    </div>
   </div>`;
     })
     .join('');
 
-  const notice = saved ? `<div class="notice">${escapeHtml(OK_TEXT.plan_saved)} (${escapeHtml(saved)})</div>` : '';
+  const notice = saved
+    ? `<div class="notice">${escapeHtml(
+        saved === 'plan_deleted' ? OK_TEXT.plan_deleted : OK_TEXT.plan_saved
+      )}${saved === 'plan_deleted' && note ? ` — ${escapeHtml(note)}` : saved === 'plan_deleted' ? '' : ` (${escapeHtml(saved)})`}</div>`
+    : '';
   const errorNotice = error ? `<div class="alert"><b>تعذّر الحفظ:</b> ${escapeHtml(error)}</div>` : '';
 
   // مودال إضافة باقة جديدة — يفتح برابط #add-plan بلا سكربتات (نفس أسلوب التعديل).
@@ -815,14 +791,24 @@ export function renderAdminPlans({ plans, totalSubscribers, saved = '', error = 
             <label for="new-tokens">النقاط</label>
             <input type="number" id="new-tokens" name="tokens" min="0" max="100000000" step="1" required value="1000" />
           </div>
+          <div class="field">
+            <label for="new-storage">مساحة التخزين (MB)</label>
+            <input type="number" id="new-storage" name="storage_mb" min="10" max="102400" step="10" required
+              value="${escapeHtml(String(PLAN_STORAGE_DEFAULT_MB))}" />
+          </div>
+        <div class="field">
+            <label for="new-role">دور الباقة (يحدد الخدمات)</label>
+            <select id="new-role" name="role_code">${roleOptions('')}</select>
+          </div>
         </div>
         <div class="field">
           <label for="new-tagline">الوصف المختصر</label>
           <input type="text" id="new-tagline" name="tagline" maxlength="160" />
         </div>
         <div class="field">
-          <label for="new-features">المزايا (ميزة واحدة في كل سطر)</label>
-          <textarea id="new-features" name="features" rows="5" maxlength="4000"></textarea>
+          <label for="new-features">أسطر إضافية تُعرض مع المزايا (سطر لكل ميزة — اختياري)</label>
+          <textarea id="new-features" name="features" rows="4" maxlength="4000"></textarea>
+          <p class="form-hint">المزايا الأساسية تُولَّد من صلاحيات دور الباقة المختار أدناه — لا تكتبها يدوياً.</p>
         </div>
         <label class="check"><input type="checkbox" name="popular" value="1" /> باقة مميّزة (شريط «الأكثر طلباً»)</label>
         <label class="check"><input type="checkbox" name="is_active" value="1" checked /> مفعّلة (تظهر في صفحة الهبوط)</label>
@@ -843,7 +829,7 @@ export function renderAdminPlans({ plans, totalSubscribers, saved = '', error = 
       <a class="btn btn-primary" href="#add-plan">إضافة باقة</a>
     </div>
     ${renderTable({
-      columns: ['الكود', 'الاسم', 'السعر', 'النقاط', 'الحالة', 'المشتركون', 'تحرير'],
+      columns: ['الكود', 'الاسم', 'السعر', 'النقاط', 'مساحة التخزين', 'الدور', 'الحالة', 'المشتركون', 'إجراءات'],
       rows,
       emptyMessage: 'لا توجد باقات بعد — شغّل npm run db:seed لإضافة الباقات الافتراضية.'
     })}
@@ -877,10 +863,14 @@ function humanBytes(bytes) {
 export function renderAdminSettings({
   limits,
   usage = {},
+  supervisors = [],
+  supervisorPermissions = [],
+  supportWhatsapp = '',
+  currency = 'LYD',
+  methods = [],
   saved = false,
   error = '',
   adminToken = '',
-  system = null,
   account = null
 }) {
   const token = adminToken ? `?token=${encodeURIComponent(adminToken)}` : '';
@@ -895,6 +885,183 @@ export function renderAdminSettings({
 
   const notice = saved ? '<div class="notice">حُفظت حدود التخزين — تسري على كل الباحثين فوراً.</div>' : '';
   const errorNotice = error ? `<div class="alert"><b>تعذّر الحفظ:</b> ${escapeHtml(error)}</div>` : '';
+
+  // قسم المشرفين: جدول supervisors + إضافة بريد (حساب بريد جوجل)
+  const supervisorRows = supervisors.length
+    ? supervisors
+        .map(
+          (row) => `<tr>
+    <td><p class="strong">${escapeHtml(row.full_name || row.email)}</p><p class="muted">${escapeHtml(row.email)}</p></td>
+    <td>${row.is_active === false ? '<span class="badge badge-off">لم يسجّل الدخول</span>' : '<span class="badge badge-active">نشط</span>'}</td>
+    <td>${escapeHtml(row.plan_code || '—')}</td>
+    <td class="row-actions">
+      <form method="post" action="/admin/settings/supervisors/delete${token}"
+        data-confirm="إزالة ${escapeHtml(row.email)} من المشرفين؟ سيعود دوره إلى دور باقته.">
+        <input type="hidden" name="email" value="${escapeHtml(row.email)}" />
+        <button class="btn btn-sm btn-danger" type="submit">إزالة</button>
+      </form>
+    </td>
+  </tr>`
+        )
+        .join('')
+    : '<tr><td colspan="4" class="muted">لا مشرفين بعد — أضف بريد مشرف من النموذج بالأسفل.</td></tr>';
+
+  // طرق الدفع + عملة الموقع: يحددها المدير، وتظهر للباحث في صفحة الاشتراك.
+  const currencyOptions = SITE_CURRENCIES.map(
+    (item) =>
+      `<option value="${escapeHtml(item.code)}"${item.code === currency ? ' selected' : ''}>${escapeHtml(item.label)} (${escapeHtml(item.symbol)})</option>`
+  ).join('');
+
+  const methodRows = methods.length
+    ? methods
+        .map(
+          (method) => `<tr>
+      <td><p class="strong">${escapeHtml(method.label)}</p><p class="muted">${escapeHtml(method.code)}</p></td>
+      <td>${escapeHtml(formatMoney(0, method.currency).split(' ')[1] || method.currency)}</td>
+      <td>${escapeHtml(method.note || '—')}${method.details ? `<p class="muted">${escapeHtml(method.details)}</p>` : ''}</td>
+      <td>${method.isActive ? '<span class="badge badge-active">مفعّلة</span>' : '<span class="badge badge-off">معطّلة</span>'}</td>
+      <td class="row-actions">
+        <form method="post" action="/admin/settings/payment-methods/delete${token}">
+          <input type="hidden" name="code" value="${escapeHtml(method.code)}" />
+          <button class="btn btn-sm btn-danger" type="submit" data-confirm="حذف طريقة «${escapeHtml(
+            method.label
+          )}»؟ إن لها طلبات سابقة فستُعطَّل بدل حذفها.">حذف</button>
+        </form>
+      </td>
+    </tr>`
+        )
+        .join('')
+    : '<tr><td colspan="5" class="muted">لا طرق دفع بعد — أضف الأولى من النموذج بالأسفل.</td></tr>';
+
+  const paymentsSection = `<div class="card mt-16">
+    <div class="card-head"><h2>الدفع وطرق التحويل</h2></div>
+    <p class="muted">
+      الدفع <b>يدوي خارج المنصة</b>: يحوّل الباحث المبلغ ثم يرسل رقم العملية، والإدارة تؤكّد الطلب من صفحة
+      <a href="/admin/payments">طلبات الدفع</a> فتُفعَّل باقته وتُضاف نقاطه.
+    </p>
+
+    <form method="post" action="/admin/settings/currency${token}" class="toolbar">
+      <div class="field">
+        <label for="site-currency">عملة الموقع (تظهر في كل الأسعار)</label>
+        <select id="site-currency" name="currency">${currencyOptions}</select>
+      </div>
+      <button class="btn btn-primary" type="submit">حفظ العملة</button>
+    </form>
+
+    <table class="ref-table mt-16">
+      <thead><tr><th>الطريقة</th><th>العملة</th><th>التفاصيل</th><th>الحالة</th><th>إجراء</th></tr></thead>
+      <tbody>${methodRows}</tbody>
+    </table>
+
+    <form method="post" action="/admin/settings/payment-methods${token}" class="form-card mt-16">
+      <div class="field-row">
+        <div class="field">
+          <label for="pm-code">الكود (إنجليزي صغير)</label>
+          <input type="text" id="pm-code" name="code" maxlength="50" required placeholder="bank_transfer" />
+        </div>
+        <div class="field">
+          <label for="pm-label">اسم الطريقة</label>
+          <input type="text" id="pm-label" name="label" maxlength="120" required placeholder="تحويل بنكي" />
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="pm-currency">العملة</label>
+          <select id="pm-currency" name="currency">${currencyOptions}</select>
+        </div>
+        <div class="field">
+          <label for="pm-order">الترتيب</label>
+          <input type="number" id="pm-order" name="display_order" min="0" max="999" value="0" />
+        </div>
+      </div>
+      <div class="field">
+        <label for="pm-note">وصف مختصر</label>
+        <input type="text" id="pm-note" name="note" maxlength="255" placeholder="حوّل المبلغ ثم أرسل رقم العملية." />
+      </div>
+      <div class="field">
+        <label for="pm-details">تفاصيل التحويل (تظهر للباحث)</label>
+        <textarea id="pm-details" name="details" rows="3" maxlength="2000" placeholder="مثال: مصرف الجمهورية — الحساب 1234567 — IBAN: LY00 ..."></textarea>
+      </div>
+      <label class="check"><input type="checkbox" name="is_active" value="1" checked /> مفعّلة (تظهر للباحثين)</label>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">حفظ طريقة الدفع</button>
+        <span class="muted">نفس الكود يحدّث الطريقة بدل إنشاء نسختين.</span>
+      </div>
+    </form>
+  </div>`;
+
+  
+/** قسم المشرفين: جدول supervisors + إضافة بريد (حساب بريد جوجل). */
+
+/**
+ * الدعم الفني على واتساب: المدير يضبط الرقم من هنا (لا يمسّ الكود)، ويرى
+ * رابط المعاينة مباشرةً قبل الحفظ ليتأكد أنه يفتح على محادثة صحيحة.
+ */
+function supportSection(supportWhatsapp, token) {
+  const current = String(supportWhatsapp || '').trim();
+  const preview = whatsappLink();
+
+  return `<div class="card mt-16">
+    <div class="card-head">
+      <h2>الدعم الفني (واتساب)</h2>
+      <div class="links">
+        ${
+          current
+            ? '<span class="badge badge-active">الزر ظاهر في صفحات الباحث</span>'
+            : '<span class="badge badge-off">الزر مخفي الآن</span>'
+        }
+      </div>
+    </div>
+    <p class="muted">الرقم الذي يضغط عليه الباحث عند أي مشكلة أو شكوى — يظهر كزر عائم أسفل الشاشة
+      في صفحات الزائر والباحث (ولا يظهر في لوحة الإدارة).</p>
+    <form method="post" action="/admin/settings/support-whatsapp${token}" class="form-card">
+      <div class="field">
+        <label for="wa-number">رقم واتساب الاستقبال</label>
+        <input type="text" id="wa-number" name="whatsapp" inputmode="tel" maxlength="24"
+          value="${escapeHtml(current)}" placeholder="09xxxxxxxx أو +2189xxxxxxxx" />
+        <p class="form-hint">أرقام فقط (8 إلى 15 رقماً). تُضاف رمز الدولة 218 تلقائياً إذا كتبته محلياً.
+          اتركه فارغاً لإخفاء الزر عن الباحثين.</p>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">حفظ الرقم</button>
+        ${
+          preview
+            ? `<a class="btn" href="${escapeHtml(preview)}" target="_blank" rel="noopener">معاينة الرابط ↗</a>
+               <span class="muted">${escapeHtml(current)}</span>`
+            : '<span class="muted">لا رابط بعد — أدخل رقماً صالحاً.</span>'
+        }
+      </div>
+    </form>
+  </div>`;
+}
+
+const supervisorsSection = `<div class="card mt-16">
+    <div class="card-head">
+      <h2>المشرفون (${escapeHtml(formatNumber(supervisors.length))})</h2>
+    </div>
+    <table class="ref-table">
+      <thead><tr><th>المشرف</th><th>الحالة</th><th>الباقة</th><th>إجراء</th></tr></thead>
+      <tbody>${supervisorRows}</tbody>
+    </table>
+    ${permissionsEditor({
+      permissions: supervisorPermissions,
+      addAction: `/admin/settings/supervisors/permissions${token}`,
+      deleteAction: `/admin/settings/supervisors/permissions/delete${token}`,
+      ownerLabel: 'دور المشرف',
+      label: 'ما يستطيعه المشرف في المنصة:',
+      emptyText: 'لا صلاحيات للمشرف بعد.'
+    })}
+    <form method="post" action="/admin/settings/supervisors/add${token}" class="form-card mt-16">
+      <div class="field">
+        <label for="sup-email">إضافة مشرف (بريد حساب جوجل)</label>
+        <input type="email" id="sup-email" name="email" maxlength="255" required placeholder="supervisor@university.edu" />
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">إضافة مشرف</button>
+        <span class="muted">يُطبَّق فوراً — دوره مشرف في طلبه القادم.</span>
+      </div>
+    </form>
+  </div>`;
 
   const body = `
   <div class="grid">${stats}</div>
@@ -914,10 +1081,10 @@ export function renderAdminSettings({
           <p class="form-hint">مثال: 100 يعني 100 ميجابايت كحد أقصى للملف.</p>
         </div>
         <div class="field">
-          <label for="max_storage_mb">المساحة الكلية لكل باحث (MB)</label>
+          <label for="max_storage_mb">الحصة العامة (fallback) لكل باحث (MB)</label>
           <input type="number" id="max_storage_mb" name="max_storage_mb" min="10" max="102400" step="10" required
             value="${escapeHtml(String(limits.maxStorageMb))}" />
-          <p class="form-hint">مثال: 500 يعني 500 ميجابايت إجمالاً. (1024 = 1 جيجابايت)</p>
+          <p class="form-hint">تُستعمل فقط إن لم تكن للباقة حصة محدّدة. حصة كل باقة تُضبط من صفحة «الباقات» (storage_mb).</p>
         </div>
       </div>
       <div class="form-actions">
@@ -926,25 +1093,6 @@ export function renderAdminSettings({
       </div>
       </form>
     </div>
-    <div class="card">
-      <div class="card-head">
-        <h2>حالة النظام</h2>
-        <a class="btn btn-sm" href="#system-help">ماذا تعني؟</a>
-      </div>
-      <p class="muted">كل ما يلي يُقرأ لحظياً من الخادم وقاعدة البيانات — يتحدث بعد كل تحديث للصفحة.</p>
-      <div class="grid">
-      ${statRaw('قاعدة البيانات', system?.database || '—')}
-      ${statRaw('Node.js', system?.node || '—')}
-      ${statRaw('مدة تشغيل الخادم', system?.uptime || '—')}
-      ${statRaw('رمز ADMIN_TOKEN', system?.adminToken || '—')}
-      ${statRaw('المزوّدون المعدّون', system?.providers || '—')}
-      ${statRaw('باحثون', system?.users ?? '—')}
-      ${statRaw('باقات', system?.plans ?? '—')}
-      ${statRaw('عمليات استهلاك', system?.usage_events ?? '—')}
-      ${statRaw('إشعارات', system?.notifications ?? '—')}
-      ${statRaw('إعدادات محفوظة', system?.settings_rows ?? '—')}
-      </div>
-    </div>
   </div>
   <div class="modal" id="limits-help">
     <div class="card">
@@ -952,25 +1100,17 @@ export function renderAdminSettings({
       <ul class="muted">
         <li><b>حجم الملف الواحد</b> — أقصى حجم لملف يرفعه الباحث (بين 1 و2048 MB).</li>
         <li><b>المساحة الكلية</b> — مجموع ما يرفعه باحث واحد؛ لو ملأها لا يستطيع الرفع حتى يحذف ملفاً، ويجب ألا تقل عن حجم الملف الواحد.</li>
-        <li>كل تعديل يُحفظ في جدول settings ويسري فوراً على كل الحسابات بلا إعادة تشغيل.</li>
+        <li>كل تعديل يُحفظ فوراً ويسري على كل الحسابات بلا إعادة تشغيل.</li>
       </ul>
     </div>
   </div>
-  <div class="modal" id="system-help">
-    <div class="card">
-      <div class="card-head"><h2>حالة النظام</h2><a class="btn btn-sm" href="#" title="إغلاق">إغلاق ✕</a></div>
-      <ul class="muted">
-        <li><b>قاعدة البيانات و Node.js ومدة التشغيل</b> — قراءة لحظية من الخادم وقاعدة البيانات.</li>
-        <li><b>رمز ADMIN_TOKEN</b> — هل اللوحة محمية برمز يصل من أي جهاز، أم متاحة محلياً فقط.</li>
-        <li><b>المزوّدون المعدّون</b> — كم مزوّداً لديه مفتاح واحد على الأقل (من .env أو روابط اللوحة).</li>
-        <li><b>باحثون وباقات وإشعارات وإعدادات محفوظة</b> — عدّادات أسطر في الجداول، تتحدث مع كل تحديث.</li>
-      </ul>
-    </div>
-  </div>`;
+  ${paymentsSection}
+  ${supportSection(supportWhatsapp, token)}
+  ${supervisorsSection}`;
 
   return renderLayout({
     title: 'الإعدادات',
-    subtitle: 'حدود التخزين + حالة النظام لحظة بلحظة من قاعدة البيانات',
+    subtitle: 'حدود التخزين + طرق الدفع + المشرفون',
     activeKey: 'settings',
     account,
     scripts: ['/js/app-shell.js'],
@@ -1081,7 +1221,7 @@ export function renderAdminUserDetail({
               )
               .join('')}
           </select>
-          <p class="form-hint">الباقات المعروضة هي الباقات المفعّلة في جدول plans.</p>
+          <p class="form-hint">الباقات المعروضة هنا هي الباقات المفعّلة حالياً.</p>
         </div>
         <div class="form-actions">
           <button class="btn" type="submit">تغيير الباقة</button>
@@ -1090,8 +1230,12 @@ export function renderAdminUserDetail({
     </div>
     <div class="row-actions mt-16">
       ${
-        isSelf
-          ? ''
+        isSelf || user.role === 'admin'
+          ? `<p class="muted">${
+              user.role === 'admin'
+                ? 'حساب المدير محمي: لا يمكن إيقافه أو حذفه — يغيّر بريده فقط من الإعدادات.'
+                : 'هذا حسابك أنت — الإيقاف والحذف معطّلان لحمايتك من قفل اللوحة على نفسك.'
+            }</p>`
           : `<form class="inline-form" method="post" action="${base}/status${token}">
         <input type="hidden" name="active" value="${user.is_active ? '0' : '1'}" />
         <button class="btn ${user.is_active ? 'btn-danger' : 'btn-quiet'}" type="submit">${user.is_active ? 'إيقاف الحساب' : 'تفعيل الحساب'}</button>
@@ -1143,7 +1287,7 @@ export function renderAdminUserDetail({
     : `
   <div class="card mt-16">
     <h2>منطقة الخطر</h2>
-    <p class="muted">الحذف يزيل الحساب من قاعدة البيانات نهائياً مع كل ما يخصه: ملفات ومحادثات وملاحظات ومراجع وإشعارات ورصيد. لا يمكن التراجع.</p>
+    <p class="muted">الحذف يزيل الحساب نهائياً مع كل ما يخصه: ملفات ومحادثات وملاحظات ومراجع وإشعارات ورصيد. لا يمكن التراجع.</p>
     <form method="post" action="${base}/delete${token}">
       <button class="btn btn-danger" type="submit">حذف الحساب نهائياً</button>
     </form>
@@ -1171,191 +1315,495 @@ export function renderAdminUserDetail({
   });
 }
 
-/** إدارة قائمة المديرين: جدول admins في القاعدة + إيميلات .env الثابتة. */
-export function renderAdminAdmins({
-  dbAdmins = [],
-  saved = '',
+/**
+ * محرّر صلاحيات قابل لإعادة الاستعمال — يظهر في مكانين لأن المعنى واحد:
+ *   • داخل كرت **الباقة**: ما تفتحه الباقة لمشتركيها.
+ *   • داخل قسم **المشرفين** في الإعدادات: ما يستطيعه المشرف.
+ * لا صفحة «أدوار» منفصلة: الدور يتبع صاحبه (باقة أو مشرف) فيرى المدير كل شيء حيث يعمل.
+ */
+function permissionsEditor({
+  permissions = [],
+  choices = PERMISSION_CHOICES,
+  addAction,
+  deleteAction,
+  ownerLabel = '',
+  label = 'ما تفتحه هذه الباقة لمشتركيها:',
+  emptyText = 'لا صلاحيات بعد.'
+}) {
+  const owned = new Set(permissions);
+  const chips = permissions.length
+    ? permissions
+        .map(
+          (perm) => `<span class="chip" title="${escapeHtml(perm)}">${escapeHtml(permissionLabel(perm))}
+      <form method="post" action="${deleteAction}" data-confirm="حذف صلاحية «${escapeHtml(
+            permissionLabel(perm)
+          )}»${ownerLabel ? ` من ${escapeHtml(ownerLabel)}` : ''}؟">
+        <input type="hidden" name="permission" value="${escapeHtml(perm)}" />
+        <button class="chip-x" type="submit" aria-label="حذف">✕</button>
+      </form></span>`
+        )
+        .join('\n    ')
+    : `<p class="muted">${escapeHtml(emptyText)}</p>`;
+
+  const options = choices
+    .filter((code) => !owned.has(code))
+    .map((code) => `<option value="${escapeHtml(code)}">${escapeHtml(permissionLabel(code))}</option>`)
+    .join('');
+
+  return `<div class="permissions-editor">
+  <p class="form-hint"><b>${escapeHtml(label)}</b></p>
+  <div class="chips">${chips}</div>
+  ${options ? `<form class="toolbar mt-12" method="post" action="${addAction}">
+    <select name="permission" required title="اختر صلاحية لتفتحها">
+      <option value="" disabled selected>اختر صلاحية...</option>
+      ${options}
+    </select>
+    <button class="btn btn-primary" type="submit">فتح الصلاحية</button>
+  </form>` : '<p class="muted mt-12">كل الصلاحيات متاحة لهذه الباقة.</p>'}
+</div>`;
+}
+
+
+/** اسم مصدر الاستيراد للعرض. */
+function librarySourceName(code) {
+  return { upload: 'رفع مباشر', openlibrary: 'Open Library', doaj: 'DOAJ', zenodo: 'Zenodo' }[code] || code || 'upload';
+}
+
+/**
+ * بطاقة عنصر في مكتبة المنصة: العنوان والشارات + التوثيق + البيانات + الإجراءات.
+ * الأزرار كلها نماذج POST عادية أو روابط (بلا سكربتات)، والتعديل يفتح مودال #edit-{id}.
+ */
+function libraryItemRow(item, token) {
+  const id = escapeHtml(item.id);
+  const meta = [
+    item.authors || 'بلا مؤلف محدد',
+    item.year ? String(item.year) : '',
+    item.field || ''
+  ].filter(Boolean);
+
+  return `<article class="lib-item lib-card">
+  <div class="lib-card-head">
+    <h3>${escapeHtml(item.title)}</h3>
+    <div class="lib-badges">
+      ${librarySourceBadge(item.sourceSystem)}
+      ${item.hasFile ? `<span class="badge badge-active">ملف ${escapeHtml(humanBytes(item.sizeBytes))}</span>` : '<span class="badge">بيانات فقط</span>'}
+      ${item.isActive ? '' : '<span class="badge badge-off">معطّل</span>'}
+    </div>
+  </div>
+  <p class="lib-citation">${escapeHtml(item.citation || '—')}</p>
+  <p class="lib-meta">${meta.map((part) => `<span>${escapeHtml(part)}</span>`).join('<span>·</span>')}</p>
+  ${item.subjects ? `<div class="chips">${librarySubjectChips(item.subjects)}</div>` : ''}
+  <div class="lib-actions">
+    ${
+      item.hasFile
+        ? `<a class="btn btn-sm" href="/admin/library/${id}/file${token}">${icon('download', 'icon-sm')} تحميل الملف</a>`
+        : ''
+    }
+    ${
+      item.externalUrl
+        ? `<a class="btn btn-sm" href="${escapeHtml(item.externalUrl)}" target="_blank" rel="noopener">فتح المصدر ↗</a>`
+        : ''
+    }
+    <a class="btn btn-sm" href="#edit-${id}">${icon('edit', 'icon-sm')} تعديل</a>
+    <form class="inline-form" method="post" action="/admin/library/${id}/toggle${token}">
+      <input type="hidden" name="active" value="${item.isActive ? '0' : '1'}" />
+      <button class="btn btn-sm ${item.isActive ? 'btn-danger' : 'btn-quiet'}" type="submit">${
+        item.isActive ? 'تعطيل' : 'تفعيل'
+      }</button>
+    </form>
+    <form class="inline-form" method="post" action="/admin/library/${id}/delete${token}"
+      data-confirm="حذف «${escapeHtml(item.title || 'هذا العنصر')}» من المكتبة نهائياً مع ملفه من القرص؟">
+      <button class="btn btn-sm btn-danger" type="submit">${icon('trash', 'icon-sm')} حذف</button>
+    </form>
+  </div>
+</article>`;
+}
+
+/** شارة مصدر الاستيراد. */
+function librarySourceBadge(code) {
+  const label = librarySourceName(code);
+  return code && code !== 'upload'
+    ? `<span class="badge badge-plan">${escapeHtml(label)}</span>`
+    : `<span class="badge">${escapeHtml(label)}</span>`;
+}
+
+/** ترويسة الصفحة: العنوان والوصف وأزرار الإجراءات. */
+function libraryHero() {
+  return `<div class="card lib-hero">
+    <div class="lib-hero-top">
+      <div>
+        <h2>المكتبة العلمية المركزية</h2>
+        <p>ارفع كتبك بالتوثيق التلقائي، أو جلب كتباً وأبحاثاً مجانية من المواقع المفتوحة ليقرأها كل الباحثين من رابط واحد.</p>
+      </div>
+      <div class="lib-hero-actions">
+        <a class="btn btn-primary" href="#add-item">＋ إضافة كتاب</a>
+        <a class="btn" href="#fetch-panel">جلب من مصادر مجانية</a>
+      </div>
+    </div>
+  </div>`;
+}
+
+/** بطاقة مصدر قابل للاختيار (بديل القائمة المنسدلة — يعمل بلا سكربتات عبر :checked). */
+function librarySourcePicker(sources, current) {
+  return `<div class="source-picker" role="radiogroup" aria-label="مصدر الجلب">
+    ${sources
+      .map(
+        (item) => `<label class="source-option">
+      <input type="radio" name="esrc" value="${escapeHtml(item.id)}"${item.id === current ? ' checked' : ''} />
+      <span class="source-option-body">
+        <span class="source-name"><span class="source-dot"></span>${escapeHtml(item.label)}</span>
+        ${item.hint ? `<span class="source-hint">${escapeHtml(item.hint)}</span>` : ''}
+      </span>
+    </label>`
+      )
+      .join('')}
+  </div>`;
+}
+
+/** لوحة الجلب الجانبية: اختيار المصدر ثم كلمة البحث أو التصنيف. */
+function libraryFetchPanel({ sources, search, q, status, adminToken, token }) {
+  return `<section class="card lib-panel" id="fetch-panel">
+    <div class="lib-section-head"><h2>جلب من مواقع مجانية</h2></div>
+    <p class="lib-hint">اختر المصدر ثم اكتب كلمة بحث أو تصنيفاً — والنتيجة تظهر أسفل الصفحة.</p>
+    <form class="lib-form" method="get" action="/admin/library">
+      ${adminToken ? `<input type="hidden" name="token" value="${escapeHtml(adminToken)}" />` : ''}
+      <input type="hidden" name="q" value="${escapeHtml(q)}" />
+      <input type="hidden" name="status" value="${escapeHtml(status)}" />
+      <div class="lib-fields">
+        <div class="lib-field-full">
+          <span class="field-label">المصدر</span>
+          ${librarySourcePicker(sources, search.source)}
+        </div>
+        <div class="field lib-field-full">
+          <label for="lib-eq">كلمة البحث (عنوان/مؤلف)</label>
+          <input type="search" id="lib-eq" name="eq" value="${escapeHtml(search.q || '')}" placeholder="مثال: machine learning" />
+        </div>
+        <div class="field lib-field-full">
+          <label for="lib-subject">التصنيف (اختياري)</label>
+          <input type="search" id="lib-subject" name="subject" value="${escapeHtml(search.subject || '')}" placeholder="مثال: psychology" />
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">${icon('searchCheck', 'icon-sm')} ابدأ الجلب</button>
+      </div>
+    </form>
+    <p class="lib-hint-box">
+      <b>كيف يعمل؟</b> الجلب بلا مفاتيح من: Crossref (بيانات الاستشهاد الكاملة) · OpenAlex (يفهرس IEEE وACM
+      والSpringer) · IEEE Xplore · ACM Digital Library (عبر بادئات DOI الرسمية) · Semantic Scholar · arXiv ·
+      Europe PMC · Open Library (كتب + Internet Archive) · DOAJ · Zenodo.
+      عند الاستيراد يحاول الموقع تنزيل الملف تلقائياً (أو يجد نسخة مفتوحة عبر Unpaywall)، وإن لم يتوفّر يُضاف
+      العنصر ببياناته كاملة: المؤلفون · المجلة · السنة · DOI · رابط المصدر.
+    </p>
+  </section>`;
+}
+
+/** قسم نتائج الجلب الخارجي (يظهر فقط بعد تشغيل البحث). */
+function libraryExternalSection(external, sources, token) {
+  if (!external) return '';
+  const label = sources.find((item) => item.id === external.source)?.label || 'المصدر الخارجي';
+  const count = external.results?.length || 0;
+
+  const content = external.error
+    ? `<div class="alert">${escapeHtml(external.error)}</div>`
+    : count
+      ? `<div class="lib-list">${external.results.map((result) => libraryExternalResult(result, external.source, token)).join('')}</div>`
+      : '<div class="empty">لا نتائج — جرّب كلمة أخرى أو تصنيفاً مختلفاً.</div>';
+
+  return `<section class="card">
+    <div class="lib-section-head">
+      <h2>نتائج الجلب من ${escapeHtml(label)}</h2>
+      <span class="lib-section-note">${count ? `${formatNumber(count)} نتيجة — ضغطة واحدة تستورد العنصر وملفه` : ''}</span>
+    </div>
+    ${content}
+  </section>`;
+}
+
+/** صفحة المكتبة العلمية: تخطيط بطل + عمودان (قائمة العناصر ولوحة الجلب) + نتائج الجلب. */
+export function renderAdminLibrary({
+  items = [],
+  total = 0,
+  pages = 1,
+  page = 1,
+  counts = {},
+  q = '',
+  status = 'all',
+  external = null,
+  sources = [],
+  search = {},
+  ok = '',
+  note = '',
   error = '',
   adminToken = '',
   account = null
 }) {
   const token = adminToken ? `?token=${encodeURIComponent(adminToken)}` : '';
-  const notice = saved && OK_TEXT[saved] ? `<div class="notice">${escapeHtml(OK_TEXT[saved])}</div>` : '';
-  const errorNotice = error ? `<div class="alert"><b>تعذّر:</b> ${escapeHtml(error)}</div>` : '';
+  const notice = OK_TEXT[ok] ? `<div class="notice">${escapeHtml(OK_TEXT[ok])}${note ? ` — ${escapeHtml(note)}` : ''}</div>` : '';
+  const errorNotice = error ? `<div class="alert">${escapeHtml(error)}</div>` : '';
+  const acceptTypes = LIBRARY_EXTENSIONS.map((ext) => `.${ext}`).join(',');
 
-  const rows = dbAdmins.map((row, index) => {
-    const email = String(row.email || '').toLowerCase();
-    const isSelf = account && String(account.email || '').trim().toLowerCase() === email;
-    return `
-    <td class="strong">${escapeHtml(row.email)}</td>
-    <td>${escapeHtml(row.added_by || '—')}</td>
-    <td>${escapeHtml(formatDate(row.created_at))}</td>
-    <td class="row-actions">
-      <a class="btn btn-sm" href="#edit-admin-${index}">تعديل</a>
-      ${
-        isSelf
-          ? '<span class="muted">حسابك الحالي</span>'
-          : `<form class="inline-form" method="post" action="/admin/admins/delete${token}"
-            data-confirm="إزالة ${escapeHtml(row.email)} من المديرين؟ سيفقد صلاحية اللوحة في طلبه القادم.">
-            <input type="hidden" name="email" value="${escapeHtml(row.email)}" />
-            <button class="btn btn-sm btn-danger" type="submit">إزالة</button>
-          </form>`
-      }
-    </td>`;
-  });
+  const stats = [
+    statRaw('إجمالي المكتبة', formatNumber(counts.total ?? total)),
+    statRaw('بملف كامل', formatNumber(counts.withFile ?? 0)),
+    statRaw('بيانات فقط', formatNumber(Math.max((counts.total ?? total) - (counts.withFile ?? 0), 0))),
+    statRaw('معطّلة', formatNumber(counts.inactive ?? 0))
+  ].join('');
 
-  // مودال تعديل بريد لكل مدير — يفتح برابط #edit-admin-N بلا سكربتات
-  const editModals = dbAdmins
-    .map(
-      (row, index) => `
-  <div class="modal" id="edit-admin-${index}">
-    <div class="card">
-      <div class="card-head">
-        <h2>تعديل بريد مدير</h2>
-        <a class="btn btn-sm" href="#" title="إغلاق">إغلاق ✕</a>
-      </div>
-      <form method="post" action="/admin/admins/edit${token}">
-        <input type="hidden" name="email" value="${escapeHtml(row.email)}" />
-        <div class="field">
-          <label for="edit-admin-email-${index}">البريد الإلكتروني الجديد</label>
-          <input type="email" id="edit-admin-email-${index}" name="new_email" maxlength="255" required
-            value="${escapeHtml(row.email)}" />
-          <p class="form-hint">يجب أن يكون نفس البريد المستخدم في تسجيل الدخول بجوجل.</p>
-        </div>
-        <div class="form-actions">
-          <button class="btn btn-primary" type="submit">حفظ البريد</button>
-          <a class="btn btn-quiet" href="#">إلغاء</a>
-        </div>
-      </form>
-    </div>
-  </div>`
-    )
-    .join('');
-
-  const body = `
-  ${notice}${errorNotice}
-  <div class="card">
-    <h2>من يدخل اللوحة؟</h2>
-    <p class="muted">
-      مصدر واحد فقط: جدول <b>admins</b> في قاعدة البيانات. أي حساب جوجل يحمل أحد هذه
-      البريدات يصبح «مدير المنصة» فوراً في طلبه القادم. الإضافة والتعديل والإزالة كلها
-      من هذه الصفحة — يسري التغيير بعد الطلب التالي للمدير دون أي إعداد آخر.
-    </p>
-  </div>
-  <div class="card mt-16">
-    <div class="card-head">
-      <h2>المديرون (${escapeHtml(formatNumber(dbAdmins.length))})</h2>
-      <a class="btn btn-primary" href="#add-admin">إضافة مدير</a>
-    </div>
-    ${renderTable({
-      columns: ['الإيميل', 'أُضيف بواسطة', 'التاريخ', 'إجراء'],
-      rows,
-      emptyMessage: 'لا يوجد مديرون في الجدول بعد — أضِف أول إيميل من النموذج أدناه.'
-    })}
-  </div>
-  <div class="card mt-16" id="add-admin">
-    <div class="card-head">
-      <h2>إضافة مدير جديد</h2>
-    </div>
-    <form method="post" action="/admin/admins/add${token}">
-      <div class="field">
-        <label for="admin-email">بريد جوجل للمدير</label>
-        <input type="email" id="admin-email" name="email" maxlength="255" required placeholder="someone@example.com" />
-        <p class="form-hint">يجب أن يكون نفس البريد المستخدم في تسجيل الدخول بجوجل.</p>
-      </div>
-      <div class="form-actions">
-        <button class="btn btn-primary" type="submit">إضافة المدير</button>
-      </div>
-    </form>
-  </div>
-  ${editModals}`;
-
-  return renderLayout({
-    title: 'المديرون',
-    subtitle: 'من يملك صلاحية لوحة الإدارة — من جدول admins في القاعدة مباشرة',
-    activeKey: 'admins',
-    account,
-    scripts: ['/js/app-shell.js'],
-    body
-  });
-}
-
-/** الأدوار والصلاحيات: تُقرأ وتُعدَّل من جدولي roles وrole_permissions مباشرة. */
-export function renderAdminRoles({ roles = [], saved = '', error = '', adminToken = '', account = null }) {
-  const token = adminToken ? `?token=${encodeURIComponent(adminToken)}` : '';
-  const notice = saved ? `<div class="notice">${escapeHtml(saved)}</div>` : '';
-  const errorNotice = error ? `<div class="alert"><b>تعذّر:</b> ${escapeHtml(error)}</div>` : '';
-
-  const cards = roles
-    // دور المدير غير معروض هنا: صلاحيته «*» محمية في المسارات وتُدار من صفحة المديرين
-    .filter((role) => role.code !== 'admin')
-    .map((role) => {
-      const permissions = role.permissions || [];
-      const chips = permissions.length
-        ? permissions
-            .map(
-              (perm) => `<span class="chip" title="${escapeHtml(perm)}">${escapeHtml(permissionLabel(perm))}
-        <form method="post" action="/admin/roles/${encodeURIComponent(role.code)}/permissions/delete${token}"
-          data-confirm="حذف صلاحية «${escapeHtml(permissionLabel(perm))}» من دور «${escapeHtml(role.title)}»؟">
-          <input type="hidden" name="permission" value="${escapeHtml(perm)}" />
-          <button type="submit" title="حذف الصلاحية" aria-label="حذف الصلاحية ${escapeHtml(perm)}">×</button>
-        </form>
-      </span>`
-            )
-            .join('')
-        : '<span class="muted">لا توجد صلاحيات لهذا الدور بعد.</span>';
-
-      // الإضافة من قائمة مسدلة بالصلاحيات المعروفة بأسمائها العربية — بلا كتابة كود يدوياً
-      const available = PERMISSION_CHOICES.filter((code) => !permissions.includes(code));
-      const options = available.length
-        ? available
-            .map(
-              (code) =>
-                `<option value="${escapeHtml(code)}">${escapeHtml(permissionLabel(code))} — ${escapeHtml(code)}</option>`
-            )
-            .join('')
-        : '<option value="">كل الصلاحيات المعروفة مضافة لهذا الدور</option>';
-
-      return `
-  <div class="card mt-16">
-    <div class="card-head">
-      <h2>${escapeHtml(role.title)} <span class="muted mono">(${escapeHtml(role.code)})</span></h2>
-      <span class="badge badge-plan">مستوى ${escapeHtml(String(role.level))} · ${escapeHtml(
-        formatNumber(role.members)
-      )} حساب بهذا الدور</span>
-    </div>
-    <div class="chips">${chips}</div>
-    <form class="toolbar mt-12" method="post" action="/admin/roles/${encodeURIComponent(role.code)}/permissions${token}">
-      <select name="permission" required title="اختر صلاحية لإضافتها إلى الدور">
-        <option value="" disabled selected>اختر صلاحية...</option>
-        ${options}
-      </select>
-      <button class="btn btn-primary" type="submit">إضافة صلاحية</button>
-    </form>
-  </div>`;
+  const filterLinks = ['all', 'active', 'off']
+    .map((value) => {
+      const label = { all: 'الكل', active: 'مفعّلة', off: 'معطّلة' }[value];
+      const href = `/admin/library${buildQuery({ q, status: value, page: 1, esrc: search.source, eq: search.q, subject: search.subject, token: adminToken })}`;
+      return `<a class="chip${status === value ? ' is-active' : ''}" href="${href}">${escapeHtml(label)}</a>`;
     })
     .join('');
 
+  const pager = pages > 1
+    ? `<div class="toolbar mt-12">
+      <span class="muted">صفحة ${escapeHtml(formatNumber(page))} من ${escapeHtml(formatNumber(pages))}</span>
+      ${page > 1 ? `<a class="btn btn-sm" href="/admin/library${buildQuery({ q, status, page: page - 1, esrc: search.source, eq: search.q, subject: search.subject, token: adminToken })}">السابق</a>` : ''}
+      ${page < pages ? `<a class="btn btn-sm" href="/admin/library${buildQuery({ q, status, page: page + 1, esrc: search.source, eq: search.q, subject: search.subject, token: adminToken })}">التالي</a>` : ''}
+    </div>`
+    : '';
+
+  const itemsHtml = items.length
+    ? `<div class="lib-list">${items.map((item) => libraryItemRow(item, token)).join('')}</div>${pager}${items.map((item) => libraryEditModal(item, token)).join('')}`
+    : `<div class="empty">${
+        q ? 'لا نتائج لهذا البحث داخل المكتبة — جرّب كلمة أخرى.' : 'لا عناصر بعد — ارفع كتاباً أو استورد من المصادر المجانية.'
+      }</div>`;
+
   const body = `
   ${notice}${errorNotice}
-  <div class="card">
-    <h2>كيف تعمل هذه الصفحة؟</h2>
-    <p class="muted">
-      كل ما تراه هنا يُقرأ ويُكتب مباشرةً في جدولي <b>roles</b> و<b>role_permissions</b> في قاعدة البيانات —
-      لا شيء مكتوب في الكود. كل صلاحية معروضة باسمها العربي، وكودها الأصلي يظهر عند التمرير فوقها،
-      ويمكن إضافتها من القائمة المنسدلة بأسمائها العربية. تُطبَّق الصلاحيات في طلبات الحسابات
-      المعنية التالية فور حفظها.
-    </p>
+  ${libraryHero()}
+
+  <div class="lib-layout">
+    <section class="card">
+      <div class="lib-section-head">
+        <h2>عناصر المكتبة${total ? ` (${formatNumber(total)})` : ''}</h2>
+        <form class="toolbar" method="get" action="/admin/library" role="search">
+          ${adminToken ? `<input type="hidden" name="token" value="${escapeHtml(adminToken)}" />` : ''}
+          <input type="hidden" name="status" value="${escapeHtml(status)}" />
+          <input type="hidden" name="esrc" value="${escapeHtml(search.source || '')}" />
+          <input type="hidden" name="eq" value="${escapeHtml(search.q || '')}" />
+          <input type="hidden" name="subject" value="${escapeHtml(search.subject || '')}" />
+          <div class="field">
+            <label for="lib-q">بحث داخل المكتبة</label>
+            <input type="search" id="lib-q" name="q" value="${escapeHtml(q)}" placeholder="عنوان، مؤلف، أو تخصص..." />
+          </div>
+          <button class="btn btn-primary" type="submit">${icon('searchCheck', 'icon-sm')} بحث</button>
+        </form>
+      </div>
+      <div class="lib-hero-filters">${filterLinks}</div>
+      <div class="lib-stats">${stats}</div>
+      ${itemsHtml}
+    </section>
+    ${libraryFetchPanel({ sources, search, q, status, adminToken, token })}
   </div>
-  ${cards}`;
+
+  ${libraryExternalSection(external, sources, token)}
+
+  ${libraryAddModal(token, acceptTypes)}`;
 
   return renderLayout({
-    title: 'الأدوار والصلاحيات',
-    subtitle: 'أدوار النظام وصلاحياتها من جدول roles — إضافة وحذف بلا لمس الكود',
-    activeKey: 'roles',
+    title: 'المكتبة العلمية',
+    subtitle: 'رفع الكتب بالتوثيق + جلب من مصادر مجانية وتخزينها في الموقع',
+    activeKey: 'library',
     account,
     scripts: ['/js/app-shell.js'],
     body
   });
 }
 
+/** رابط استعلام آمن من كائن قيم. */
+function buildQuery(values = {}) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(values || {})) {
+    if (value === undefined || value === null) continue;
+    const text = String(value).trim();
+    if (!text) continue;
+    params.set(key, key === 'token' ? text.slice(0, 200) : text.slice(0, 200));
+  }
+  const query = params.toString();
+  return query ? `?${query}` : '';
+}
+
+/** شرائح تصنيفات (chips) من نص مفصول بـ « · ». */
+function librarySubjectChips(subjects) {
+  const list = String(subjects || '')
+    .split('·')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+  return list.map((item) => `<span class="chip">${escapeHtml(item)}</span>`).join(' ');
+}
+
+/** مودال تعديل عنصر — يفتح برابط #edit-{id} بلا سكربتات. */
+function libraryEditModal(item, token) {
+  const id = escapeHtml(item.id);
+  return `
+  <div class="modal" id="edit-${id}">
+    <div class="card">
+      <div class="card-head">
+        <h2>تعديل عنصر المكتبة</h2>
+        <a class="btn btn-sm" href="#" title="إغلاق">إغلاق ✕</a>
+      </div>
+      <p class="muted">التوثيق يُعاد توليده تلقائياً إن تركت حقل التوثيق فارغاً.</p>
+      <form method="post" action="/admin/library/${id}/edit${token}">
+        <div class="field-row">
+          <div class="field">
+            <label for="e-title-${id}">العنوان *</label>
+            <input type="text" id="e-title-${id}" name="title" maxlength="500" required value="${escapeHtml(item.title)}" />
+          </div>
+          <div class="field">
+            <label for="e-authors-${id}">المؤلفون</label>
+            <input type="text" id="e-authors-${id}" name="authors" maxlength="1000" value="${escapeHtml(item.authors)}" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="e-year-${id}">سنة النشر</label>
+            <input type="number" id="e-year-${id}" name="year" min="1000" max="2999" value="${item.year ?? ''}" />
+          </div>
+          <div class="field">
+            <label for="e-source-${id}">الناشر / المصدر (للمراجع)</label>
+            <input type="text" id="e-source-${id}" name="source" maxlength="255" value="${escapeHtml(item.source)}" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="e-field-${id}">التخصص / التصنيف</label>
+            <input type="text" id="e-field-${id}" name="field" maxlength="255" value="${escapeHtml(item.field)}" />
+          </div>
+          <div class="field">
+            <label for="e-subjects-${id}">وسوم التصنيف (مفصولة بـ ·)</label>
+            <input type="text" id="e-subjects-${id}" name="subjects" maxlength="500" value="${escapeHtml(item.subjects)}" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="e-abstract-${id}">الملخص</label>
+          <textarea id="e-abstract-${id}" name="abstract" rows="3" maxlength="5000">${escapeHtml(item.abstract)}</textarea>
+        </div>
+        <div class="field">
+          <label for="e-citation-${id}">التوثيق (APA)</label>
+          <textarea id="e-citation-${id}" name="citation" rows="2" maxlength="2000">${escapeHtml(item.citation)}</textarea>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" type="submit">حفظ التعديلات</button>
+          <span class="muted">${item.hasFile ? `الملف الحالي: ${escapeHtml(item.fileName)} (${humanBytes(item.sizeBytes)})` : 'بلا ملف مرفوع.'}</span>
+        </div>
+      </form>
+    </div>
+  </div>`;
+}
+
+/** مودال إضافة كتاب جديد (ملف اختياري + بيانات + توثيق تلقائي). */
+function libraryAddModal(token, acceptTypes) {
+  return `
+  <div class="modal" id="add-item">
+    <div class="card">
+      <div class="card-head">
+        <h2>إضافة كتاب إلى المكتبة</h2>
+        <a class="btn btn-sm" href="#" title="إغلاق">إغلاق ✕</a>
+      </div>
+      <p class="muted">الملف يُحفظ في storage/library/references مرة واحدة ويقرأه كل الباحثين — التوثيق يُولَّد تلقائياً إن تركته فارغاً.</p>
+      <form method="post" action="/admin/library/add${token}" enctype="multipart/form-data">
+        <div class="field-row">
+          <div class="field">
+            <label for="add-title">العنوان *</label>
+            <input type="text" id="add-title" name="title" maxlength="500" required placeholder="مثال: أساسيات البحث العلمي" />
+          </div>
+          <div class="field">
+            <label for="add-authors">المؤلفون</label>
+            <input type="text" id="add-authors" name="authors" maxlength="1000" placeholder="أحمد محمد، سارة علي" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="add-year">سنة النشر</label>
+            <input type="number" id="add-year" name="year" min="1000" max="2999" placeholder="2024" />
+          </div>
+          <div class="field">
+            <label for="add-source">الناشر / المصدر (للمراجع)</label>
+            <input type="text" id="add-source" name="source" maxlength="255" placeholder="دار النشر، أو اسم المجلة" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="add-field">التخصص / التصنيف</label>
+            <input type="text" id="add-field" name="field" maxlength="255" placeholder="مثال: إدارة الأعمال" />
+          </div>
+          <div class="field">
+            <label for="add-degree">الدرجة المستهدفة</label>
+            <select id="add-degree" name="degree_level">
+              <option value="">لكل الدرجات</option>
+              <option value="bachelor">طالب جامعي (بكالوريوس)</option>
+              <option value="master">باحث ماجستير</option>
+              <option value="phd">باحث دكتوراه</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="add-subjects">وسوم التصنيف (مفصولة بـ ·)</label>
+          <input type="text" id="add-subjects" name="subjects" maxlength="500" placeholder="علم النفس · القياس · المناهج" />
+        </div>
+        <div class="field">
+          <label for="add-abstract">الملخص</label>
+          <textarea id="add-abstract" name="abstract" rows="3" maxlength="5000"></textarea>
+        </div>
+        <div class="field">
+          <label for="add-citation">التوثيق (APA) — اختياري</label>
+          <textarea id="add-citation" name="citation" rows="2" maxlength="2000" placeholder="اتركه فارغاً ليُولَّد من العنوان والمؤلف والسنة والمصدر."></textarea>
+        </div>
+        <div class="field">
+          <label for="add-file">ملف الكتاب (اختياري)</label>
+          <input type="file" id="add-file" name="file" accept="${escapeHtml(acceptTypes)}" />
+          <p class="form-hint">الصيغ المسموحة: ${escapeHtml(acceptTypes)} — حتى 200MB.</p>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" type="submit">إضافة إلى المكتبة</button>
+          <span class="muted">يظهر فوراً في نتائج البحث للباحثين.</span>
+        </div>
+      </form>
+    </div>
+  </div>`;
+}
+
+/** بطاقة نتيجة بحث خارجي مع زر الاستيراد (نموذج POST مخفي ببيانات النتيجة). */
+function libraryExternalResult(result, provider, token) {
+  const abstract = String(result.abstract || '');
+  const meta = [
+    result.authors || 'بلا مؤلف محدد',
+    result.year ? String(result.year) : '',
+    result.source || '',
+    result.doi ? `DOI: ${result.doi}` : '',
+    result.citations ? `${formatNumber(result.citations)} استشهاد` : ''
+  ].filter(Boolean);
+
+  return `<article class="lib-item lib-card">
+  <div class="lib-card-head">
+    <h3>${escapeHtml(result.title)}</h3>
+    <div class="lib-badges">
+      ${librarySourceBadge(provider)}
+      ${result.isOpenAccess ? '<span class="badge badge-active">مفتوح الوصول</span>' : ''}
+      ${result.downloadable ? '<span class="badge badge-active">ملف متاح</span>' : '<span class="badge">بيانات فقط</span>'}
+    </div>
+  </div>
+  <p class="lib-meta">${meta.map((part) => `<span>${escapeHtml(part)}</span>`).join('<span>·</span>')}</p>
+  ${abstract ? `<p class="lib-abs">${escapeHtml(abstract.slice(0, 300))}${abstract.length > 300 ? '…' : ''}</p>` : ''}
+  ${result.subjects ? `<div class="chips">${librarySubjectChips(result.subjects)}</div>` : ''}
+  <div class="lib-actions">
+    <form class="inline-form" method="post" action="/admin/library/import${token}">
+      <input type="hidden" name="provider" value="${escapeHtml(provider)}" />
+      <input type="hidden" name="locator" value="${escapeHtml(result.locator || '')}" />
+      <input type="hidden" name="title" value="${escapeHtml(result.title)}" />
+      <input type="hidden" name="authors" value="${escapeHtml(result.authors || '')}" />
+      <input type="hidden" name="year" value="${result.year ?? ''}" />
+      <input type="hidden" name="source_label" value="${escapeHtml(result.source || '')}" />
+      <input type="hidden" name="abstract" value="${escapeHtml(abstract.slice(0, 1500))}" />
+      <input type="hidden" name="subjects" value="${escapeHtml(result.subjects || '')}" />
+      <input type="hidden" name="item_url" value="${escapeHtml(result.url || '')}" />
+      <button class="btn btn-primary btn-sm" type="submit">${icon('download', 'icon-sm')} استيراد إلى المكتبة${result.downloadable ? ' + تحميل الملف' : ' (بيانات فقط)'}</button>
+    </form>
+    <a class="btn btn-sm" href="${escapeHtml(result.url || '#')}" target="_blank" rel="noopener">فتح المصدر ↗</a>
+    ${result.pdfUrl ? `<a class="btn btn-sm" href="${escapeHtml(result.pdfUrl)}" target="_blank" rel="noopener">${icon('download', 'icon-sm')} PDF مفتوح ↗</a>` : ''}
+  </div>
+</article>`;
+}

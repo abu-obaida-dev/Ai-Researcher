@@ -7,13 +7,30 @@
 export const APP_NAME = 'Zena AI';
 export const APP_TAGLINE = 'المشرف البحثي الذكي';
 export const SUPPORT_EMAIL = 'support@moshrefai.com';
-export const SUPPORT_WHATSAPP = '01000000000';
+/** رقم واتساب الدعم الفني — يُضبط في ملف البيئة (SUPPORT_WHATSAPP) لا هنا.
+ *  فارغ = لا يظهر زر واتساب إطلاقاً (أفضل من رابط مكسور). */
+export const SUPPORT_WHATSAPP = '';
 
 /** النقاط الممنوحة مجاناً لكل باحث جديد (سقوط آمن إن تعذّرت قراءة الباقة المجانية) */
 export const FREE_TRIAL_TOKENS = 10000;
 
 /** كود الباقة المجانية في جدول plans */
 export const FREE_PLAN_CODE = 'free_trial';
+
+/**
+ * صيغة UUID (مثال الإصدار 4) — للتحقق من معرّفات المسارات قبل أي استعلام.
+ *
+ * لماذا: أعمدة المعرّفات في PostgreSQL من نوع uuid. تمرير قيمة غير UUID(مثل abc أو undefined)
+ * يجعل `pg` يرمي استثناءً غير ملتقَط. وفي Express 4 الاستثناءات داخل معالج async لا يلتقطها
+ * الإطار تلقائياً ⇒ تتحول إلى unhandledRejection ⇒ **تنهار عملية الخادم كاملة**.
+ * أي مستخدم مصادَق يستطيع إسقاط الموقع برابط واحد ⇒ поэтому نتحقق هنا ونُرجع 404 بدل الرمي.
+ */
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** هل القيمة UUID صالح؟ (يُستخدم كحارس قبل أي استعلام بمعرّف من المسار) */
+export function isUuid(value) {
+  return UUID_RE.test(String(value ?? '').trim());
+}
 
 export const TOKEN_COSTS = [
   {
@@ -146,16 +163,33 @@ export const UNIVERSITIES = [
 /** روابط التنقل في الصفحة العامة */
 export const PUBLIC_NAV = [
   { href: '/#features', label: 'المميزات' },
+  { href: '/#services', label: 'الخدمات' },
   { href: '/#how', label: 'كيف تعمل' },
   { href: '/#pricing', label: 'الباقات' },
   { href: '/#faq', label: 'الأسئلة الشائعة' }
 ];
 
 /**
+ * المساحة التخزينية الافتراضية لكل باقة بالميغابايت.
+ * القيمة تُخزَّن في plans.storage_mb ويضبطها المدير من صفحة «الباقات» فقط،
+ * وتُستخدم في: عرض بطاقة الباقة · فحص الحصة عند رفع الملفات · صفحة ملفاتك.
+ * كل الباقات تشترك في نفس الحصة العامة (500 MB) حتى يغيّرها المدير.
+ */
+export const PLAN_STORAGE_DEFAULT_MB = 500;
+
+/** أقصى حصة تخزين يمكن أن يمنحها المدير لباقة (100 GB) — حدّ حماية للأقراص. */
+export const PLAN_STORAGE_MAX_MB = 102400;
+
+/**
  * الباقات الافتراضية — مصدر واحد مزدوج الاستخدام:
  * 1) بذرة جدول plans عند تنفيذ npm run db:seed.
  * 2) سقوط آمن لعرض صفحة الهبوط إذا تعذّرت قراءة قاعدة البيانات.
- * حقل features يُخزَّن في قاعدة البيانات كنص بأسطر متعددة.
+ *
+ * ملاحظة مهمة عن «المزايا»: ما يُعرض في بطاقة الباقة **ليس** هنا، بل يُولَّد في
+ * services/plans.js من صلاحيات دور الباقة في قاعدة البيانات (role_permissions)
+ * + حصة التخزين من plans.storage_mb — فلا تختلف advertorial عن ما يفتحه فعلياً.
+ * الحقل features هنا/في الجدول = أسطر إضافية اختيارية يكتبها المدير، تُعرض
+ * بعد المزايا المولَّدة (مثل «بدون بطاقة بنكية»).
  */
 export const DEFAULT_PLANS = [
   {
@@ -168,13 +202,9 @@ export const DEFAULT_PLANS = [
     cta: 'ابدأ مجاناً',
     popular: false,
     displayOrder: 1,
-    features: [
-      `${FREE_TRIAL_TOKENS.toLocaleString('en-US')} نقطة مجاناً عند إنشاء الحساب`,
-      'محادثة مع المشرف البحثي الذكي',
-      'اقتراح عناوين وأفكار وفرضيات بحثية',
-      'ملف بحثي مخصص حسب مجالك وجامعتك',
-      'بدون بطاقة بنكية'
-    ]
+    roleCode: 'free',
+    storageMb: PLAN_STORAGE_DEFAULT_MB,
+    features: [`${FREE_TRIAL_TOKENS.toLocaleString('en-US')} نقطة عند إنشاء الحساب`, 'بدون بطاقة بنكية — الدخول بحساب جوجل']
   },
   {
     code: 'student',
@@ -186,13 +216,9 @@ export const DEFAULT_PLANS = [
     cta: 'اشترك الآن',
     popular: false,
     displayOrder: 2,
-    features: [
-      '50,000 نقطة شهرياً',
-      'كل مزايا التجربة المجانية',
-      'بناء هيكل البحث وتقسيم الفصول',
-      'تدقيق لغوي وصياغة أكاديمية',
-      'دعم عبر البريد خلال 24 ساعة'
-    ]
+    roleCode: 'student',
+    storageMb: PLAN_STORAGE_DEFAULT_MB,
+    features: ['النقاط تُستخدم في كل أدوات المنصة بلا استثناء']
   },
   {
     code: 'researcher',
@@ -204,14 +230,9 @@ export const DEFAULT_PLANS = [
     cta: 'اشترك الآن',
     popular: true,
     displayOrder: 3,
-    features: [
-      '150,000 نقطة شهرياً',
-      'كل مزايا باقة الطالب',
-      'مراجعة منهجية لفصول البحث',
-      'اقتراح المصادر وتوثيقها بنظام APA',
-      'مراجعة الدراسات السابقة وصياغة الفجوة البحثية',
-      'أولوية في الدعم الفني'
-    ]
+    roleCode: 'researcher',
+    storageMb: PLAN_STORAGE_DEFAULT_MB,
+    features: ['ملف بحثي مخصص حسب مجالك وجامعتك واللغة المفضلة لديك']
   },
   {
     code: 'thesis',
@@ -223,14 +244,9 @@ export const DEFAULT_PLANS = [
     cta: 'اشترك الآن',
     popular: false,
     displayOrder: 4,
-    features: [
-      '500,000 نقطة شهرياً',
-      'كل مزايا باقة الباحث',
-      'متابعة كاملة لرسالة الماجستير أو الدكتوراه',
-      'توليد أسئلة المناقشة والردود عليها',
-      'تقارير تحسين الصياغة والاتساق',
-      'دعم مخصص وبريد مباشر مع الفريق'
-    ]
+    roleCode: 'thesis',
+    storageMb: PLAN_STORAGE_DEFAULT_MB,
+    features: ['أولوية في الرد على استفساراتك خلال ساعات العمل']
   }
 ];
 
@@ -253,14 +269,144 @@ export const READING_STATUSES = [
 ];
 
 /**
- * أدوار النظام (بذرة جدول roles — تفعيلها في الـ middleware يأتي مع المرحلة الثانية).
- * level يُستخدم للمقارنة («هذا الدور لا يقل عن X») عند تفعيل requireRole.
+ * خدمات المنصة (features) — مصدر واحد لكل ما يعرض في الواجهة ويُمنع في المسارات.
+ * كل خدمة مرتبطة بصلاحية واحدة في جدول role_permissions، وباقة الباحث تحدّد دوره،
+ * فيفتح ما تسمح به صلاحيات ذلك الدور. «الدردشة» (المشرف الذكي) متاحة لكل الباقات.
+ */
+export const PLATFORM_SERVICES = [
+  {
+    key: 'chat',
+    label: 'المشرف الذكي (الدردشة)',
+    short: 'الدردشة',
+    icon: 'message',
+    href: '/chat',
+    permission: 'chat:use',
+    always: true,
+    planFeature: 'محادثة كاملة مع المشرف الذكي (أفكار · منهجية · صياغة · مراجعة)',
+    note: 'متاحة لكل الباقات — المشرف الذكي يجيب عن أسئلتك ويقترح المصادر.'
+  },
+  {
+    key: 'journey',
+    label: 'مسار البحث',
+    short: 'المسار',
+    icon: 'graduation',
+    href: '/journey',
+    permission: 'journey:edit',
+    planFeature: 'مسار بحث متسلسل خطوة بخطوة (من الفكرة حتى المناقشة)',
+    note: 'خطوات البحث من اختيار الموضوع حتى المناقشة.'
+  },
+  {
+    key: 'library',
+    label: 'المكتبة العلمية',
+    short: 'المكتبة',
+    icon: 'book',
+    href: '/references',
+    permission: 'library:browse',
+    planFeature: 'المكتبة العلمية ومراجعها (بحث + مراجعك + توثيق APA)',
+    note: 'مكتبة المنصة: مراجع وكتب يضيفها المدير ويقرأها كل الباحثين.'
+  },
+  {
+    key: 'notes',
+    label: 'المفكرة',
+    short: 'المفكرة',
+    icon: 'list',
+    href: '/notes',
+    permission: 'notes:use',
+    planFeature: 'المفكرة وملاحظات البحث مرتبطة بخطوات المسار',
+    note: 'ملاحظاتك ووسومك، مرتبطة بخطوات البحث.'
+  },
+  {
+    key: 'files',
+    label: 'رفع الملفات',
+    short: 'الملفات',
+    icon: 'clipboard',
+    href: '/files',
+    permission: 'files:upload',
+    planFeature: 'رفع ملفاتك (فصول · ملفات Excel · مستندات) مع المعاينة والتحميل',
+    note: 'مساحة تخزين شخصية لملفاتك وفصول رسالتك.'
+  },
+  {
+    key: 'defense',
+    label: 'المناقشة والتدريب عليها',
+    short: 'المناقشة',
+    icon: 'message',
+    href: '/defense',
+    permission: 'defense:train',
+    planFeature: 'محاكاة المناقشة: أسئلة اللجنة ثم تقييم ونقاط الضعف',
+    note: 'محاكاة مناقشة حقيقية بعد انتهاء البحث — أسئلة متدرجة ثم تقييم ونقاط الضعف.'
+  }
+];
+
+/**
+ * أدوار النظام: دور لكل باقة + المشرف + مدير المنصة.
+ * الباقة تحدّد الدور (plans.role_code)، والدور يحدد الخدمات المفتوحة عبر صلاحياته.
+ * level يُستخدم للمقارنة («هذا الدور لا يقل عن X»).
  */
 export const DEFAULT_ROLES = [
-  { code: 'user', title: 'مستخدم', level: 0, permissions: ['dashboard:view', 'chat:use'] },
-  { code: 'researcher', title: 'باحث', level: 1, permissions: ['dashboard:view', 'chat:use', 'journey:edit', 'library:browse'] },
-  { code: 'supervisor', title: 'مشرف أكاديمي', level: 2, permissions: ['dashboard:view', 'chat:use', 'journey:edit', 'library:browse', 'students:view'] },
+  {
+    code: 'free',
+    title: 'باقة مجانية',
+    level: 0,
+    permissions: ['dashboard:view', 'chat:use', 'journey:edit', 'notes:use']
+  },
+  {
+    code: 'researcher',
+    title: 'باحث',
+    level: 1,
+    permissions: ['dashboard:view', 'chat:use', 'journey:edit', 'library:browse', 'notes:use', 'files:upload']
+  },
+  {
+    code: 'student',
+    title: 'طالب جامعي',
+    level: 1,
+    permissions: ['dashboard:view', 'chat:use', 'journey:edit', 'library:browse', 'notes:use', 'files:upload']
+  },
+  {
+    code: 'thesis',
+    title: 'رسائل علمية',
+    level: 2,
+    permissions: [
+      'dashboard:view',
+      'chat:use',
+      'journey:edit',
+      'library:browse',
+      'notes:use',
+      'files:upload',
+      'defense:train'
+    ]
+  },
+  {
+    code: 'supervisor',
+    title: 'مشرف إداري',
+    level: 3,
+    // صلاحياته كلّها في لوحة الإدارة: يفتحها المدير له ويمنعها عنه وقتاً يشاء.
+    // وما ليس هنا (إضافة مشرف أو مدير، حدود التخزين، إعدادات الموقع) فمreservation للمدير وحده.
+    permissions: [
+      'dashboard:view',
+      'admin:panel',
+      'admin:users',
+      'admin:library',
+      'admin:usage',
+      'admin:payments'
+    ]
+  },
   { code: 'admin', title: 'مدير المنصة', level: 9, permissions: ['*'] }
+];
+
+/**
+ * صلاحيات لوحة الإدارة — كل صلاحية تخصّ مجموعة صفحات.
+ * دور admin يملك '*' (كل شيء)، والمشرف الإداري لا يملك سوى ماختاره المدير له من هنا،
+ * وصفحة الإعدادات (حدود التخزين + المشرفون) ما زالت للمدير وحده ولا تُمنح بالمعطيات.
+ */
+export const ADMIN_PERMISSIONS = [
+  { key: 'admin:panel', label: 'دخول لوحة الإدارة', hint: 'بلا هذه لا يفتح السايدبار ولا أي صفحة إدارة.' },
+  { key: 'admin:users', label: 'إدارة الباحثين', hint: 'البحث والفلترة والإيقاف والمنح والتغيير وحذف الحسابات.' },
+  { key: 'admin:library', label: 'المكتبة العلمية', hint: 'رفع الكتب واستيرادها من المصادر وتعديلها وحذفها.' },
+  { key: 'admin:plans', label: 'الباقات والأدوار', hint: 'إضافة وتعديل الباقات وربط كل باقة بدورها.' },
+  { key: 'admin:roles', label: 'الأدوار والصلاحيات', hint: 'تعديل صلاحيات الأدوار (مهمّة حسّاسة).' },
+  { key: 'admin:usage', label: 'الاستهلاك والإحصاءات', hint: 'سجل الاستهلاك ومخططات المنصة.' },
+  { key: 'admin:payments', label: 'تأكيد طلبات الدفع', hint: 'مراجعة طلبات الاشتراك وتأكيدها (تُفعّل الباقة والنقاط) أو رفضها.' },
+  { key: 'admin:notify', label: 'إرسال الإشعارات', hint: 'إشعار فوري لكل الباحثين.' }
 ];
 
 /**
@@ -299,9 +445,46 @@ export const DEFAULT_SETTINGS = [
   ['support_whatsapp', SUPPORT_WHATSAPP]
 ];
 
-/** الطرق المتاحة للدفع (تُعرض في الصفحة العامة) */
-export const PAYMENT_METHODS = [
-  { name: 'إنستاباي', note: 'تحويل فوري من أي بنك', ready: true },
-  { name: 'فودافون كاش', note: 'محفظة إلكترونية', ready: true },
-  { name: 'بطاقة بنكية', note: 'قريباً مع بوابة الدفع الإلكتروني', ready: false }
+/** عملات المنصة المدعومة — واحدة تُختار من الإعدادات (site_currency). */
+export const SITE_CURRENCIES = [
+  { code: 'LYD', label: 'دينار ليبي', symbol: 'د.ل', short: 'د.ل' },
+  { code: 'USD', label: 'دولار أمريكي', symbol: '$', short: '$' }
 ];
+
+/** كود العملة الافتراضي (السقوط الآمن إن لم يوجد إعداد). */
+export const DEFAULT_CURRENCY = 'LYD';
+
+/**
+ * طرق الدفع اليدوية (خارج المنصة: تحويل بنكي أو محفظة أو دفع نقدي).
+ * المصدر الحقيقي جدول payment_methods (يضبطه المدير من الإعدادات)،
+ * وهذه قائمة سقوط آمنة تظهر لو لم تُضبط بعد.
+ */
+export const DEFAULT_PAYMENT_METHODS = [
+  {
+    code: 'bank_transfer',
+    label: 'تحويل بنكي',
+    note: 'حوّل المبلغ ثم أرسل رقم العملية لتأكيدها.',
+    details: '',
+    currency: 'LYD',
+    ready: true
+  },
+  {
+    code: 'wallet',
+    label: 'محفظة إلكترونية',
+    note: 'حوّل عبر المحفظة ثم أرسل رقم العملية.',
+    details: '',
+    currency: 'LYD',
+    ready: true
+  },
+  {
+    code: 'cash_office',
+    label: 'دفع نقدي عبر مكتب معتمد',
+    note: 'ادفع نقداً وأرسل صورة الإيصال.',
+    details: '',
+    currency: 'LYD',
+    ready: true
+  }
+];
+
+/** طرق الدفع القديمة (نُبقيها للصفحة العامة لو أُهملت القائمة الجديدة). */
+export const PAYMENT_METHODS = DEFAULT_PAYMENT_METHODS.map((item) => ({ name: item.label, note: item.note, ready: item.ready }));

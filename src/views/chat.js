@@ -14,15 +14,17 @@ import { escapeHtml, renderLayout } from './layout.js';
  *   وحذف المحادثة يحذف المحادثة ورسائلها فقط (لا رصيد ولا سجل استهلاك).
  */
 
-/** فقاعة رسالة واحدة (لون حسب الدور) مع الوقت. */
+/**
+ * فقاعة رسالة واحدة (لون حسب الدور) مع الوقت.
+ * **لا نعرض اسم الموديل** للباحث — ما يهمه هو الإجابة، لا تفاصيل المزوّد.
+ * (يُحفظ الموديل في قاعدة البيانات للتشخيص والمراجعة فنيا.)
+ */
 function renderMessage(message) {
   const isUser = message.role === 'user';
 
   return `<div class="bubble ${isUser ? 'bubble-user' : 'bubble-ai'}">
   <p class="bubble-text">${escapeHtml(message.content)}</p>
-  <p class="bubble-meta">${isUser ? 'أنت' : `المشرف الذكي${message.model ? ` · ${escapeHtml(message.model)}` : ''}`} · ${escapeHtml(
-    formatDateTime(message.created_at)
-  )}</p>
+  <p class="bubble-meta">${isUser ? 'أنت' : 'المشرف الذكي'} · ${escapeHtml(formatDateTime(message.created_at))}</p>
 </div>`;
 }
 
@@ -89,23 +91,104 @@ function renderModeBar(conversation) {
 </div>`;
 }
 
-/** أسهل طريقة لإرفاق ملف: أزرار اختيار من ملفاته، والاختيار يُرسل مع الرسالة. */
+/**
+ * إرفاق ملفات مع الرسالة: مربّعات اختيار **داخل نموذج الإرسال** (كانت خارج النموذج
+ * فلا تصل المشرف ولا واحدة)، مع وسم «يُقرأ/غير مقروء» لكل صيغة.
+ */
 function renderAttachRow(files = []) {
   if (!files.length) return '';
 
-  return `<div class="chat-attach" id="chat-attach">
-  <span class="chat-attach-label">${icon('file', 'icon-sm')} إرفاق:</span>
-  ${files
-    .map(
-      (file) =>
-        `<label class="chat-attach-chip" title="${escapeHtml(file.fileName)}">
+  const rows = files
+    .map((file) => {
+      const readable = /\.(txt|md|csv|json|xlsx|xls|docx|pdf)$/i.test(file.fileName || '');
+      return `<label class="chat-attach-chip" title="${escapeHtml(file.fileName)}">
     <input type="checkbox" name="file_ids" value="${escapeHtml(file.id)}" />
-    <span>${escapeHtml(file.fileName)}</span>
-  </label>`
-    )
-    .join('\n  ')}
-  <span class="chat-attach-hint">حتى ٣ ملفات · نصّ و Excel فقط</span>
+    <span class="attach-name">${escapeHtml(file.fileName)}</span>
+    <span class="attach-tag ${readable ? 'is-ok' : 'is-off'}">${readable ? 'يُقرأ' : 'غير مقروء'}</span>
+  </label>`;
+    })
+    .join('\n  ');
+
+  return `<div class="chat-attach" id="chat-attach">
+  <span class="chat-attach-label">${icon('clipboard', 'icon-sm')} أرفق مع رسالتك:</span>
+  ${rows}
+  <span class="chat-attach-hint">اختر ما تريد قراءته في هذه الرسالة · حتى ٣ ملفات · PDF و Word و txt و Excel (الصور لا تُقرأ نصياً)</span>
 </div>`;
+}
+
+/**
+ * نتائج أداة المراجع — تظهر تحت آخر ردّ: بيانات الاستشهاد كاملة + رابط
+ * المصدر + رابط النسخة المفتوحة، وزر لإضافتها إلى «مراجعي» بضغطة واحدة.
+ */
+function renderReferencesFound(conversation) {
+  const items = Array.isArray(conversation?.references_found) ? conversation.references_found : [];
+  if (!items.length) return '';
+
+  const rows = items
+    .map((item) => {
+      const meta = [item.authorText || 'بلا مؤلف محدد', item.year || '', item.venue || '', item.doi ? `DOI: ${item.doi}` : '']
+        .filter(Boolean)
+        .join(' · ');
+
+      // عنصر المكتبة: يفتح داخل المنصة (معاينة/تحميل) — عنصر الويب: رابط خارجي.
+      if (item.kind === 'library') {
+        const open = [
+          item.hasFile
+            ? `<a href="/library/${escapeHtml(item.id)}/file?inline=1" target="_blank" rel="noopener">${icon(
+                'book',
+                'icon-sm'
+              )} اقرأ الكتاب</a>
+               <a href="/library/${escapeHtml(item.id)}/file">${icon('download', 'icon-sm')} تحميل</a>`
+            : '',
+          // رابط المصدر في صفحة المراجع يبقى متاحاً دائماً (مجلّة · أرXiv · رابط حرّ).
+          item.externalUrl
+            ? `<a href="${escapeHtml(item.externalUrl)}" target="_blank" rel="noopener">المصدر ↗</a>`
+            : ''
+        ]
+          .filter(Boolean)
+          .join(' ');
+
+        return `<li class="ref-found is-library">
+    <b>${escapeHtml(item.title)}</b>
+    <span class="ref-found-meta">${escapeHtml(meta)}${item.hasFile ? ' · متاح داخل المنصة' : ''}${
+      item.fromLink ? ' · بيانات المجلة مقروءة من رابط المصدر' : ''
+    }</span>
+    <span class="ref-found-links">
+      ${open}
+      <form method="post" action="/references" class="inline-form">
+        <input type="hidden" name="library_item_id" value="${escapeHtml(item.id)}" />
+        <button class="btn btn-sm" type="submit">${icon('plus', 'icon-sm')} إلى مراجعي</button>
+      </form>
+    </span>
+  </li>`;
+      }
+
+      const link = item.pdfUrl || item.url || '';
+
+      return `<li class="ref-found">
+    <b>${escapeHtml(item.title)}</b>
+    <span class="ref-found-meta">${escapeHtml(meta)}</span>
+    <span class="ref-found-links">
+      ${link ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener">${item.pdfUrl ? 'تحميل PDF' : 'فتح المصدر'} ↗</a>` : ''}
+      <form method="post" action="/references/web" class="inline-form">
+        <input type="hidden" name="title" value="${escapeHtml(item.title)}" />
+        <input type="hidden" name="authors" value="${escapeHtml(item.authorText || '')}" />
+        <input type="hidden" name="year" value="${escapeHtml(String(item.year || ''))}" />
+        <input type="hidden" name="venue" value="${escapeHtml(item.venue || '')}" />
+        <input type="hidden" name="doi" value="${escapeHtml(item.doi || '')}" />
+        <input type="hidden" name="url" value="${escapeHtml(item.url || '')}" />
+        <button class="btn btn-sm" type="submit">${icon('plus', 'icon-sm')} إلى مراجعي</button>
+      </form>
+    </span>
+  </li>`;
+    })
+    .join('\n  ');
+
+  return `<details class="chat-refs" id="chat-refs">
+  <summary>${icon('book', 'icon-sm')} مراجع جاهزة (${items.length}) — اضغط للعرض</summary>
+  <p class="chat-refs-hint">بياناتها كما في المصدر؛ وما عليه شريط أخضر فهو قابل للقراءة والتحميل داخل المنصة الآن.</p>
+  <ul class="ref-found-list">${rows}</ul>
+</details>`;
 }
 
 /** صفحة الشات كاملة. */
@@ -151,14 +234,18 @@ export function renderChatPage({
   ${renderModeBar(conversation)}
   <div class="chat-body" id="messages">${messagesHtml}</div>
 
-  ${renderAttachRow(attachableFiles)}
+  ${renderReferencesFound(conversation)}
+
   <form class="chat-composer" method="post" action="/chat">
     <input type="hidden" name="conversation_id" value="${escapeHtml(conversation?.id || '')}" />
     <input type="hidden" name="step" value="${escapeHtml(stepKey)}" />
-    <textarea id="message" name="message" rows="1" required maxlength="8000"
-      placeholder="${conversation?.mode === 'defense' ? 'اكتب إجابتك…' : 'اكتب رسالتك إلى المشرف الذكي…'}"
-      aria-label="رسالتك إلى المشرف الذكي">${escapeHtml(prefill)}</textarea>
-    <button class="btn btn-primary chat-send" type="submit" title="إرسال" aria-label="إرسال">${icon('send')}</button>
+    <div class="chat-composer-row">
+      <textarea id="message" name="message" rows="1" required maxlength="8000"
+        placeholder="${conversation?.mode === 'defense' ? 'اكتب إجابتك…' : 'اكتب رسالتك إلى المشرف الذكي…'}"
+        aria-label="رسالتك إلى المشرف الذكي">${escapeHtml(prefill)}</textarea>
+      <button class="btn btn-primary chat-send" type="submit" title="إرسال" aria-label="إرسال">${icon('send')}</button>
+    </div>
+    ${renderAttachRow(attachableFiles)}
   </form>
 </section>`;
 

@@ -7,6 +7,8 @@ import { createSessionCookie, SESSION_COOKIE_NAME } from '../src/auth/google.js'
 import { pool } from '../src/db/client.js';
 import { deleteFile, filesSummary, saveUpload } from '../src/services/files.js';
 import { saveStorageLimits, storageLimits } from '../src/services/settings.js';
+import { isFcmServerConfigured } from '../src/services/firebase.js';
+import { whatsappLink } from '../src/views/layout.js';
 import ExcelJS from 'exceljs';
 import { askSupervisor } from '../src/services/chat.js';
 import { probeProvider, providerStatus } from '../src/services/ai.js';
@@ -15,8 +17,20 @@ import { addStrike, getStrikes, resetStrikes } from '../src/services/supervisor-
 import { chargeUsage, estimateReservation, normalizeUsage } from '../src/services/tokens.js';
 import { TOKEN_RATES } from '../src/constants.js';
 
+/** باقة الاختبار: دور «رسائل علمية» — أوسع صلاحيات، فكل مسارات البحث تعمل. */
+const TEST_PLAN_CODE = 'thesis';
+
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:3000';
 const results = [];
+
+// حماية CSRF في الخادم ترفض أي POST يحمل كوكي جلسة بلا ترويسة Origin،
+// فكل نداءات الاختبار تُرسل Origin مطابقاً للمضيف (كما يفعل المتصفح).
+const nativeFetch = globalThis.fetch;
+globalThis.fetch = (url, options = {}) => {
+  const headers = new Headers(options.headers || {});
+  if (!headers.has('origin')) headers.set('origin', new URL(String(url), BASE).origin);
+  return nativeFetch(url, { ...options, headers });
+};
 
 /** يسجّل نتيجة اختبار واحدة ويطبعها. */
 function check(name, ok, extra = '') {
@@ -25,8 +39,8 @@ function check(name, ok, extra = '') {
 }
 
 /** طلب HTTP مع كوكي الجلسة، ويعيد الحالة والنص ورابط التحويل. */
-async function call(path, { method = 'GET', form, cookie, expect = [200] } = {}) {
-  const headers = {};
+async function call(path, { method = 'GET', form, cookie, expect = [200], accept = 'text/html' } = {}) {
+  const headers = { accept };
   if (cookie) headers.cookie = cookie;
   let body;
   if (form) {
@@ -43,10 +57,10 @@ async function call(path, { method = 'GET', form, cookie, expect = [200] } = {})
 async function createTestUser() {
   const stamp = Date.now();
   const { rows } = await pool.query(
-    `INSERT INTO users (email, full_name, google_sub, role, tokens_balance, tokens_used, tokens_granted, onboarding_complete, is_active)
-     VALUES ($1, 'باحث اختبار', $2, 'researcher', 5000, 0, 5000, true, true)
-     RETURNING id, email`,
-    [`smoke.phase1.${stamp}@example.com`, `smoke-${stamp}`]
+    `INSERT INTO users (email, full_name, google_sub, role, tokens_balance, tokens_used, tokens_granted, onboarding_complete, is_active, plan_code)
+     VALUES ($1, 'باحث اختبار', $2, 'researcher', 5000, 0, 5000, true, true, $3)
+     RETURNING id, email, plan_code`,
+    [`smoke.phase1.${stamp}@example.com`, `smoke-${stamp}`, TEST_PLAN_CODE]
   );
   const user = rows[0];
 
@@ -333,7 +347,7 @@ async function testFiles(userId, cookie) {
   check('1E أرقام Excel تُعرض كنص', sheetView.text.includes('90') && sheetView.text.includes('ممتاز'));
   check('1E زر «عرض» يظهر لملف Excel', (await call('/files', { cookie })).text.includes(`/files/${sheetId}/view`));
 
-  // xlsx تالف ⇒ رسالة عربية مفهومة بدل انهيار الخادم
+  // xlsx تالف ⇒ رفض عند الرفع (بصمة ZIP غير صحيحة) ⇒ لا يُخزَّن أصلاً
   const brokenForm = new FormData();
   brokenForm.append('title', 'جدول تالف');
   brokenForm.append(
@@ -341,11 +355,34 @@ async function testFiles(userId, cookie) {
     new Blob(['ليس ملف excel'], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
     'broken.xlsx'
   );
-  await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: brokenForm, redirect: 'manual' });
-  const brokenId = (
-    await pool.query("SELECT id FROM files WHERE user_id = $1 AND title = 'جدول تالف' ORDER BY created_at DESC LIMIT 1", [userId])
-  ).rows[0].id;
-  check('1E xlsx تالف: رسالة خطأ مفهومة', (await call(`/files/${brokenId}/view`, { cookie })).text.includes('تعذّرت قراءة الملف'));
+  const brokenRes = await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: brokenForm, redirect: 'manual' });
+  const brokenRow = await pool.query(
+    "SELECT id FROM files WHERE user_id = $1 AND title = 'جدول تالف' ORDER BY created_at DESC LIMIT 1",
+    [userId]
+  );
+  check(
+    '1E xlsx تالف: مرفوض عند الرفع ولا يُخزَّن (فحص البصمة)',
+    brokenRes.status === 303 && brokenRow.rows.length === 0
+  );
+
+  // xlsx بتوقيع ZIP صحيح لكن محتواه تالف ⇒ يمرّ الرفع، وتتعامل المعاينة برسالة خطأ مفهومة
+  const halfBrokenForm = new FormData();
+  halfBrokenForm.append('title', 'جدول نصف تالف');
+  halfBrokenForm.append(
+    'file',
+    new Blob([Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from('xl/workbook.xml'), Buffer.from('ZZZ')])], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    }),
+    'halfbroken.xlsx'
+  );
+  await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: halfBrokenForm, redirect: 'manual' });
+  const halfBrokenId = (
+    await pool.query("SELECT id FROM files WHERE user_id = $1 AND title = 'جدول نصف تالف' ORDER BY created_at DESC LIMIT 1", [userId])
+  ).rows[0]?.id;
+  check(
+    '1E xlsx تالف داخلياً: رسالة خطأ مفهومة بلا انهيار',
+    Boolean(halfBrokenId) && (await call(`/files/${halfBrokenId}/view`, { cookie })).text.includes('تعذّرت قراءة الملف')
+  );
 
   // csv ⇒ نفس معاينة الجدول
   const csvForm = new FormData();
@@ -359,14 +396,29 @@ async function testFiles(userId, cookie) {
   // ملف غير معروض (zip) ⇒ إرشاد تحميل بلا معاينة
   const zipUpload = new FormData();
   zipUpload.append('title', 'أرشيف مضغوط');
-  zipUpload.append('file', new Blob(['PKfake'], { type: 'application/zip' }), 'bundle.zip');
+  zipUpload.append(
+    'file',
+    new Blob([Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from('fake-but-zip-signature')])], { type: 'application/zip' }),
+    'bundle.zip'
+  );
   await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: zipUpload, redirect: 'manual' });
   const zipRow = await pool.query(
     "SELECT id FROM files WHERE user_id = $1 AND title = 'أرشيف مضغوط' ORDER BY created_at DESC LIMIT 1",
     [userId]
   );
-  const zipView = await call(`/files/${zipRow.rows[0].id}/view`, { cookie });
+  const zipView = zipRow.rows[0] ? await call(`/files/${zipRow.rows[0].id}/view`, { cookie }) : { ok: false, text: '' };
   check('1E ملف zip: إرشاد تحميل (لا معاينة)', zipView.ok && zipView.text.includes('لا يعرض المتصفح هذا النوع'));
+
+  // zip بتنكّر (توقيع ناقص) ⇒ مرفوض عند الرفع ولا يُخزَّن
+  const fakeZipUpload = new FormData();
+  fakeZipUpload.append('title', 'أرشيف مزوّر');
+  fakeZipUpload.append('file', new Blob(['#!/bin/sh\necho hacked'], { type: 'application/zip' }), 'fake.zip');
+  const fakeZipRes = await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: fakeZipUpload, redirect: 'manual' });
+  const fakeZipRow = await pool.query(
+    "SELECT id FROM files WHERE user_id = $1 AND title = 'أرشيف مزوّر' ORDER BY created_at DESC LIMIT 1",
+    [userId]
+  );
+  check('1E zip متنكّر: مرفوض عند الرفع (بصمة غير صحيحة)', fakeZipRes.status === 303 && fakeZipRow.rows.length === 0);
 
   const del = await call(`/files/${file.id}/delete`, { method: 'POST', cookie, expect: [303] });
   check('1E حذف الملف (303)', del.ok && del.location.includes('ok=file_deleted'), del.location);
@@ -510,8 +562,12 @@ async function testChat(userId, cookie) {
   const groqRow = providerStatus().find((row) => row.key === 'groq');
   check('1H Groq مزوّد معرّف بنماذج عربية', Boolean(groqRow) && groqRow.models.some((m) => /qwen|allam/.test(m)), groqRow?.models.join(' ← '));
 
+  // صفحة المزوّدين حُذفت بالكامل ⇒ 404، ولا رابط إليها في السايدبار.
   const providersPage = await call('/admin/providers', { cookie });
-  check('1H لوحة المدير تعرض حالة المزوّدين', providersPage.status === 200 && providersPage.text.includes('النماذج (بترتيب التبديل)') && providersPage.text.includes('معاني الأخطاء'));
+  check('1H صفحة المزوّدين محذوفة (404)', providersPage.status === 404, `الحالة ${providersPage.status}`);
+  const adminHome = await call('/admin', { cookie });
+  check('1H لا رابط للمزوّدين في لوحة الإدارة', !adminHome.text.includes('/admin/providers'));
+  check('1H المزوّدون يعملون بمفاتيح .env فقط (بلا روابط مخصّصة)', !providerStatus().some((row) => typeof row.custom !== 'undefined'));
 
   // مزوّد وهمي بلا مفتاح: يفشل فوراً ولا يُعيد المحاولة (لا مضيعة وقت ولا رصيد)
   const fakeKey = 'zena-test-unknown';
@@ -680,6 +736,190 @@ async function testStorageLimits() {
 
   const adminPage = await call('/admin/settings', { expect: [200] });
   check('1E صفحة إعدادات التخزين تفتح للمدير', adminPage.ok && adminPage.text.includes('name="max_upload_mb"') && adminPage.text.includes('name="max_storage_mb"'));
+  // «حالة النظام» حُذفت من الإعدادات بقرار المنصة: لا البطاقة ولا نافذة شرحها.
+  check(
+    '1E لا قسم «حالة النظام» في الإعدادات',
+    !adminPage.text.includes('حالة النظام') && !adminPage.text.includes('system-help') && !adminPage.text.includes('مدة تشغيل الخادم')
+  );
+
+  // الأدوار والصلاحيات انتقلت إلى موضعها: صلاحيات كل باقة داخل صفحة الباقات،
+  // وصلاحيات المشرف داخل الإعدادات — ولم تعد هناك صفحة «أدوار» مستقلة.
+  const rolesPage = await call('/admin/roles', { expect: [404] });
+  check('1E صفحة الأدوار المستقلة محذوفة (404)', rolesPage.status === 404, `الحالة ${rolesPage.status}`);
+  const adminSidebar = await call('/admin', { expect: [200] });
+  check('1E لا رابط صفحة الأدوار في السايدبار', !adminSidebar.text.includes('/admin/roles'));
+
+  const plansPage = await call('/admin/plans', { expect: [200] });
+  check(
+    '1E صلاحيات الباقات داخل صفحة الباقات',
+    plansPage.text.includes('/permissions') && plansPage.text.includes('ما تفتحه هذه الباقة لمشتركيها')
+  );
+  const settingsPage = await call('/admin/settings', { expect: [200] });
+  check(
+    '1E صلاحيات المشرف داخل الإعدادات',
+    settingsPage.text.includes('/admin/settings/supervisors/permissions') && settingsPage.text.includes('ما يستطيعه المشرف')
+  );
+
+  // سياسة المنصة: لا أسماء جداول ولا ذكر لقاعدة البيانات في أي نص مرئي للوحة.
+  const FORBIDDEN_TERMS = ['قاعدة البيانات', 'قاعدة بيانات', 'جدول', 'جداول', 'PostgreSQL'];
+  const adminPages = ['/admin', '/admin/roles', '/admin/users', '/admin/plans', '/admin/library', '/admin/usage', '/admin/settings'];
+  const leaks = [];
+  for (const path of adminPages) {
+    const page = await call(path, { expect: [200] });
+    // نُسقط الأنماط والسكربتات: المطلوب النص المرئي فقط لا تعليقات الكود
+    const visible = page.text
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<[^>]+>/g, ' ');
+    const found = FORBIDDEN_TERMS.filter((term) => visible.includes(term));
+    if (found.length) leaks.push(`${path}: ${found.join('+')}`);
+  }
+  check('1E لا ذكر للجداول أو قاعدة البيانات في لوحات الإدارة', leaks.length === 0, leaks.join(' · ') || 'كل الصفحات نظيفة');
+
+  /* ---------- صفحات与服务 Researcher غير المغطّاة سابقاً ---------- */
+  const researchPages = [
+    ['/defense', 'المناقشة'],
+    ['/notes', 'المفكرة'],
+    ['/files', 'الملفات'],
+    ['/payments', 'الدفع']
+  ];
+  for (const [path, label] of researchPages) {
+    const page = await call(path, { expect: [200, 302, 403] });
+    check(
+      `1G صفحة ${label} ${path} تستجيب`,
+      page.status !== 404 && page.status !== 500,
+      `الحالة ${page.status}`
+    );
+  }
+
+  // قرار مقصود: لا صفحة إشعارات مستقلة ⇒ التحويل إلى لوحة الباحث
+  const notificationsRedirect = await call('/notifications', { expect: [302] });
+  check(
+    '1G /notifications يحوّل إلى /dashboard (قرار مقصود)',
+    notificationsRedirect.location.includes('/dashboard'),
+    notificationsRedirect.location
+  );
+
+  /* ---------- لوحة الإدارة: كل صفحاتها تفتح (كانت خارج التغطية) ---------- */
+  const adminUiPages = [
+    ['/admin', 'النظرة العامة'],
+    ['/admin/users', 'الباحثون'],
+    ['/admin/plans', 'الباقات'],
+    ['/admin/library', 'المكتبة'],
+    ['/admin/usage', 'الاستهلاك'],
+    ['/admin/settings', 'الإعدادات'],
+    ['/admin/payments', 'طلبات الدفع']
+  ];
+  for (const [path, label] of adminUiPages) {
+    const page = await call(path, { expect: [200] });
+    check(`1G لوحة الإدارة: ${label} ${path}`, page.ok, `الحالة ${page.status}`);
+  }
+
+  /* ---------- PWA / SEO ---------- */
+  const manifest = await call('/manifest.webmanifest', { expect: [200] });
+  check(
+    '1G manifest.webmanifest صالح للتثبيت',
+    manifest.text.includes('"display":"standalone"') && manifest.text.includes('icon-512.png'),
+    manifest.text.slice(0, 50)
+  );
+  const robots = await call('/robots.txt', { expect: [200] });
+  check(
+    '1G robots.txt يغلق الجلسات واللوحة ويفتح العامة',
+    robots.text.includes('Disallow: /admin') && robots.text.includes('Disallow: /chat') && robots.text.includes('Sitemap:'),
+    robots.text.includes('Sitemap:') ? 'فيه رابط sitemap' : 'بلا sitemap'
+  );
+  const sitemap = await call('/sitemap.xml', { expect: [200] });
+  check(
+    '1G sitemap.xml بروابط مطلقة للصفحات العامة فقط',
+    /<loc>https?:\/\/[^<]+\/<\/loc>/.test(sitemap.text) && !sitemap.text.includes('/dashboard'),
+    (sitemap.text.match(/<loc>([^<]+)<\/loc>/) || [])[1] || ''
+  );
+  const icons = await Promise.all(['/apple-touch-icon.png', '/icon-192.png', '/icon-512.png'].map((path) => call(path, { expect: [200] })));
+  check('1G أيقونات PNG للتثبيت وأيقونة اللمس', icons.every((page) => page.ok && page.text.length > 100), `${icons.length}/3`);
+
+  const homeMeta = await call('/', { expect: [200], accept: 'text/html' });
+  check(
+    '1G وسوم المشاركة (og:) موجودة في كل صفحة',
+    homeMeta.text.includes('og:title') && homeMeta.text.includes('og:image') && homeMeta.text.includes('twitter:card') && homeMeta.text.includes('rel="canonical"')
+  );
+
+  /* ---------- إشعارات الهاتف (Firebase) ---------- */
+  const pushConfig = await (await fetch(`${BASE}/api/firebase-config`)).json();
+  check(
+    '1F إعدادات الإشعارات متاحة للمتصفح بلا أسرار',
+    typeof pushConfig.configured === 'boolean' && typeof pushConfig.serverReady === 'boolean' && !JSON.stringify(pushConfig).includes('PRIVATE KEY')
+  );
+  check('1F الخادم يقرأ حساب خدمة Firebase من الملف', pushConfig.serverReady === true, isFcmServerConfigured() ? 'جاهز' : 'غير مفعّل');
+  const pushScript = await call('/js/push-notifications.js', { expect: [200] });
+  check('1F سكربت تفعيل إشعارات الهاتف موجود', pushScript.ok && pushScript.text.includes('firebase-messaging') && pushScript.text.includes('/api/notifications/register'));
+  const swFile = await call('/firebase-messaging-sw.js', { expect: [200] });
+  check('1F عامل الخدمة يستقبل الإشعارات ويفتحها', swFile.ok && swFile.text.includes('onBackgroundMessage') && swFile.text.includes('notificationclick'));
+  // زر واتساب للدعم: يظهر مع الزائر والباحث، ولا يظهر في لوحة الإدارة.
+  // بدون رقم في البيئة لا يظهر إطلاقاً (لا رابط مكسور).
+  const waUser = await createTestUser();
+  const waChat = await call('/chat', { cookie: waUser.cookie, expect: [200] });
+  const waAdmin = await call('/admin/users', { expect: [200] });
+  // قاعدة لا تعتمد على بيئة التشغيل: إن ظهر الزر فـ رابطه سليم دائماً.
+  const waHref = /href="(https:\/\/wa\.me\/[^"?]+)\?text=/.exec(waChat.text)?.[1] || '';
+  const waValid = Boolean(waHref) && /wa\.me\/\d{8,15}$/.test(waHref);
+  check(
+    '1G زر واتساب سليم أو غائب تماماً',
+    waChat.text.includes('wa-float"') === waValid,
+    waValid ? `رابط سليم: ${waHref}` : 'لا رقم في البيئة ⇒ لا زر (لا رابط مكسور)'
+  );
+  check('1G لا زر واتساب في لوحة الإدارة', !waAdmin.text.includes('wa-float"'));
+
+  // المدير يضبط الرقم من الإعدادات: حفظٌ صحيح يظهر فوراً، والسقوط يبقى سليماً.
+  const waSaveOk = await call('/admin/settings/support-whatsapp', {
+    method: 'POST', form: { whatsapp: '0912345678' }, expect: [302]
+  });
+  const waAfterSave = await call('/chat', { cookie: waUser.cookie, expect: [200] });
+  check(
+    '1G حفظ رقم واتساب من الإعدادات يظهر فوراً',
+    waAfterSave.text.includes('wa.me/218912345678'),
+    waSaveOk.ok ? 'الرابط بعد الحفظ' : `الحالة ${waSaveOk.status} · ${waSaveOk.location || ''}`.slice(0, 90)
+  );
+  const waBad = await call('/admin/settings/support-whatsapp', {
+    method: 'POST', form: { whatsapp: '0912' }, expect: [302]
+  });
+  // location يستخدم + بدل المسافة ⇒ نحوّلها قبل الفحص
+  const waBadText = decodeURIComponent((waBad.location || '').replace(/\+/g, ' '));
+  check('1G يرفض رقماً ناقصاً برسالة عربية', waBadText.includes('رقم غير صالح'), waBadText.slice(0, 70));
+
+  // نُعيد الرقم كما كان (فارغاً) حتى لا يتسرّب رقم اختبار
+  await call('/admin/settings/support-whatsapp', { method: 'POST', form: { whatsapp: '' }, expect: [302] });
+  const notifApi = await call('/api/notifications', { cookie: waUser.cookie, expect: [200] });
+  check(
+    '1G واجهة الإشعارات ترجع JSON',
+    /"ok":true/.test(notifApi.text) && /"devices"/.test(notifApi.text),
+    notifApi.text.slice(0, 60)
+  );
+
+  const shortToken = await call('/api/notifications/register', {
+    method: 'POST', form: { token: 'x' }, cookie: waUser.cookie, expect: [200, 400, 415, 422]
+  });
+  check('1G توكن فارغ/قصير يُرفض برسالة JSON', /"ok":false/.test(shortToken.text), shortToken.text.slice(0, 60));
+
+  // صفحة الإعدادات: لا قسم «بريد المدير» ولا ملاحظة «خطة نجاة» (حُذفا بقرار المنصة).
+  const settingsClean = await call('/admin/settings', { expect: [200] });
+  check(
+    '1G لا قسم بريد المدير ولا ملاحظته في الإعدادات',
+    !settingsClean.text.includes('بريدك الجديد') &&
+      !settingsClean.text.includes('ADMIN_EMAILS') &&
+      !settingsClean.text.includes('خطة نجاة')
+  );
+  const goneAdminEmail = await call('/admin/settings/admin-email', { method: 'POST', form: { email: 'x@y.com' }, expect: [302, 303, 404, 401, 403] });
+  check('1G مسار تغيير بريد المدير محذوف', goneAdminEmail.status !== 200, `الحالة ${goneAdminEmail.status}`);
+
+  await pool.query('DELETE FROM users WHERE id = $1', [waUser.user.id]);
+
+  // المفاتيح صارت في ملف البيئة فقط ⇒ لا كارت مفاتيح في لوحة الإدارة.
+  const settingsPagePush = await call('/admin/settings', { expect: [200] });
+  check(
+    '1F لا كارت مفاتيح الإشعارات في الإعدادات',
+    !settingsPagePush.text.includes('name="apiKey"') && !settingsPagePush.text.includes('name="vapidKey"')
+  );
 
   await saveStorageLimits({ maxUploadMb: 30, maxStorageMb: 50 });
   const changed = await storageLimits();
@@ -694,14 +934,29 @@ async function testStorageLimits() {
   check('1E ترفض حصة أقل من حجم الملف الواحد', rejected);
 
   // باحث يرفع 30MB ثم يحاول تجاوز الحصة الباقية (20MB)
+  // الحصة الآن تأتي من باقته في قاعدة البيانات (plans.storage_mb) لا من الحد العام،
+  // فنُنزّلها لباقة الاختبار نفسها (كما يفعل المدير من صفحة الباقات).
   const { user, cookie } = await createTestUser();
   const megabytes = (n) => Buffer.alloc(n * 1024 * 1024, 0x41);
+  // ملف PDF وهمي صالح البصمة: نبدأ بتوقيع %PDF- ثم نملأ الباقي (اختبار الحصة لا المحتوى).
   const fakeFile = (name, sizeMb) => ({
     name,
     size: sizeMb * 1024 * 1024,
     type: 'application/pdf',
-    arrayBuffer: async () => megabytes(sizeMb).buffer
+    arrayBuffer: async () => {
+      const body = megabytes(sizeMb);
+      Buffer.from('%PDF-1.4\n').copy(body, 0);
+      return body.buffer;
+    }
   });
+
+  const planCode = user.plan_code;
+  const planStorageBefore = await pool.query('SELECT storage_mb FROM plans WHERE code = $1', [planCode]);
+  const defaultsPlanStorage = Number(planStorageBefore.rows[0]?.storage_mb) || 500;
+  const savedPlanStorage = await pool.query('UPDATE plans SET storage_mb = 50 WHERE code = $1 RETURNING storage_mb', [
+    planCode
+  ]);
+  check('1E تغيير المدير لحصة تخزين الباقة ينعكس على الحصة', Number(savedPlanStorage.rows[0]?.storage_mb) === 50);
 
   await saveUpload(user.id, { file: fakeFile('a.pdf', 30) });
   const summary = await filesSummary(user.id);
@@ -713,7 +968,7 @@ async function testStorageLimits() {
   } catch (error) {
     quotaBlocked = error.code === 'QUOTA_EXCEEDED';
   }
-  check('1E يرفض رفع يتجاوز الحصة الكلية', quotaBlocked);
+  check('1E يرفض رفع يتجاوز حصة الباقة', quotaBlocked);
 
   let sizeBlocked = false;
   try {
@@ -745,13 +1000,19 @@ async function testStorageLimits() {
   const viaForm = await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: form, redirect: 'manual' });
   check('1E الحد الجديد يطبَّق فوراً على الرفع', viaForm.status === 303 && (viaForm.headers.get('location') || '').includes('err=file_bad'));
 
-  // تنظيف + إعادة الافتراضي
+  // تنظيف + إعادة الافتراضي (حدود المنصة + حصة الباقة التي loweredها الاختبار)
   const files = await pool.query('SELECT id FROM files WHERE user_id = $1', [user.id]);
   for (const file of files.rows) await deleteFile(user.id, file.id);
   await pool.query('DELETE FROM users WHERE id = $1', [user.id]);
+  await pool.query('UPDATE plans SET storage_mb = $2 WHERE code = $1', [planCode, defaultsPlanStorage]);
   await saveStorageLimits({ maxUploadMb: defaults.maxUploadMb, maxStorageMb: defaults.maxStorageMb });
   const restored = await storageLimits();
-  check('1E العودة للافتراضي بعد الاختبار', restored.maxUploadMb === 100 && restored.maxStorageMb === 500, JSON.stringify(restored));
+  const restoredPlan = await pool.query('SELECT storage_mb FROM plans WHERE code = $1', [planCode]);
+  check(
+    '1E العودة للافتراضي بعد الاختبار',
+    restored.maxUploadMb === 100 && restored.maxStorageMb === 500 && Number(restoredPlan.rows[0]?.storage_mb) === defaultsPlanStorage,
+    JSON.stringify(restored)
+  );
 }
 
 async function main() {

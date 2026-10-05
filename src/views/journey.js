@@ -75,9 +75,20 @@ function renderStep(step, statuses) {
 
   <form class="step-form" method="post" action="/journey/steps/${encodeURIComponent(step.key)}">
     <div class="field">
-      <label for="note-${escapeHtml(step.key)}">ملاحظة المخرجات (ماذا أنجزت في هذه الخطوة؟)</label>
+      <label for="note-${escapeHtml(step.key)}">${
+        step.key === 'topic' ? 'عنوان موضوع البحث الذي اخترته *' : 'ملاحظة المخرجات (ماذا أنجزت في هذه الخطوة؟)'
+      }</label>
       <textarea id="note-${escapeHtml(step.key)}" name="output_note" rows="2" maxlength="2000"
-        placeholder="مثال: اخترت العنوان النهائي وحددت سؤال البحث">${escapeHtml(step.outputNote)}</textarea>
+        placeholder="${
+          step.key === 'topic'
+            ? 'اكتب عنوان موضوع بحثك هنا — كل ما يُبنى عليه مراجعك لاحقاً في مرحلة الدراسات السابقة'
+            : 'مثال: اخترت العنوان النهائي وحددت سؤال البحث'
+        }">${escapeHtml(step.outputNote)}</textarea>
+      ${
+        step.key === 'topic'
+          ? `<p class="form-hint">هذا العنوان هو المصدر الوحيد لبحث المراجع لاحقاً. يمكنك أيضاً كتابته في الشات (اكتب: «موضوعي: …») ونسجّله لك.</p>`
+          : ''
+      }
     </div>
     <div class="step-form-actions">
       <div class="step-status-group">${statusChoices(statuses, step.status)}</div>
@@ -93,8 +104,8 @@ export function renderJourneyPage({ account, journey, profile, unread = 0, flash
   const meter = `<div class="meter"><i style="width:${journey.percent}%"></i></div>`;
   const sourceNote =
     journey.source === 'database'
-      ? 'الخطوات مخزّنة في قاعدة البيانات (يمكن للمدير تعديلها).'
-      : 'الخطوات الافتراضية لهذه الدرجة — يمكن تفعيل نسخة مخصصة لكل تخصص من قاعدة البيانات.';
+      ? 'خطوات مخصّصة لهذه الدرجة (يمكن للمدير تعديلها).'
+      : 'الخطوات الافتراضية لهذه الدرجة — يمكن تفعيل نسخة مخصّصة لكل تخصص.';
 
   const body = `<div class="journey-grid">
   <section class="card journey-summary">

@@ -1,7 +1,8 @@
 import { pool } from '../db/client.js';
-import { CHAT_REPLY_CAPS, TOKEN_COSTS } from '../constants.js';
+import { CHAT_REPLY_CAPS, TOKEN_COSTS, isUuid } from '../constants.js';
 import { runSupervisor } from './ai.js';
-import { isValidStepKeyForUser } from './journey.js';
+import { extractStatedTopic, literatureToolFor } from './literature.js';
+import { isValidStepKeyForUser, recordTopic, registeredTopic } from './journey.js';
 import { buildSupervisorContext } from './supervisor-context.js';
 import { buildSystemPrompt } from './supervisor-prompt.js';
 import { addStrike, summarizeConversation } from './supervisor-memory.js';
@@ -60,6 +61,7 @@ export async function listConversations(userId, { limit = 12 } = {}) {
 
 /** محادثة واحدة بملكيتها + رسائلها بالترتيب الزمني + حالة المناقشة. */
 export async function getConversation(userId, conversationId) {
+  if (!isUuid(conversationId)) return null;
   const { rows } = await pool.query('SELECT * FROM conversations WHERE id = $2 AND user_id = $1', [
     userId,
     conversationId
@@ -74,11 +76,12 @@ export async function getConversation(userId, conversationId) {
   return { ...rows[0], messages, defense_state: rows[0].defense_state || {} };
 }
 
-/** إنشاء محادثة جديدة باسم مختصر من أول سؤال. */
-export async function createConversation(userId, { title = '', stepKey = null } = {}) {
+/** إنشاء محادثة جديدة باسم مختصر من أول سؤال — والوضع إرشادي افتراضياً. */
+export async function createConversation(userId, { title = '', stepKey = null, mode = 'normal' } = {}) {
+  const nextMode = mode === 'defense' ? 'defense' : 'normal';
   const { rows } = await pool.query(
-    'INSERT INTO conversations (user_id, title, step_key) VALUES ($1, $2, $3) RETURNING *',
-    [userId, String(title || 'محادثة جديدة').trim().slice(0, TITLE_LIMIT), stepKey || null]
+    'INSERT INTO conversations (user_id, title, step_key, mode) VALUES ($1, $2, $3, $4) RETURNING *',
+    [userId, String(title || 'محادثة جديدة').trim().slice(0, TITLE_LIMIT), stepKey || null, nextMode]
   );
 
   return rows[0];
@@ -100,6 +103,7 @@ export async function appendMessage(conversationId, { role, content, tokensUsed 
 
 /** حذف محادثة كاملة برسائلها. */
 export async function deleteConversation(userId, conversationId) {
+  if (!isUuid(conversationId)) return false;
   const { rowCount } = await pool.query('DELETE FROM conversations WHERE id = $2 AND user_id = $1', [
     userId,
     conversationId
@@ -159,7 +163,15 @@ async function writeDefenseState(conversationId, state) {
  *
  * الأكواد: NO_TOKENS / NO_PROVIDER / PROVIDERS_FAILED / EMPTY_PROMPT / NOT_FOUND / BAD_STEP.
  */
-export async function askSupervisor({ userId, prompt, conversationId = null, stepKey = null, profile = {}, fileIds = [] }) {
+export async function askSupervisor({
+  userId,
+  prompt,
+  conversationId = null,
+  stepKey = null,
+  profile = {},
+  fileIds = [],
+  mode = null
+}) {
   const question = sanitizeUserText(String(prompt || '').trim().slice(0, PROMPT_LIMIT));
   if (!question) {
     const error = new Error('اكتب سؤالك أولاً.');
@@ -183,12 +195,11 @@ export async function askSupervisor({ userId, prompt, conversationId = null, ste
   // محادثة جديدة: ننشئها أولاً لنعرف وضعها، ونتذكّر السابقة لتلخيص ذاكرتها
   const previousId = conversation ? null : await lastRichConversation(userId);
   if (!conversation) {
-    const created = await createConversation(userId, { title: titleFromPrompt(question), stepKey });
-    conversation = { ...created, messages: [], mode: 'normal', defense_state: {} };
+    const created = await createConversation(userId, { title: titleFromPrompt(question), stepKey, mode });
+    conversation = { ...created, messages: [], mode: created.mode || mode || 'normal', defense_state: {} };
   }
 
   const context = await buildSupervisorContext({ userId, profile, conversation, fileIds });
-  const system = buildSystemPrompt(context);
 
   const history = conversation.messages
     .slice(-HISTORY_LIMIT)
@@ -198,7 +209,126 @@ export async function askSupervisor({ userId, prompt, conversationId = null, ste
     }));
 
   const messages = [...history, { role: 'user', content: question }];
-  const replyCap = context.replyCap || CHAT_REPLY_CAPS.normal;
+
+  // الملفات المرفقة: نذكرها في الرسالة نفسها (لا في الموجّه فقط) حتى لا يفترض
+  // النموذج أن السؤال بلا سياق ويصنّفه خارج النطاق.
+  const attachedNames = Array.isArray(context.fileNames) ? context.fileNames : [];
+  if (attachedNames.length && context.files) {
+    messages[messages.length - 1] = {
+      role: 'user',
+      content: `${question}\n\n[مرفق مع هذه الرسالة: ${attachedNames.join('، ')} — مقتطفاتها كاملة في قسم «الملفات المرفقة»]`
+    };
+  }
+
+  const baseCap = context.replyCap || CHAT_REPLY_CAPS.normal;
+
+  /*
+   * أداة المراجع: إن طلب الباحث مصادر/مراجع، نبحث له في قواعد البيانات
+   * العلمية الحقيقية (Crossref · OpenAlex · IEEE · ACM · arXiv …) ونحقن
+   * النتائج في رسالة المشرف، فلا يختلق مرجعاً ولا رابطاً من ذاكرته.
+   * الروابط كلها حقيقية (DOI/الناشر/نسخة مفتوحة) وما دون ذلك يقول «ابحثت ولم أجد».
+   * التكلفة: بلا خصم نقاط (نداء خارجي رخيص) مع تسجيله في سجل الاستهلاك.
+   */
+  let references = null;
+  // الموضوع المُسجَّل (خطوة اختيار الموضوع أو عنوان الملف) — مصدر واحد معتمد.
+  let registered = { topic: '', origin: 'none' };
+  try {
+    registered = await registeredTopic(userId, profile);
+  } catch (error) {
+    console.warn(`تعذّرت قراءة موضوع البحث المسجّل: ${error?.code || error?.message}`);
+  }
+
+  try {
+    // سياق المحادثات: المهمة المتفق عليها + ملخّص الذاكرة + آخر كلام للباحث،
+    // حتى لو كان ملفه ناقصاً نعرف من أي تخصّص يبحث.
+    const conversationTopic = [
+      context.openTask,
+      context.memorySummary,
+      ...history
+        .filter((message) => message.role === 'user')
+        .slice(-2)
+        .map((message) => String(message.content || '').slice(0, 160))
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
+    // هل سبق أن سألناه عن العنوان في هذه المحادثة؟ (لنفادي سؤال مكرّر)
+    // نتحقّق أننا سبق عن العنوان (المحرّك قد يصوغ السؤال بصيغ مختلفة)
+    const askedBefore = conversation.messages.slice(-3).some((message) => {
+      if (message.role !== 'assistant') return false;
+      const text = String(message.content || '');
+      if (/في أي عنوان|أي عنوان بالتحديد/.test(text)) return true;
+      return /(عنوان|موضوع)/.test(text) && /(مراجع|مصادر)/.test(text) && /[؟?]/.test(text);
+    });
+
+    references = await literatureToolFor(question, {
+      limit: 6,
+      userId,
+      field: String(profile?.research_field || context.field || '').slice(0, 80),
+      title: String(profile?.research_title || context.title || '').slice(0, 160),
+      context: conversationTopic,
+      askedBefore
+    });
+  } catch (error) {
+    console.warn(`فشل بحث المراجع التلقائي: ${error?.code || error?.message}`);
+  }
+
+  // لا نقبل طلباً بلا عنوان محدّد ⇒ نطلب من الباحث عنوان بحثه (سؤال واحد).
+  if (references?.needsTopic) {
+    const hint =
+      references.reason === 'need_title'
+        ? 'طلب الباحث مراجع دون أن يذكر عنواناً محدّداً.'
+        : references.reason === 'no_match'
+          ? `بحثنا عن «${references.topic || ''}» ولم نجد له مراجع مطابقة في قواعد البيانات.`
+          : references.reason === 'broad'
+            ? `عبارة «${references.topic || ''}» عامة أكثر من اللازم ولا تحدّد بحثاً بعينه.`
+            : 'لم نتبيّن عنوان بحثه بعد.';
+
+    messages[messages.length - 1] = {
+      role: 'user',
+      content:
+        '== لا ترسل مراجع في هذه الرسالة ==\n' +
+        `${hint}\n` +
+        'المطلوب ممنك: اسأله **سؤالاً واحداً فقط** عن العنوان الذي يريد مراجع عنه، مثل: «في أي عنوان بالتحديد تريد المراجع؟».\n' +
+        (context.field && context.field !== 'غير محدد'
+          ? `اذكري أن تخصصه في ملفه «${context.field}» وتسأليه إن كان العنوان داخل هذا التخصص أو خارجه.\n`
+          : '') +
+        'لا تعرضي أي مرجع من معرفتكِ الآن، ولا تَعِدْه به. انتظري جوابه ثم ابحثي له في رسالته التالية.\n' +
+        'قاعدة عامة: لا تفترض شيئاً من عندك ولا تخمّن ما يريده.'
+    };
+  } else if (references?.block) {
+    messages[messages.length - 1] = {
+      role: 'user',
+      content: `${references.block}\n\n---\nسؤال الباحث: ${question}`
+    };
+  }
+
+  /*
+   * إكمال خطوة «اختيار الموضوع»: إن كتب الباحث موضوعه صراحةً في رسالة
+   * (أو أجاب على سؤال المشرفة عنه) نُسجّله في خطته — بعبارته هو، بلا تأليف.
+   * وتبقى الخطوة «جاري» حتى هو يقرّر أنها تمّت.
+   */
+  let topicRecordedBySystem = '';
+  if (String(context.currentStepKey || stepKey || '') === 'topic') {
+    const stated = extractStatedTopic(question);
+    if (stated) {
+      try {
+        topicRecordedBySystem = await recordTopic(userId, stated, {
+          degreeLevel: profile?.degree_level || '',
+          stepKey: 'topic'
+        });
+      } catch (error) {
+        console.warn(`تعذّر تسجيل موضوع البحث: ${error?.code || error?.message}`);
+      }
+    }
+  }
+
+  // نخبر المشرف بما سجّلناه نيابةً عن الباحث، فتكتب أمامه لا من تلقاء نفسها.
+  const system = buildSystemPrompt(
+    { ...context, topicRecordedBySystem },
+    { references: references?.items?.length || 0, recordedTopic: topicRecordedBySystem }
+  );
+  const replyCap = references?.block || attachedNames.length ? Math.max(baseCap, 1400) : baseCap;
 
   // ٣) الحجز المسبق — أعلى تكلفة ممكنة لهذه الرسالة، يُردّ الفرق بعد الرد
   const reservation = estimateReservation({ system, messages, replyCap });
@@ -238,6 +368,38 @@ export async function askSupervisor({ userId, prompt, conversationId = null, ste
   await appendMessage(conversation.id, { role: 'assistant', content: cleaned.text, model: reply.model });
   await pool.query('UPDATE conversations SET provider = $2 WHERE id = $1', [conversation.id, reply.provider]);
 
+  // نتائج أداة المراجع: قواعد البيانات الخارجية + ما وجدناه في مكتبة المنصة (وروابطه).
+  const foundReferences = [
+    ...(references?.items || []).map((item) => ({ kind: 'web', ...item })),
+    ...(references?.libraryItems || []).map((item) => ({
+      kind: 'library',
+      id: item.id,
+      title: item.title,
+      authorText: item.authorsText || item.authors || '',
+      authors: item.authors || [],
+      year: item.year,
+      venue: item.venue || item.source,
+      source: item.source,
+      doi: item.doi || '',
+      pdfUrl: item.pdfUrl || '',
+      hasFile: Boolean(item.hasFile),
+      externalUrl: item.externalUrl || '',
+      // بيانات مقروءة من رابط المصدر نفسه (وسوم citation_*)
+      fromLink: Boolean(item.enriched),
+      linkTitle: item.linkTitle || ''
+    }))
+  ].slice(0, 12);
+
+  // نحفظها لتظهر للباحث كقائمة بيانات وروابط قابلة للفتح
+  if (foundReferences.length) {
+    const payload = foundReferences;
+
+    await pool.query('UPDATE conversations SET references_found = $2 WHERE id = $1', [
+      conversation.id,
+      JSON.stringify(payload)
+    ]);
+  }
+
   await logUsage(userId, {
     type: 'chat',
     tokens: charged,
@@ -248,6 +410,18 @@ export async function askSupervisor({ userId, prompt, conversationId = null, ste
     multiplier: charge.multiplier,
     summary: titleFromPrompt(question)
   });
+
+  // سجل أدوات المراجع: يوثّق ما بحثناه فعلاً بلا خصم (شفافية للباحث ولوحة الإدارة).
+  if (references?.items?.length || references?.libraryItems?.length) {
+    const webSources = [...new Set((references.items || []).flatMap((item) => item.sources || []))];
+    await logUsage(userId, {
+      type: 'sources',
+      tokens: 0,
+      summary: `بحث مراجع: ${(references.items || []).length} نتيجة خارجية${webSources.length ? ` (${webSources.join('، ')})` : ''}${
+        references.libraryItems?.length ? ` + ${references.libraryItems.length} من مكتبة المنصة` : ''
+      }`
+    });
+  }
 
   // ٧) بدء جلسة جديدة ⇒ تلخيص الجلسة السابقة (على حساب المنصة، لا الباحث)
   if (previousId) {
@@ -275,12 +449,15 @@ export async function askSupervisor({ userId, prompt, conversationId = null, ste
     tokensCharged: charged,
     reserved: reservation.credits,
     strikes,
+    // المراجع التي عثرت عليها الأداة (خارجية + مكتبة المنصة): تُعرض تحت الرد برابط كل مرجع
+    references: foundReferences,
     mode: conversation.mode
   };
 }
 
 /** تبديل وضع المحادثة بين الإرشاد العادي ووضع المناقشة. */
 export async function setConversationMode(userId, conversationId, mode) {
+  if (!isUuid(conversationId)) return false;
   const next = mode === 'defense' ? 'defense' : 'normal';
   const { rowCount } = await pool.query(
     "UPDATE conversations SET mode = $3, defense_state = '{}'::jsonb WHERE id = $2 AND user_id = $1",

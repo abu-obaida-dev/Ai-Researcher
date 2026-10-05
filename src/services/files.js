@@ -2,9 +2,11 @@ import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool } from '../db/client.js';
-import { FILE_UPLOAD_LIMITS } from '../constants.js';
+import { FILE_UPLOAD_LIMITS, FREE_PLAN_CODE, isUuid } from '../constants.js';
 import { isValidStepKeyForUser } from './journey.js';
 import { maxStorageBytes, maxUploadBytes } from './settings.js';
+import { planStorageBytes } from './plans.js';
+import { assertContentMatchesExtension } from './upload-guard.js';
 
 /**
  * ملفات الباحث (1E): الميتاداتا في جدول files والبايتات على القرص تحت
@@ -20,6 +22,15 @@ const STORAGE_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..
 
 /** أقصى حجم نعرضه كنص داخل صفحة المعاينة (كبير كفاية، صغير يحمي المتصفح). */
 const TEXT_PREVIEW_LIMIT = 400 * 1024;
+
+/**
+ * هل التخزين المحلي متاح؟ على Vercel/AWS Functions نظام الملفات للقراءة فقط،
+ * فكتابة الملفات المرفوعة تفشل دائماً. نكتشف المنصة بمتغيّر بيئة بدل محاولة
+ * الكتابة ثم الفشل (والمحاولة تقرأ الملف كله في الذاكرة قبل أن ترفضه).
+ */
+export function isEphemeralStorage() {
+  return Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+}
 
 export { maxUploadBytes, maxStorageBytes };
 
@@ -121,6 +132,21 @@ export async function listFiles(userId, { step = '', limit = 100 } = {}) {
 }
 
 /**
+ * حصة تخزين الباحث بالبايت: القيمة الحقيقية من باقته في قاعدة البيانات
+ * (plans.storage_mb — يضبطها المدير من صفحة الباقات)، مع سقوط آمن على
+ * حدّ المنصة العام (settings.max_storage_mb) إن تعذّرت القراءة.
+ */
+export async function userQuotaBytes(userId) {
+  try {
+    const { rows } = await pool.query('SELECT plan_code FROM users WHERE id = $1', [userId]);
+    return await planStorageBytes(rows[0]?.plan_code || FREE_PLAN_CODE);
+  } catch (error) {
+    console.warn(`تعذّرت قراءة حصة التخزين للمستخدم: ${error.code || error.message}`);
+    return maxStorageBytes();
+  }
+}
+
+/**
  * ملخّص مساحة الباحث: عدد الملفات + المستخدم + الحصة + المتبقي + نسبة الاستخدام.
  * يُستخدم في شريط المساحة أعلى صفحة «ملفاتى».
  *
@@ -129,14 +155,16 @@ export async function listFiles(userId, { step = '', limit = 100 } = {}) {
  * مرئياً للشريط (1.2%) ما دام المستخدم لم يفرغ، وإلا بدا الشريط معطّلاً.
  */
 export async function filesSummary(userId) {
-  const { rows } = await pool.query(
-    'SELECT count(*)::int AS total, COALESCE(sum(size_bytes), 0)::bigint AS bytes FROM files WHERE user_id = $1',
-    [userId]
-  );
+  const [{ rows }, quotaBytes] = await Promise.all([
+    pool.query(
+      'SELECT count(*)::int AS total, COALESCE(sum(size_bytes), 0)::bigint AS bytes FROM files WHERE user_id = $1',
+      [userId]
+    ),
+    userQuotaBytes(userId)
+  ]);
 
   const usedBytes = Number(rows[0]?.bytes || 0);
   const total = Number(rows[0]?.total || 0);
-  const quotaBytes = await maxStorageBytes();
   const remainingBytes = Math.max(0, quotaBytes - usedBytes);
 
   const rawPercent = quotaBytes > 0 ? (usedBytes / quotaBytes) * 100 : 0;
@@ -205,6 +233,9 @@ export function textPreview(buffer, maxBytes = TEXT_PREVIEW_LIMIT) {
 
 /** صف واحد بملكيته (null إن لم يكن له) — يُستخدم للتحميل والحذف. */
 export async function getFileRow(userId, fileId) {
+  // حارس: معرّف غير UUID يجعل Postgres يرمي ⇒ بلا هذا يتحوّل الرمي إلى
+  // unhandledRejection داخل معالج async فتنهار عملية الخادم كاملة (DoS).
+  if (!isUuid(fileId)) return null;
   const { rows } = await pool.query('SELECT * FROM files WHERE id = $2 AND user_id = $1', [userId, fileId]);
   return rows[0] || null;
 }
@@ -215,6 +246,14 @@ export async function getFileRow(userId, fileId) {
  * metadata. أي فشل بعد الكتابة ينظّف الملف جزئياٌ.
  */
 export async function saveUpload(userId, { file, title = '', step = '' } = {}) {
+  // منصّات Serverless (Vercel): نظام الملفات للقراءة فقط ⇒ لا مكان لحفظ الملف.
+  // نرفض مبكراً برسالة عربية مفهومة بدل خطأ 500 غامض أو ضياع الملف بعد قراءته.
+  if (isEphemeralStorage()) {
+    const error = new Error('رفع الملفات غير متاح على هذه المنصة حالياً (نظام الملفات مؤقّت).');
+    error.code = 'NO_STORAGE';
+    throw error;
+  }
+
   const extension = extensionOf(file?.name);
   if (!extension || !FILE_UPLOAD_LIMITS.allowedExtensions.includes(extension)) {
     const error = new Error(`نوع الملف غير مسموح. المسموح: ${allowedTypesLabel()}`);
@@ -222,7 +261,7 @@ export async function saveUpload(userId, { file, title = '', step = '' } = {}) {
     throw error;
   }
 
-  const [limit, quotaBytes] = await Promise.all([maxUploadBytes(), maxStorageBytes()]);
+  const [limit, quotaBytes] = await Promise.all([maxUploadBytes(), userQuotaBytes(userId)]);
   if (Number(file.size || 0) > limit) {
     const error = new Error(`حجم الملف أكبر من الحد المسموح (${Math.round(limit / (1024 * 1024))} MB).`);
     error.code = 'TOO_LARGE';
@@ -260,6 +299,10 @@ export async function saveUpload(userId, { file, title = '', step = '' } = {}) {
     error.code = 'TOO_LARGE';
     throw error;
   }
+
+  // البصمة الثنائية: نتأكد أن بايتات الملف تطابق امتداده قبل أي كتابة على القرص.
+  // (الامتداد وContent-Type يرسلهما المتصفح ⇒ لا يصلحان كدليل وحدهما).
+  assertContentMatchesExtension(extension, bytes);
 
   // إعادة الفحص بالحجم الحقيقي (بعد قراءة البايتات) في حال أخبر المتصفح بحجم أقل
   if (usedBefore.bytes + bytes.length > quotaBytes) {

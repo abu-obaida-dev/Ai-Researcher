@@ -2,14 +2,21 @@ import {
   APP_NAME,
   DEGREE_LEVELS,
   GOAL_OPTIONS,
+  PLATFORM_SERVICES,
   PROGRESS_LEVELS,
   RESEARCH_STAGES,
   SPECIALIZATIONS,
   TOKEN_COSTS
 } from '../constants.js';
 import { formatDate, formatDateTime, formatNumber } from './format.js';
+import { formatStorageMb } from '../services/plans.js';
 import { googleIcon, icon } from './icons.js';
 import { BRAND, escapeHtml, renderLayout } from './layout.js';
+
+/** اسم الخدمة بالعربية من مفتاحها (لعرض خدمات الباقة في اللوحة والحساب). */
+function serviceLabel(key) {
+  return PLATFORM_SERVICES.find((service) => service.key === key)?.short || key;
+}
 
 /**
  * صفحات المصادقة والحساب: الدخول بحساب جوجل، إكمال الملف البحثي (onboarding)،
@@ -176,7 +183,7 @@ const ONBOARDING_REASONS = [
   {
     icon: 'shield',
     title: 'بياناتك محفوظة عندنا',
-    text: 'بياناتك تُخزَّن في قاعدة بيانات المنصة (PostgreSQL) وتُستخدم لتخصيص الإشراف فقط، ويمكنك تعديلها في أي وقت.'
+    text: 'بياناتك تُحفظ في خوادم المنصة وتُستخدم لتخصيص الإشراف فقط، ويمكنك تعديلها في أي وقت.'
   }
 ];
 
@@ -226,7 +233,7 @@ export function renderOnboardingPage({ account, values, errors = [], profile = n
 
       <div class="form-actions">
         <button class="btn btn-primary" type="submit">${profile ? 'حفظ التعديلات' : 'ابدأ مع المشرف الذكي'}</button>
-        <span class="muted">يُحفظ الملف في قاعدة بيانات المنصة ويمكنك تعديله في أي وقت.</span>
+        <span class="muted">يُحفظ الملف في خوادم المنصة ويمكنك تعديله في أي وقت.</span>
       </div>
     </form>
   </div>
@@ -316,6 +323,8 @@ export function renderAccountPage({ account, profile, plan, usage, unread = 0 })
     )} نقطة (${percent}%).</p>
     <dl class="kv">
       ${kv('الباقة الحالية', plan?.title || account.plan_code || 'لا توجد باقة')}
+      ${kv('مساحة التخزين', plan?.storageMb ? formatStorageMb(plan.storageMb) : '—')}
+      ${kv('خدمات باقتك', (plan?.services || []).map((key) => serviceLabel(key)).join(' · ') || '—')}
       ${kv('عمليات مسجّلة', formatNumber(usage.events))}
       ${kv('نقاط مستهلكة', formatNumber(used))}
     </dl>
@@ -569,6 +578,8 @@ export function renderDashboardPage({
   )} نقطة (${percent}%).</p>
   <dl class="kv">
     ${kv('الباقة الحالية', plan?.title || account.plan_code || 'لا توجد باقة')}
+    ${kv('مساحة التخزين', plan?.storageMb ? formatStorageMb(plan.storageMb) : '—')}
+    ${kv('خدمات باقتك', (plan?.services || []).map((key) => serviceLabel(key)).join(' · ') || '—')}
     ${kv('عمليات مسجّلة', formatNumber(usage.events))}
     ${safe.lastActivity ? kv('آخر نشاط', formatDateTime(safe.lastActivity)) : ''}
   </dl>

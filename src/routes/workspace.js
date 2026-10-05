@@ -1,6 +1,7 @@
 import { Readable } from 'node:stream';
 import express from 'express';
-import { requireAccount } from '../middleware/auth.js';
+import { requireAccount, requireService } from '../middleware/auth.js';
+import { concurrencyLimit, rateLimitUser } from '../middleware/security.js';
 import { degreeOfUser, resolvePathForDegree, stepOptionsForDegree, stepTitle } from '../services/journey.js';
 import { unreadCount } from '../services/notifications.js';
 import {
@@ -32,6 +33,9 @@ import {
 import { renderNotice } from '../views/layout.js';
 import { renderFileViewerPage, renderFilesPage, renderNotesPage, renderReferencesPage } from '../views/workspace.js';
 import { readSpreadsheet, spreadsheetErrorMessage } from '../services/spreadsheet.js';
+import { readLibraryItem } from '../services/library.js';
+import { LIBRARY_SOURCES } from '../services/library-sources.js';
+import { searchLiterature, resolveReference, buildSearchQuery } from '../services/literature.js';
 
 /**
  * مسارات مساحة عمل الباحث (1E): المراجع والمفكرة والملفات.
@@ -57,7 +61,11 @@ const FLASH = {
   file_uploaded: { type: 'ok', message: 'تم رفع الملف وحفظه في مساحتك.' },
   file_deleted: { type: 'ok', message: 'حُذف الملف.' },
   file_missing: { type: 'error', message: 'الملف غير موجود.' },
-  file_bad: { type: 'error', message: 'تعذّر رفع الملف — تحقق من النوع والحجم.' }
+  file_bad: { type: 'error', message: 'تعذّر رفع الملف — تحقق من النوع والحجم.' },
+  file_no_storage: {
+    type: 'error',
+    message: 'رفع الملفات غير متاح على هذه المنصة حالياً (نظام الملفات مؤقّت) — بقية المنصة تعمل كما هي.'
+  }
 };
 
 /** تنبيه النتيجة من باراميترات الرابط (?ok= أو ?err=). */
@@ -72,20 +80,35 @@ async function stepTitlesForUser(userId) {
 }
 
 /** صفحة المراجع: بحث في المكتبة + «مراجعي» + نموذج إضافة يدوية. */
-router.get('/references', requireAccount, async (req, res) => {
+router.get('/references', requireService('library'), async (req, res) => {
   try {
     const userId = req.account.id;
     const query = String(req.query.q || '').trim().slice(0, 120);
     const stepKey = String(req.query.step || '').trim().slice(0, 100);
     const status = String(req.query.status || '').trim();
+    const webQuery = String(req.query.wq || '').trim().slice(0, 160);
+    const webSource = String(req.query.wsrc || '').trim().slice(0, 30);
+  const resolveQuery = String(req.query.resolve || '').trim().slice(0, 300);
 
-    const [results, references, counts, stepOptions, stepTitles, unread] = await Promise.all([
+  // أداة «لديّ DOI أو رابط» — تُحلَّل بالتوازي مع البحث العام (وحدها إن وُجدت).
+  const resolveResult = resolveQuery ? await resolveReference(resolveQuery) : null;
+
+    const [results, references, counts, stepOptions, stepTitles, unread, web] = await Promise.all([
       query ? searchLibraryItems({ userId, q: query }) : Promise.resolve([]),
       listUserReferences(userId, { step: stepKey, status }),
       referenceStatusCounts(userId),
       stepOptionsForDegree(await degreeOfUser(userId)),
       stepTitlesForUser(userId),
-      unreadCount(userId)
+      unreadCount(userId),
+      // أداة الباحث: بحث في قواعد البيانات العلمية الحقيقية (Crossref · IEEE · ACM · arXiv …)
+      webQuery
+        ? searchLiterature({
+            query: buildSearchQuery({ topic: webQuery }),
+            sources: webSource ? [webSource] : undefined,
+            limit: 8,
+            topic: webQuery
+          })
+        : Promise.resolve(null)
     ]);
 
     res.type('html').send(
@@ -99,6 +122,13 @@ router.get('/references', requireAccount, async (req, res) => {
         stepKey,
         stepOptions,
         stepTitles,
+        web,
+        webQuery,
+        webSource,
+        webSources: LIBRARY_SOURCES,
+        resolved: resolveResult?.record || null,
+        resolveError: resolveResult?.error || '',
+        resolveQuery,
         flash: flashFromQuery(req.query)
       })
     );
@@ -112,8 +142,101 @@ router.get('/references', requireAccount, async (req, res) => {
   }
 });
 
+/**
+ * ملف كتاب في مكتبة المنصة: معاينة داخل المتصفح أو تحميل.
+ *   - /library/:id/file            ⇒ تحميل (attachment)
+ *   - /library/:id/file?inline=1   ⇒ معاينة (image/pdf/txt داخل الصفحة)
+ * العنصر المعطّل لا يُفتح لأحد (activeOnly = true)، ونصادر ثابتة مع
+ * content-disposition وnosniff وCSP صارمة كما في ملفات الباحث.
+ */
+router.get('/library/:id/file', requireService('library'), async (req, res) => {
+  try {
+    const found = await readLibraryItem(String(req.params.id), { activeOnly: true });
+    if (!found) {
+      res.status(404).type('text').send('الكتاب غير موجود في مكتبة المنصة.');
+      return;
+    }
+    if (!found.buffer) {
+      const link = found.row.external_url;
+      res
+        .status(410)
+        .type('html')
+        .send(
+          `<p style="font-family:sans-serif">لا يتوفّر ملف لهذا العنصر في المكتبة.${
+            link ? ` <a href="${escapeAttr(link)}" target="_blank" rel="noopener">افتح المصدر الأصلي ↗</a>` : ''
+          }</p>`
+        );
+      return;
+    }
+
+    const inline = String(req.query.inline || '') === '1';
+    const row = found.row;
+    const isText = String(row.mime || '').startsWith('text/') || /\.(txt|md|csv)$/i.test(row.file_name || '');
+    const name = encodeURIComponent(row.file_name || `${row.title || 'book'}.pdf`);
+
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
+    res.setHeader('content-length', found.buffer.length);
+
+    if (inline && !isText) {
+      res.setHeader('content-type', row.mime || 'application/octet-stream');
+      res.setHeader('content-disposition', `inline; filename*=UTF-8''${name}`);
+    } else {
+      // النص يُقدَّم كنص عادي دائماً (لا HTML) ⇒ منع تنفيذ أي محتوى مرفوع.
+      res.setHeader('content-type', isText ? 'text/plain; charset=utf-8' : row.mime || 'application/octet-stream');
+      res.setHeader('content-disposition', `attachment; filename*=UTF-8''${name}`);
+    }
+
+    res.send(found.buffer);
+  } catch (error) {
+    console.warn(`تعذّر فتح ملف مكتبة: ${error?.code || error?.message}`);
+    res.status(500).type('text').send('تعذّر قراءة الملف.');
+  }
+});
+
+/** خانق يهرّب قيمة داخل خاصية HTML (يُستخدم في رسالة 410 أعلاه). */
+function escapeAttr(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/** إضافة مرجع من بحث الويب إلى «مراجعي» — بنفس نموذج الإضافة اليدوي لكن مع
+ * بيانات النتيجة (المؤلفون · السنة · المجلة · DOI) جاهزة.
+ */
+router.post(
+  '/references/web',
+  requireService('library'),
+  rateLimitUser('reference_web_add', { limit: 30, windowMs: 10 * 60 * 1000 }),
+  async (req, res) => {
+    const body = req.body || {};
+    const step = String(body.step || '').trim().slice(0, 100);
+    const back = `/references${step ? `?step=${encodeURIComponent(step)}` : ''}`;
+
+    try {
+      await addCustomReference(req.account.id, {
+        title: body.title,
+        authors: body.authors,
+        year: body.year,
+        source: [body.venue || body.source, body.doi ? `doi:${body.doi}` : '', body.url || '']
+          .filter(Boolean)
+          .join(' · ')
+          .slice(0, 500),
+        note: String(body.note || '').slice(0, 500),
+        step
+      });
+      res.redirect(303, `${back}${back.includes('?') ? '&' : '?'}ok=ref_added`);
+    } catch (error) {
+      const key = error?.code === 'NOT_ADDED' ? 'ref_exists' : 'ref_bad';
+      res.redirect(303, `${back}${back.includes('?') ? '&' : '?'}err=${key}`);
+    }
+  }
+);
+
 /** إضافة مرجع: من المكتبة (library_item_id) أو يدوياً (title). */
-router.post('/references', requireAccount, async (req, res) => {
+router.post('/references', requireService('library'), async (req, res) => {
   const body = req.body || {};
   const step = String(body.step || '').trim().slice(0, 100);
   const back = step ? `/references?step=${encodeURIComponent(step)}` : '/references';
@@ -139,7 +262,7 @@ router.post('/references', requireAccount, async (req, res) => {
 });
 
 /** تغيير حالة قراءة مرجع. */
-router.post('/references/:id/status', requireAccount, async (req, res) => {
+router.post('/references/:id/status', requireService('library'), async (req, res) => {
   try {
     await updateReferenceStatus(req.account.id, String(req.params.id), String(req.body?.status || 'to_read'));
     res.redirect(303, '/references?ok=ref_status');
@@ -149,13 +272,13 @@ router.post('/references/:id/status', requireAccount, async (req, res) => {
 });
 
 /** حذف مرجع من قائمة الباحث. */
-router.post('/references/:id/delete', requireAccount, async (req, res) => {
+router.post('/references/:id/delete', requireService('library'), async (req, res) => {
   const deleted = await deleteReference(req.account.id, String(req.params.id));
   res.redirect(303, `/references?${deleted ? 'ok' : 'err'}=${deleted ? 'ref_deleted' : 'ref_missing'}`);
 });
 
 /** صفحة المفكرة. */
-router.get('/notes', requireAccount, async (req, res) => {
+router.get('/notes', requireService('notes'), async (req, res) => {
   try {
     const userId = req.account.id;
     const query = String(req.query.q || '').trim().slice(0, 120);
@@ -195,7 +318,7 @@ router.get('/notes', requireAccount, async (req, res) => {
 });
 
 /** إنشاء ملاحظة (مع ربطها بمرجع اختياري عند القدوم من صفحة المراجع). */
-router.post('/notes', requireAccount, async (req, res) => {
+router.post('/notes', requireService('notes'), async (req, res) => {
   const body = req.body || {};
   const step = String(body.step || '').trim().slice(0, 100);
   const referenceId = String(body.reference_id || '').trim();
@@ -217,7 +340,7 @@ router.post('/notes', requireAccount, async (req, res) => {
 });
 
 /** تعديل ملاحظة. */
-router.post('/notes/:id', requireAccount, async (req, res) => {
+router.post('/notes/:id', requireService('notes'), async (req, res) => {
   const body = req.body || {};
   const step = String(body.step || '').trim().slice(0, 100);
 
@@ -236,7 +359,7 @@ router.post('/notes/:id', requireAccount, async (req, res) => {
 });
 
 /** تثبيت/إلغاء تثبيت ملاحظة. */
-router.post('/notes/:id/pin', requireAccount, async (req, res) => {
+router.post('/notes/:id/pin', requireService('notes'), async (req, res) => {
   const step = String(req.body?.step || '').trim().slice(0, 100);
 
   try {
@@ -248,13 +371,13 @@ router.post('/notes/:id/pin', requireAccount, async (req, res) => {
 });
 
 /** حذف ملاحظة. */
-router.post('/notes/:id/delete', requireAccount, async (req, res) => {
+router.post('/notes/:id/delete', requireService('notes'), async (req, res) => {
   const deleted = await deleteNote(req.account.id, String(req.params.id));
   res.redirect(303, `/notes?${deleted ? 'ok' : 'err'}=${deleted ? 'note_deleted' : 'note_missing'}`);
 });
 
 /** صفحة الملفات. */
-router.get('/files', requireAccount, async (req, res) => {
+router.get('/files', requireService('files'), async (req, res) => {
   try {
     const userId = req.account.id;
     const stepKey = String(req.query.step || '').trim().slice(0, 100);
@@ -293,10 +416,27 @@ router.get('/files', requireAccount, async (req, res) => {
 });
 
 /** رفع ملف: نستقبل multipart يدوياً عبر undici formData (بدون مكتبة خارجية). */
-router.post('/files', requireAccount, async (req, res) => {
+router.post(
+  '/files',
+  requireService('files'),
+  rateLimitUser('file_upload', { limit: 20, windowMs: 10 * 60 * 1000 }),
+  concurrencyLimit('uploads'),
+  async (req, res) => {
   const step = String(req.query.step || '').trim().slice(0, 100);
 
   try {
+    // رفض مبكر قبل قراءة الجسم كاملاً في الذاكرة (حماية من DoS):
+    // حد الطلب = حدّ الملف الواحد + 2MB لحدود النموذج وترويسات multipart.
+    const declared = Number(req.headers['content-length'] || 0);
+    if (declared > 0) {
+      const maxBytes = await maxUploadBytes();
+      if (declared > maxBytes + 2 * 1024 * 1024) {
+        console.warn(`رُفض رفع ضخم بلا قراءة: ${declared} بايت`);
+        res.redirect(303, '/files?err=file_bad');
+        return;
+      }
+    }
+
     const request = new Request('http://localhost/files', {
       method: 'POST',
       body: Readable.toWeb(req),
@@ -321,12 +461,15 @@ router.post('/files', requireAccount, async (req, res) => {
     res.redirect(303, `/files?ok=file_uploaded${step ? `&step=${encodeURIComponent(step)}` : ''}`);
   } catch (error) {
     console.warn(`فشل رفع الملف: ${error?.code || error?.message}`);
-    const key = ['TOO_LARGE', 'BAD_TYPE', 'BAD_MIME', 'BAD_STEP', 'QUOTA_EXCEEDED'].includes(error?.code)
+    const key = ['TOO_LARGE', 'BAD_TYPE', 'BAD_MIME', 'BAD_STEP', 'BAD_CONTENT', 'QUOTA_EXCEEDED'].includes(error?.code)
       ? 'file_bad'
-      : 'file_missing';
+      : error?.code === 'NO_STORAGE'
+        ? 'file_no_storage'
+        : 'file_missing';
     res.redirect(303, `/files?err=${key}`);
   }
-});
+  }
+);
 
 /**
  * تحميل/عرض ملف (مملوك للباحث فقط).
@@ -334,7 +477,7 @@ router.post('/files', requireAccount, async (req, res) => {
  *  - ?inline=1 : عرض داخل المتصفح — لنوع «النص» نُجبر text/plain مع nosniff
  *    حتى لا يُفسَّر محتوى مرفوع كـ HTML (منع XSS مخزّن).
  */
-router.get('/files/:id/raw', requireAccount, async (req, res) => {
+router.get('/files/:id/raw', requireService('files'), async (req, res) => {
   const found = await readOwnedFile(req.account.id, String(req.params.id));
 
   if (!found) {
@@ -374,7 +517,7 @@ function safeInlineMime(kind, mime) {
 }
 
 /** صفحة معاينة ملف: صورة/PDF/نص داخل الموقع. */
-router.get('/files/:id/view', requireAccount, async (req, res) => {
+router.get('/files/:id/view', requireService('files'), async (req, res) => {
   const fileId = String(req.params.id);
   const found = await readOwnedFile(req.account.id, fileId);
 
@@ -419,7 +562,7 @@ router.get('/files/:id/view', requireAccount, async (req, res) => {
 });
 
 /** حذف ملف (مملوك للباحث فقط). */
-router.post('/files/:id/delete', requireAccount, async (req, res) => {
+router.post('/files/:id/delete', requireService('files'), async (req, res) => {
   const deleted = await deleteFile(req.account.id, String(req.params.id));
   res.redirect(303, `/files?${deleted ? 'ok' : 'err'}=${deleted ? 'file_deleted' : 'file_missing'}`);
 });

@@ -2,8 +2,8 @@ import { pool } from '../db/client.js';
 import { CHAT_REPLY_CAPS, DEGREE_LEVELS, PREFERRED_LANGUAGES, RESEARCH_STAGES } from '../constants.js';
 import { getJourney } from './journey.js';
 import { getStrikes } from './supervisor-memory.js';
-import { readOwnedFile, textPreview } from './files.js';
-import { readSpreadsheet } from './spreadsheet.js';
+import { readOwnedFile } from './files.js';
+import { extractFileText } from './documents.js';
 
 /**
  * سياق المشرف الذكي — كل متغيّرات {{…}} في موجّه النظام.
@@ -67,8 +67,10 @@ function orDash(value) {
 }
 
 /**
- * يبني كتلة الملفات المرفقة بالرسالة: نصوص و csv/xlsx بشكل نصّي.
+ * يبني كتلة الملفات المرفقة بالرسالة: PDF و Word و txt/md/csv و Excel.
  * تُلفّ بوسوم <file name="…"> مع تعليمات صريحة بأنها بيانات فقط.
+ * يعتمد على services/documents.js — الذي يقرأ PDF و DOCX؛ فكان سابقاً يفشل
+ * معهما فيخرج «تعذّر استخراج نصّ» فلا يعرف المشرف شيئاً عمّا أرفقه الباحث.
  */
 async function buildFilesBlock(userId, fileIds = []) {
   const ids = [
@@ -79,45 +81,41 @@ async function buildFilesBlock(userId, fileIds = []) {
     )
   ].slice(0, MAX_ATTACHED_FILES);
 
-  if (!ids.length) return { block: '', names: [] };
+  if (!ids.length) return { block: '', names: [], unreadable: [] };
 
   const parts = [];
   const names = [];
+  const unreadable = [];
 
   for (const id of ids) {
     const found = await readOwnedFile(userId, id);
     if (!found || !found.buffer) continue;
 
     const name = found.row.file_name;
-    let body = '';
+    const { text, kind } = await extractFileText(found.buffer, name);
 
-    if (/\.(txt|md|csv)$/i.test(name)) {
-      body = textPreview(found.buffer) || '';
-    } else if (/\.(xlsx|xls)$/i.test(name)) {
-      const parsed = await readSpreadsheet(found.buffer, name);
-      body = parsed.sheets
-        .map(
-          (sheet) =>
-            `ورقة «${sheet.name}»:\n${(sheet.rows || []).slice(0, 40).map((row) => row.join('\t')).join('\n')}`
-        )
-        .join('\n\n');
-
-
+    // PDF ممسوح ضوئياً أو صيغة غير مدعومة ⇒ نسمّي ذلك صراحةً بدل صمت.
+    if (!text.trim()) {
+      const reason =
+        kind === 'pdf'
+          ? 'PDF بلا نصّ قابل للقراءة (غالباً صور ممسوحة ضوئياً) — اطلب نسخة Word أو txt.'
+          : 'صيغة غير مدعومة للقراءة النصية — اطلب نسخة txt أو docx.';
+      unreadable.push({ name, reason });
+      names.push(name);
+      parts.push(`<file name="${name}">\n[تعذّرت قراءة محتوى هذا الملف: ${reason}]\n</file>`);
+      continue;
     }
 
     names.push(name);
-    parts.push(
-      body.trim()
-        ? `<file name="${name}">\n${body.slice(0, MAX_FILE_CHARS)}\n</file>`
-        : `<file name="${name}">تعذّر استخراج نصّ قابل للقراءة من هذا الملف.</file>`
-    );
+    parts.push(`<file name="${name}">\n${text.slice(0, MAX_FILE_CHARS)}\n</file>`);
   }
 
-  if (!parts.length) return { block: '', names: [] };
+  if (!parts.length) return { block: '', names: [], unreadable };
 
   return {
     block: `<files>\n${parts.join('\n').slice(0, MAX_FILES_BLOCK_CHARS)}\n</files>`,
-    names
+    names,
+    unreadable
   };
 }
 
@@ -156,6 +154,10 @@ export async function buildSupervisorContext({ userId, profile = {}, conversatio
     language,
     citationStyle,
     currentStage: orDash(journey?.current?.title || stage),
+    // مفتاح خطوة المرحلة الحالية — تستخدمه الأدوات للبوابة (مثلاً أداة المراجع
+    // لا تعمل إلا في مرحلة الدراسات السابقة).
+    currentStepKey: journey?.current?.key || '',
+    topicRecorded: String(journey?.steps?.find((step) => step.key === 'topic')?.outputNote || '').trim(),
     stepsStatus: stepsStatusLine(journey),
     journeyCompleted: Boolean(journey?.completed),
     memorySummary: String(memoryRow.memory || ''),
@@ -166,6 +168,7 @@ export async function buildSupervisorContext({ userId, profile = {}, conversatio
     mode: isDefense ? 'defense' : 'normal',
     files: files.block,
     fileNames: files.names,
+    filesUnreadable: files.unreadable || [],
     replyCap: isDefense ? CHAT_REPLY_CAPS.defense : CHAT_REPLY_CAPS.normal
   };
 }

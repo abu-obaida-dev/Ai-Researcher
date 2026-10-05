@@ -14,6 +14,55 @@ export const STORAGE_DEFAULTS = {
   maxStorageMb: 500
 };
 
+/**
+ * رقم واتساب الدعم الفني — يُعدّله المدير من **صفحة الإعدادات** (بلا لمس الكود
+ * وبلا إعادة تشغيل): يُخزَّن في settings تحت المفتاح `support_whatsapp` مع كاش
+ * في الذاكرة. لو تُرك فارغاً نرجع لمتغيّر البيئة `SUPPORT_WHATSAPP` (خط نجاة).
+ */
+let supportWhatsappCache = null;
+const SUPPORT_KEY = 'support_whatsapp';
+
+/** يحمّل الرقم من قاعدة البيانات إلى الكاش (مرة عند تشغيل الخادم). */
+export async function loadSupportWhatsapp() {
+  try {
+    supportWhatsappCache = (await readSetting(SUPPORT_KEY)) || '';
+  } catch {
+    supportWhatsappCache = '';
+  }
+  return supportWhatsappCache;
+}
+
+/** الرقم الفعّال الآن: المخزَّن أولاً، ثم البيئة، ثم فارغ (لا رابط). */
+export function currentSupportWhatsapp() {
+  return String(supportWhatsappCache || '').trim() || String(process.env.SUPPORT_WHATSAPP || '').trim();
+}
+
+/**
+ * يحفظ الرقم بعد تنظيفه: أرقام فقط مع `+` في الأول، بطول 8–15 رقماً.
+ * الفارغ = تعطيل الزر (يُحفظ كسلسلة فارغة عمداً).
+ */
+export async function saveSupportWhatsapp(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    supportWhatsappCache = '';
+    await writeSetting(SUPPORT_KEY, '');
+    return { ok: true, value: '' };
+  }
+
+  const digits = raw.replace(/[^\d]/g, '');
+  if (!/^\+?\d{8,15}$/.test(raw.replace(/[\s()-]/g, ''))) {
+    return { ok: false, error: 'رقم غير صالح — اكتبه أرقاماً فقط (8 إلى 15 رقماً)، مثل 0912345678.' };
+  }
+  if (digits.length < 8 || digits.length > 15) {
+    return { ok: false, error: `طول الرقم ${digits.length} رقماً — المطلوب 8 إلى 15.` };
+  }
+
+  const clean = raw.startsWith('+') ? `+${digits}` : digits;
+  supportWhatsappCache = clean;
+  await writeSetting(SUPPORT_KEY, clean);
+  return { ok: true, value: clean };
+}
+
 /** يقرأ إعدادًا نصيًا من جدول settings (null إن لم يوجد). */
 async function readSetting(key) {
   const { rows } = await pool.query('SELECT value FROM settings WHERE key = $1', [key]);
