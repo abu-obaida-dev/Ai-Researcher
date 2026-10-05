@@ -560,7 +560,12 @@ process.on('uncaughtException', (error) => {
 // أمّا على Vercel فيستورد `api/index.js` هذا الملف ويصدّر `app` وحده،
 // فلا يقلع الخادم هنا ولا يفتح منفذ (سلوك Functions).
 const isServerless = isServerlessPlatform();
+
+// Vercel (ومنصّات Functions) تتطلّب **default export** لدالة أو خادم، لا
+// export مسمّى فقط. لذا نصدّر app بالشكلين: `default` ليعمل كدالة، والمسمّى
+// ليكون `import { app }` متاحاً لـ api/index.js.
 export { app };
+export default app;
 
 let server = null;
 if (!isServerless) {
