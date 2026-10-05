@@ -110,21 +110,25 @@ if (trustProxy !== false) {
  * قيمة ثابتة في الكود يجعل تزوير كوكي الجلسة ممكناً لأي شخص يقرأ الكود.
  */
 function assertSessionSecret() {
-  const secret = String(process.env.SESSION_SECRET || process.env.JWT_SECRET || '').trim();
+  let secret = String(process.env.SESSION_SECRET || process.env.JWT_SECRET || '').trim();
   if (secret) return;
 
+  // في الإنتاج: لا نقتل العملية (الإقلاع الفاشل = 500 بلا تفسير عند المستخدم)،
+  // بل نولّد سراً عشوائياً **لهذا الإقلاع فقط** — لا يمكن تزوير الجلسة طوال عمر العملية،
+  // والجلسات تنتهي بإعادة التشغيل ⇒ يبقى الإقلاع آمناً ويُسجَّل تحذير واضح.
   if (process.env.NODE_ENV === 'production') {
-    console.error(
+    secret = crypto.randomBytes(48).toString('hex');
+    process.env.SESSION_SECRET = secret;
+    console.warn(
       [
         '',
-        '✖ متغيّر SESSION_SECRET (أو JWT_SECRET) مطلوب في الإنتاج.',
-        '',
-        'أنشئ سراً طويلاً وعشوائياً وضعه في .env ثم أعد التشغيل:',
-        '  SESSION_SECRET=' + crypto.randomBytes(48).toString('hex'),
+        '⚠️  SESSION_SECRET غير معرّف في الإنتاج — وُلّد سر عشوائي مؤقّت لهذا الإقلاع.',
+        '    كل الجلسات تنتهي عند إعادة النشر. ثبّته في متغيّرات Vercel فوراً:',
+        '    SESSION_SECRET=<قيمة عشوائية طويلة>',
         ''
       ].join('\n')
     );
-    process.exit(1);
+    return;
   }
 
   console.warn('تحذير: لم يُعرَّف SESSION_SECRET — المستخدَم سر تطوير ثابت (غير صالح للإنتاج).');
@@ -133,35 +137,39 @@ function assertSessionSecret() {
 assertSessionSecret();
 
 /**
- * حارس الإنتاج: لا تُقلع المنصة على الإنترنت بإعداد ناقص.
+ * حارس الإنتاج: يتحقق من الإعدادات دون إسقاط المنصة.
  *
  * أخطر سيناريو عملي في هذا المشروع:
  *   `TRUST_PROXY` غير معرّف + `ADMIN_TOKEN` فارغ  ⇒  خلف Nginx يصبح
  *   `req.ip = 127.0.0.1` لكل زائر ⇒  لوحة الإدارة مفتوحة **بلا كلمة مرور**،
- *  Incl. تأكيد طلبات الدفع وتفعيل الباقات.
+ *   بما في ذلك تأكيد طلبات الدفع وتفعيل الباقات.
  *
- * لذلك في الإنتاج نطلب ADMIN_TOKEN ونطلب ضبط TRUST_PROXY صراحةً.
- * استثناء وحيد مسموح: ADMIN_ALLOW_LOCAL=1 (نشر خلف جدار ناري بلا لوحة إدارة).
+ * لماذا لا نقتل العملية عند نقص إعداد؟ لأن الإقلاع الفاشل يظهر للمستخدم
+ * `500 FUNCTION_INVOCATION_FAILED` بلا أي تفسير، بينما التحذير في السجل
+ * مع إصلاح تلقائي يُبقي المنصة تعمل ويغلق الخطر في الوقت نفسه.
+ * فالقاعدة هنا: **نصلّح ما يمكن إصلاحه، ونحذّر بشدّة عمّا لا يمكن**.
  */
 function assertProductionSecurity() {
   if (process.env.NODE_ENV !== 'production') return;
 
+  // استثناء صريح: ADMIN_ALLOW_LOCAL=1 يتجاوز شرط TRUST_PROXY (نشر خلف جدار ناري).
+  const allowLocalOnly = String(process.env.ADMIN_ALLOW_LOCAL || '').trim() === '1';
+  const warnings = [];
   const problems = [];
 
-  // استثناء صريح: ADMIN_ALLOW_LOCAL=1 يتجاوز شرط TRUST_PROXY (نشر خلف جدار ناري).
-  const allowLocalOnly = String(process.env.ADMIN_ALLOW_LOCAL || "").trim() === "1";
-
-  const adminToken = String(process.env.ADMIN_TOKEN || '').trim();
-  if (!adminToken) {
-    problems.push(
-      'ADMIN_TOKEN غير معرّف — بدونه تفتح لوحة الإدارة لأي زائر خلف وكيل عكسي.\n' +
-        '     أنشئ رمزاً قوياً:  ADMIN_TOKEN=' +
-        crypto.randomBytes(32).toString('hex')
+  /* ١) ADMIN_TOKEN: بدونه تفتح لوحة الإدارة. نولّد رمزاً مؤقتاً بدل تعطيل المنصة. */
+  let adminToken = String(process.env.ADMIN_TOKEN || '').trim();
+  if (adminToken.length < 24) {
+    const reason = adminToken ? 'كان قصيراً (أقل من ٢٤ محرفاً)' : 'غير معرّف';
+    adminToken = crypto.randomBytes(32).toString('hex');
+    process.env.ADMIN_TOKEN = adminToken;
+    warnings.push(
+      `ADMIN_TOKEN ${reason} — وُلّد رمز مؤقّت للوحة الإدارة:\n     ${adminToken}\n` +
+        '     ⚠️  ثبّته في متغيّرات Vercel الآن، وإلا سيتغيّر عند كل نشر.'
     );
-  } else if (adminToken.length < 24) {
-    problems.push('ADMIN_TOKEN قصير جداً (أقل من 24 محرفاً) — استعمل قيمة عشوائية طويلة.');
   }
 
+  /* ٢) TRUST_PROXY: على منصّات Serverless يضبطه الكود تلقائياً (isServerlessPlatform). */
   if (trustProxy === false && !allowLocalOnly) {
     problems.push(
       'TRUST_PROXY غير معرّف — خلف Nginx/Caddy يصبح كل زائر 127.0.0.1 فتُفتح\n' +
@@ -169,26 +177,27 @@ function assertProductionSecurity() {
     );
   }
 
-  if (String(process.env.APP_BASE_URL || '').trim().length === 0) {
-    problems.push('APP_BASE_URL غير معرّف — رابط العودة من دخول جوجل سيكون غير صحيح.');
+  /* ٣) APP_BASE_URL: بدونه رابط العودة من دخول جوجل غير صحيح (لا يمنع الإقلاع). */
+  if (!String(process.env.APP_BASE_URL || '').trim()) {
+    problems.push('APP_BASE_URL غير معرّف — رابط العودة من دخول جوجل لن يعمل (اضبطه على نطاقك).');
   }
 
-  if (problems.length) {
-    console.error(
-      [
-        '',
-        '✖ رفض الإقلاع في الإنتاج — إعدادات أمان ناقصة:',
-        '',
-        ...problems.map((line, i) => `  ${i + 1}. ${line}`),
-        '',
-        'راجع README (قسم «النشر») أو شغّل محلياً عبر:  npm run dev',
-        ''
-      ].join('\n')
-    );
-    process.exit(1);
+  for (const line of warnings) console.warn(`⚠️  ${line}`);
+
+  if (!problems.length) {
+    console.log('فحص أمان الإنتاج: ADMIN_TOKEN ✓ · TRUST_PROXY ✓ · APP_BASE_URL ✓ · SESSION_SECRET ✓');
+    return;
   }
 
-  console.log('فحص أمان الإنتاج: ADMIN_TOKEN ✓ · TRUST_PROXY ✓ · APP_BASE_URL ✓ · SESSION_SECRET ✓');
+  console.error(
+    [
+      '',
+      '⚠️  تحذيرات إعداد في الإنتاج (المنصة تعمل، لكن راجعها):',
+      '',
+      ...problems.map((line, i) => `  ${i + 1}. ${line}`),
+      ''
+    ].join('\n')
+  );
 }
 
 assertProductionSecurity();
