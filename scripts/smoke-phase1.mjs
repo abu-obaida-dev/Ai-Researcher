@@ -552,6 +552,8 @@ async function testChat(userId, cookie) {
     topicPrompt.includes('اسأليه سؤالاً إرشادياً واحداً فقط في هذا الرد'),
     topicPrompt.includes('لا تذكري سؤالاً ثانياً إلى جانب السؤال الإرشادي'),
     topicPrompt.includes('لا تذكر أمثلة أو خيارات أو اقتراحات من عندك، إلا إذا طلب الباحث صراحة أمثلة أو خيارات'),
+    topicPrompt.includes('تصوراً أولياً يحتاج إلى اختبار وتحديد'),
+    topicPrompt.includes('«هذا اتجاه محتمل»، «هذه فكرة يمكن تطويرها»، «لنحدد كيف يمكن قياسها»'),
     topicPrompt.includes('المراجع ممنوعة تماماً في هذه المرحلة'),
     topicPrompt.includes('قبل البحث عن المراجع نحتاج أولاً إلى تحديد المشكلة'),
     !firstPrompt.includes('# مرحلة المشكلة والفرضيات'),
