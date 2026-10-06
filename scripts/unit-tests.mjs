@@ -422,6 +422,55 @@ test('المشرف في خطوة topic: تستخرج المشكلة بالأسئ
   assert.ok(!def.includes('# مرحلة المشكلة والفرضيات'), 'غائب في وضع المناقشة');
 });
 
+test('بوابة الانتقال بين المراحل: التزام بـ currentStepKey ورفض للمرحلة المستقبلية بسؤال واحد', () => {
+  const base = {
+    userName: 'خالد',
+    degree: 'باحث ماجستير',
+    field: 'علوم الحاسب',
+    title: 'الذكاء الاصطناعي في التعليم',
+    university: 'غير محدد',
+    language: 'العربية',
+    citationStyle: 'APA 7',
+    currentStage: 'تحديد المشكلة والفرضيات',
+    researchGoal: 'اختيار فكرة أو موضوع البحث',
+    researchGoalKey: 'topic',
+    progressLevel: 'لدي موضوع محدد',
+    stepsStatus: 'تحديد المشكلة والفرضيات: جاري · المنهجية: لم يبدأ',
+    journeyCompleted: false,
+    memorySummary: '',
+    openTask: '',
+    daysSinceLast: 0,
+    isFirstMessageEver: false,
+    strikes: 0,
+    mode: 'normal',
+    files: '',
+    fileNames: [],
+    replyCap: 900,
+    currentStepKey: 'topic'
+  };
+
+  const atTopic = buildSystemPrompt(base);
+  assert.ok(atTopic.includes('# قواعد الانتقال بين المراحل'), 'القسم موجود');
+  assert.ok(atTopic.includes('التزمي دائماً بخطوته الحالية'), 'التزام بـ currentStepKey');
+  assert.ok(atTopic.includes('لا تقدّمي محتوى أو إرشاد خطوة لم يصل إليها بعد'), 'لا محتوى لخطوة لم يبلغها');
+  assert.ok(atTopic.includes('حتى لو طلبها صراحة، ولو كأنه شرحاً عاماً'), 'لا شرح عام للمرحلة القادمة');
+  assert.ok(atTopic.includes('لا تنفّذي طلبه'), 'رفض التنفيذ لا مجرد التوجيه');
+  assert.ok(atTopic.includes('سؤالاً واحداً فقط يعينه على إكمال خطوته الحالية'), 'الرد سؤال واحد يخدم الحالية');
+  assert.ok(atTopic.includes('ما زلنا في مرحلة تحديد المشكلة والفرضيات'), 'مثال الرد يحمل مرحلته ديناميكياً');
+
+  // عامة: تعمل في منتصف المسار أيضاً — ليست من topic وحدها
+  const mid = buildSystemPrompt({ ...base, currentStepKey: 'methodology', currentStage: 'المنهجية وعينة البحث' });
+  assert.ok(mid.includes('# قواعد الانتقال بين المراحل'), 'تعمل عند أي خطوة');
+  assert.ok(mid.includes('ما زلنا في مرحلة المنهجية وعينة البحث'), 'اسم المرحلة يتبع currentStage');
+  assert.ok(!mid.includes('# مرحلة المشكلة والفرضيات'), 'قسم topic يبقى خاصاً به');
+
+  // تسقط: وضع المناقشة (قواعدها الخاصة) وعند اكتمال المسار (لا خطوة حالية)
+  const defPrompt = buildSystemPrompt({ ...base, mode: 'defense' });
+  assert.ok(!defPrompt.includes('# قواعد الانتقال بين المراحل'), 'غائبة في وضع المناقشة');
+  const finished = buildSystemPrompt({ ...base, currentStepKey: '', journeyCompleted: true });
+  assert.ok(!finished.includes('# قواعد الانتقال بين المراحل'), 'غائبة بلا خطوة حالية');
+});
+
 /* -------- بطاقة مراجعة اكتمال الخطوة: الكشف الحتمي (نقافي بلا قاعدة بيانات) -------- */
 
 test('specForStep: مواصفة حتمية لكل خطوة معروفة وسقوط آمن للمجهول', () => {
