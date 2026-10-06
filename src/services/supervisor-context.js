@@ -1,5 +1,5 @@
 import { pool } from '../db/client.js';
-import { CHAT_REPLY_CAPS, DEGREE_LEVELS, PREFERRED_LANGUAGES, RESEARCH_STAGES } from '../constants.js';
+import { CHAT_REPLY_CAPS, DEGREE_LEVELS, GOAL_OPTIONS, PREFERRED_LANGUAGES, PROGRESS_LEVELS, RESEARCH_STAGES } from '../constants.js';
 import { getJourney } from './journey.js';
 import { getStrikes } from './supervisor-memory.js';
 import { readOwnedFile } from './files.js';
@@ -64,6 +64,18 @@ function stepsStatusLine(journey) {
 function orDash(value) {
   const text = String(value || '').trim();
   return text || 'غير محدد';
+}
+
+/**
+ * جزء من نص الملف المحفوظ عند إكمال الـ onboarding:
+ * profiles.about = «الهدف الحالي: … | حالة المشروع: …» (يكتبه routes/auth.js).
+ */
+function extractAboutPart(about, key) {
+  const text = String(about || '');
+  const marker = `${key}:`;
+  const index = text.indexOf(marker);
+  if (index === -1) return '';
+  return text.slice(index + marker.length).split('|')[0].trim();
 }
 
 /**
@@ -142,14 +154,37 @@ export async function buildSupervisorContext({ userId, profile = {}, conversatio
   const degree = DEGREE_LEVELS.find((item) => item.value === profile.degree_level)?.label || '';
   const stage = RESEARCH_STAGES.find((item) => item.value === profile.research_stage)?.label || '';
   const language = PREFERRED_LANGUAGES.find((item) => item.value === profile.preferred_language)?.label || 'العربية';
-  const citationStyle = profile.citation_style === 'mla9' ? 'MLA 9' : 'APA 7';
+  const citationStyle =
+    { apa7: 'APA 7', mla9: 'MLA 9', chicago17: 'Chicago 17', ieee: 'IEEE', harvard: 'Harvard' }[
+      String(profile.citation_style || '').trim().toLowerCase()
+    ] || 'APA 7';
   const isDefense = conversation?.mode === 'defense';
+
+  // هدف الـ onboarding («ماذا تريد إنجازه الآن») وحالة تقدّمه: يُحفظان نصاً في
+  // profiles.about عند إكمال الملف، بينما العمود research_stage يحمل الحالة.
+  const goalFromAbout = extractAboutPart(profile.about, 'الهدف الحالي');
+  const progressFromAbout = extractAboutPart(profile.about, 'حالة المشروع');
+  const goalMatched = GOAL_OPTIONS.find((item) => item.label === goalFromAbout);
+  const goalFromColumn = GOAL_OPTIONS.find((item) => item.value === profile.research_stage);
+  const researchGoal = orDash(goalFromAbout || goalFromColumn?.label || '');
+  // مفتاح الهدف (topic/proposal/…) يستعمله البرومبت لاختيار أول خطوة مقترحة:
+  // من نص الملف إن طابق تسمية النموذج، ومن العمود القديم إن كان الملف بلا نص.
+  const researchGoalKey = goalMatched ? goalMatched.value : goalFromAbout ? '' : goalFromColumn?.value || '';
+  const progressLevel = orDash(
+    progressFromAbout ||
+      PROGRESS_LEVELS.find((item) => item.value === profile.research_stage)?.label ||
+      RESEARCH_STAGES.find((item) => item.value === profile.research_stage)?.label ||
+      ''
+  );
 
   return {
     userName: orDash(profile.full_name),
     degree: orDash(degree),
     field: orDash(profile.research_field),
     title: orDash(profile.research_title),
+    researchGoal,
+    researchGoalKey,
+    progressLevel,
     university: orDash([profile.university, profile.faculty].filter(Boolean).join(' — ')),
     language,
     citationStyle,

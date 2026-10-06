@@ -682,6 +682,8 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 
 /* ==== نماذج الملف البحثي ==== */
 .onboarding-grid { display: grid; gap: 18px; grid-template-columns: 1.6fr 1fr; align-items: start; }
+.onboarding-standalone { max-width: 980px; margin: 0 auto; padding: 34px 20px 48px; }
+.onboarding-standalone .page-head { text-align: center; margin-bottom: 20px; }
 .onboarding-aside { display: grid; gap: 14px; }
 .form-card { background: #fff; border: 1px solid var(--mist); border-radius: 20px; padding: 26px; }
 .form-section { margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--mist); }
@@ -826,6 +828,30 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .ref-found-links { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; font-weight: 700; margin-top: 2px; }
 .ref-found-links a { color: var(--sea); }
 .ref-found.is-library { border-inline-start: 3px solid var(--sea); }
+
+/* بطاقة مراجعة اكتمال الخطوة: تُدرَج داخل الحوار بعد آخر رد، قراءة أولاً
+   بزرَي تعديل/إلغاء، ووضع التعديل يستبدلها بنموذج حقول بلا جافاسكربت. */
+.step-review {
+  flex: 0 0 auto; margin: 8px 0; padding: 12px 14px;
+  border: 1px solid #bfe3cf; border-radius: 14px;
+  background: linear-gradient(180deg, #f4fbf7, #fff 70%);
+}
+.sr-head { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink); margin-bottom: 4px; }
+.sr-head svg { color: #2f9e6d; }
+.sr-hint { margin: 0 0 8px; font-size: 10.5px; color: var(--slate); }
+.sr-list { display: grid; gap: 6px; margin: 0 0 10px; }
+.sr-list > div { display: grid; grid-template-columns: minmax(90px, 150px) 1fr; gap: 8px; align-items: start; }
+.sr-list dt { font-size: 11px; font-weight: 800; color: var(--slate); }
+.sr-list dd { margin: 0; font-size: 12px; color: var(--ink); line-height: 1.7; word-break: break-word; }
+.sr-form { display: grid; gap: 8px; margin-bottom: 4px; }
+.sr-field { display: grid; gap: 4px; }
+.sr-field span { font-size: 11px; font-weight: 800; color: var(--slate); }
+.sr-field input {
+  width: 100%; padding: 7px 10px; border: 1px solid var(--mist); border-radius: 9px;
+  font: inherit; font-size: 12px; background: #fff; color: var(--ink);
+}
+.sr-field input:focus { outline: 2px solid rgba(13, 142, 147, 0.25); border-color: var(--sea); }
+.sr-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 
 .chat-attach {
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;

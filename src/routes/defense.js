@@ -1,5 +1,5 @@
 import express from 'express';
-import { requireService } from '../middleware/auth.js';
+import { requireCoreOnboarding, requireService } from '../middleware/auth.js';
 import { rateLimitUser } from '../middleware/security.js';
 import { deleteConversation, getConversation, askSupervisor } from '../services/chat.js';
 import { defenseChecklist, defenseProgress, listDefenses, startDefense } from '../services/defense.js';
@@ -76,7 +76,7 @@ router.get('/defense', requireService('defense'), async (req, res) => {
 });
 
 /** بدء جلسة محاكاة جديدة + سؤال افتتاحي من اللجنة (أول رسالة من المشرف). */
-router.post('/defense/start', requireService('defense'), rateLimitUser('defense_start', { limit: 5, windowMs: 30 * 60 * 1000 }), async (req, res) => {
+router.post('/defense/start', requireService('defense'), requireCoreOnboarding, rateLimitUser('defense_start', { limit: 5, windowMs: 30 * 60 * 1000 }), async (req, res) => {
   try {
     const conversation = await startDefense({ userId: req.account.id, title: 'محاكاة مناقشة' });
 
@@ -97,7 +97,7 @@ router.post('/defense/start', requireService('defense'), rateLimitUser('defense_
 });
 
 /** إرسال إجابة: المشرف الذكي يقيّمها ثم يطرح السؤال التالي (والتقييم النهائي في آخر جلسة). */
-router.post('/defense/:id/answer', requireService('defense'), async (req, res) => {
+router.post('/defense/:id/answer', requireService('defense'), requireCoreOnboarding, async (req, res) => {
   const conversationId = String(req.params.id);
 
   try {

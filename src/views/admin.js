@@ -86,7 +86,7 @@ const CHART_COLORS = ['#0d8e93', '#19b5a5', '#f4a261', '#7ecfc4', '#526777', '#0
 function usageLabel(type) {
   const known = TOKEN_COSTS.find((item) => item.type === type);
   if (known) return known.label;
-  return { chat_failed: 'رسالة فشلت (بلا خصم)', admin_adjust: 'تعديل إداري' }[type] || String(type);
+  return { chat_failed: 'رسالة فشلت (بلا خصم)', admin_adjust: 'تعديل إداري', step_completed: 'اكتمال خطوة (مراجعة)' }[type] || String(type);
 }
 
 /**

@@ -267,6 +267,11 @@ const CONVERSATIONS_REFERENCES_UPGRADE = `
   ALTER TABLE conversations ADD COLUMN IF NOT EXISTS references_found JSONB;
 `;
 
+/** ترقية بطاقة مراجعة اكتمال الخطوة (1F): تُملأ كشفياً بعد الرد ولا تُكتب في المسار إلا بحفظ الباحث. */
+const CONVERSATIONS_PENDING_REVIEW_UPGRADE = `
+  ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pending_review JSONB;
+`;
+
 const MESSAGES_TABLE = `
   CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -486,7 +491,7 @@ function normalizeArabic(text) {
 }
 
 /** يبني نصّ البحث المطبَّع لعنصر مكتبة (يُخزَّن في library_items.search_text). */
-async function backfillLibrarySearchText() {
+async function backfillLibrarySearchText(pool) {
   const { rows } = await pool.query(
     `SELECT id, title, authors, source, subjects, field, external_url
        FROM library_items
@@ -773,6 +778,7 @@ async function initializeDatabase() {
     await pool.query(USERS_PLAN_FOREIGN_KEY);
     await pool.query(STEP_KEY_UPGRADE);
     await pool.query(CONVERSATIONS_REFERENCES_UPGRADE);
+    await pool.query(CONVERSATIONS_PENDING_REVIEW_UPGRADE);
     await pool.query(SUPERVISOR_UPGRADE);
     await pool.query(ADMIN_ACCOUNT_GUARD);
     await pool.query(INDEXES);
@@ -794,7 +800,7 @@ async function initializeDatabase() {
 
     // تعبئة نصّ البحث المطبَّع للعناصر القديمة (مرة واحدة لكل عنصر):
     // «اداره التغير» يجب أن تجد «إدارة التغيير» — بحث ResearchGate/المنصة متسامح مع الإملاء.
-    await backfillLibrarySearchText();
+    await backfillLibrarySearchText(pool);
 
     console.log(`Database initialized successfully on ${target.host}:${target.port}/${target.database}.`);
     console.log('الخطوة التالية (اختيارية): npm run db:seed لإضافة الباقات الافتراضية.');

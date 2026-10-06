@@ -1,5 +1,5 @@
 import express from 'express';
-import { requireAccount } from '../middleware/auth.js';
+import { needsOnboarding, requireAccount, requireCoreOnboarding } from '../middleware/auth.js';
 import { rateLimitUser } from '../middleware/security.js';
 import { availableProviders } from '../services/ai.js';
 import {
@@ -9,6 +9,7 @@ import {
   listConversations,
   setConversationMode
 } from '../services/chat.js';
+import { cancelStepReview, editStepReview, saveStepReview } from '../services/step-review.js';
 import { isValidStepKeyForUser, stepTitle } from '../services/journey.js';
 import { unreadCount } from '../services/notifications.js';
 import { getProfile } from '../services/users.js';
@@ -35,7 +36,15 @@ const FLASH = {
   bad_step: { type: 'error', message: 'الخطوة المحددة غير موجودة في مسارك.' },
   missing_conversation: { type: 'error', message: 'المحادثة غير موجودة.' },
   mode_normal: { type: 'ok', message: 'رجعت المحادثة إلى وضع الإرشاد.' },
-  mode_defense: { type: 'ok', message: 'وضع المناقشة: سؤال واحد في كل مرة، ثم تقييم الإجابة.' }
+  mode_defense: { type: 'ok', message: 'وضع المناقشة: سؤال واحد في كل مرة، ثم تقييم الإجابة.' },
+  // بطاقة مراجعة اكتمال الخطوة: لا شيء يُكتب في المسار قبل «حفظ» الباحث
+  review_saved: { type: 'ok', message: 'أُكملت الخطوة وحُفظت في مسارك.' },
+  review_edited: { type: 'ok', message: 'عدّل البيانات ثم اضغط «حفظ وإتمام الخطوة» لإتمامها.' },
+  review_cancelled: { type: 'ok', message: 'أُلغيت المراجعة — لم يتغيّر شيء في مسارك.' },
+  review_missing: { type: 'error', message: 'لا توجد مراجعة معلّقة لهذه الخطوة.' },
+  review_bad_field: { type: 'error', message: 'راجع بيانات الخطوة: لا يُترك حقل فارغاً.' },
+  review_bad_step: { type: 'error', message: 'هذه الخطوة غير موجودة في مسارك.' },
+  review_failed: { type: 'error', message: 'تعذّرت عملية مراجعة الخطوة — أعد المحاولة.' }
 };
 
 /** تنبيه النتيجة من باراميترات الرابط. */
@@ -61,7 +70,7 @@ function flashKeyForError(error) {
   return map[error?.code] || 'failed';
 }
 
-/** صفحة الشات. */
+/** صفحة الشات: القراءة مسموحة للجميع، والإرسال يتطلب الملف الأساسي. */
 router.get('/chat', requireAccount, async (req, res) => {
   try {
     const userId = req.account.id;
@@ -92,6 +101,10 @@ router.get('/chat', requireAccount, async (req, res) => {
         // ملفات الباحث لاختيارها وإرفاقها بالرسالة (بحد أقصى ٣ في الرسالة)
         attachableFiles: await listFiles(userId, { limit: 12 }),
         providers: availableProviders(),
+        // بوابة جزئية: بلا ملف مكتمل يمكنه القراءة، لكن الإرسال يتطلب السياق الأساسي
+        profileNotice: needsOnboarding(req.account)
+          ? 'لم تُكمل ملفك البحثي بعد — أضف مرحلتك الأكاديمية وتخصصك وهدفك الحالي ليضبط المشرف الذكي إجاباته. <a href="/onboarding?next=/chat">أكمل ملفك الآن</a> (يستغرق دقيقة).'
+          : '',
         flash: flashFromQuery(req.query)
       })
     );
@@ -105,8 +118,8 @@ router.get('/chat', requireAccount, async (req, res) => {
   }
 });
 
-/** إرسال رسالة للمشرف الذكي. */
-router.post('/chat', requireAccount, rateLimitUser('chat_message', { limit: 30, windowMs: 5 * 60 * 1000 }), async (req, res) => {
+/** إرسال رسالة للمشرف الذكي (يتطلب الملف الأساسي — سياق الإشراف). */
+router.post('/chat', requireCoreOnboarding, rateLimitUser('chat_message', { limit: 30, windowMs: 5 * 60 * 1000 }), async (req, res) => {
   const body = req.body || {};
   const stepKey = String(body.step || '').trim().slice(0, 100);
   const conversationId = String(body.conversation_id || '').trim();
@@ -143,6 +156,49 @@ router.post('/chat/:id/mode', requireAccount, async (req, res) => {
   const ok = await setConversationMode(req.account.id, conversationId, mode);
 
   res.redirect(303, `/chat?c=${encodeURIComponent(conversationId)}&${ok ? 'ok' : 'err'}=${ok ? `mode_${mode}` : 'missing_conversation'}`);
+});
+
+/**
+ * بطاقة مراجعة اكتمال الخطوة: edit ⇄ save ⇄ cancel.
+ * الكشف حتمي (services/step-review.js) لكن الكتابة في المسار لا تقع إلا هنا
+ * بعد ضغط الباحث «حفظ وإتمام الخطوة» — وقبل ذلك لا يتغيّر شيء في تقدّمه.
+ */
+router.post('/chat/:id/step-review', requireAccount, async (req, res) => {
+  const conversationId = String(req.params.id);
+  const action = String(req.body?.action || '');
+  const stepKey = String(req.body?.step || '').trim().slice(0, 100);
+  const back = `/chat?c=${encodeURIComponent(conversationId)}${stepKey ? `&step=${encodeURIComponent(stepKey)}` : ''}`;
+
+  // حقول البطاقة تصل كـ f_<key> (قيمة واحدة لكل حقل)
+  const values = {};
+  for (const [key, value] of Object.entries(req.body || {})) {
+    if (key.startsWith('f_')) values[key.slice(2)] = String(value);
+  }
+
+  try {
+    if (action === 'edit') {
+      await editStepReview(req.account.id, conversationId, values);
+      res.redirect(303, `${back}&ok=review_edited`);
+    } else if (action === 'save') {
+      const result = await saveStepReview(req.account.id, conversationId, values);
+      res.redirect(303, `${back}&ok=review_saved&msg=${encodeURIComponent(result.message)}`);
+    } else if (action === 'cancel') {
+      await cancelStepReview(req.account.id, conversationId);
+      res.redirect(303, `${back}&ok=review_cancelled`);
+    } else {
+      res.redirect(303, `${back}&err=review_failed`);
+    }
+  } catch (error) {
+    console.warn(`مراجعة الخطوة فشلت (${error?.code || 'UNKNOWN'}): ${error?.message}`);
+    const keyFor = {
+      NOT_FOUND: 'missing_conversation',
+      NO_PENDING: 'review_missing',
+      EMPTY_FIELD: 'review_bad_field',
+      BAD_STEP: 'review_bad_step'
+    }[error?.code] || 'review_failed';
+    const message = error?.message && error.code === 'EMPTY_FIELD' ? `&msg=${encodeURIComponent(error.message)}` : '';
+    res.redirect(303, `${back}&err=${keyFor}${message}`);
+  }
 });
 
 /** حذف محادثة كاملة. */

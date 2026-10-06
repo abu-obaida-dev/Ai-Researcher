@@ -74,7 +74,11 @@ export async function addStrike(userId) {
   return Number(rows[0]?.strikes || 0);
 }
 
-/** تصفير يدوي للعدّاد (.session جديدة أو إنجاز Researcher لخطوة). */
+/**
+ * تصفير يدوي للعدّاد — احتياط غير مستخدم حالياً في المسارات
+ * (لا يستدعيه أحد في src/)؛ التصفير الفعلي الوحيد تلقائي بعد الهدوء 24 ساعة.
+ * موجود لاستدعاء يدوي مستقبلاً (مثال المقترح في تعليقها: تصفير عند إنجاز خطوة).
+ */
 export async function resetStrikes(userId) {
   await pool.query(
     `INSERT INTO supervisor_memory (user_id, strikes, strikes_updated_at, updated_at)

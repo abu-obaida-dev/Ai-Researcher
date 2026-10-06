@@ -37,7 +37,7 @@ import { renderAccountPage, renderAuthNotice, renderDashboardPage, renderLoginPa
  * - /auth/google    بدء دخول جوجل (OAuth 2.0 code flow)
  * - /auth/google/callback  معالجة العودة: تحقق من الـ state ثم إنشاء/تحديث المستخدم في PostgreSQL
  * - /logout         إنهاء الجلسة
- * - /onboarding     إكمال/تعديل الملف البحثي داخل لوحة الباحث (area:'app' + سايدبار)
+ * - /onboarding     الملف البحثي: صفحة مستقلة بلا سايدبار قبل الإكمال، وتعديل داخل اللوحة بعده
  * - /account        صفحة الحساب والرصيد داخل لوحة الباحث (area:'app' + سايدبار)
  * - /dashboard      الصفحة الرئيسية للوحة الباحث: الإحصائية (الرصيد + الباقة + آخر العمليات + روابط سريعة)
  */
@@ -233,22 +233,23 @@ function validateValues(values) {
   return errors;
 }
 
-/** نموذج إكمال الملف البحثي — يُستخدم أيضاً للتعديل لاحقاً. */
+/** نموذج إكمال الملف البحثي — يُستخدم أيضاً للتعديل لاحقاً. يحفظ ?next= للعودة بعد الإكمال. */
 router.get('/onboarding', requireAccount, async (req, res) => {
   const profile = await getProfile(req.account.id);
   res
     .type('html')
-    .send(renderOnboardingPage({ account: req.account, profile, values: onboardingValues(profile) }));
+    .send(renderOnboardingPage({ account: req.account, profile, values: onboardingValues(profile), next: safeNextPath(req.query.next) }));
 });
 
-/** حفظ الملف البحثي في PostgreSQL ثم التحويل إلى صفحة الحساب. */
+/** حفظ الملف البحثي في PostgreSQL ثم العودة للوجهة المحفوظة (?next=) أو الإحصائية. */
 router.post('/onboarding', requireAccount, async (req, res) => {
   const values = readValues(req.body || {});
   const errors = validateValues(values);
+  const backTarget = safeNextPath(req.query.next);
 
   if (errors.length) {
     const profile = await getProfile(req.account.id);
-    res.status(400).type('html').send(renderOnboardingPage({ account: req.account, profile, values, errors }));
+    res.status(400).type('html').send(renderOnboardingPage({ account: req.account, profile, values, errors, next: backTarget }));
     return;
   }
 
@@ -273,7 +274,7 @@ router.post('/onboarding', requireAccount, async (req, res) => {
     about: `الهدف الحالي: ${goalLabel} | حالة المشروع: ${progressLabel}`.trim()
   });
 
-  res.redirect(302, '/dashboard');
+  res.redirect(302, backTarget || '/dashboard');
 });
 
 /** الإحصائية — الصفحة الرئيسية للوحة الباحث بعد الدخول. */

@@ -1,12 +1,13 @@
 import { pool } from '../db/client.js';
 import { CHAT_REPLY_CAPS, TOKEN_COSTS, isUuid } from '../constants.js';
 import { runSupervisor } from './ai.js';
-import { extractStatedTopic, literatureToolFor } from './literature.js';
+import { extractStatedTopic, literatureToolFor, wantsLiterature } from './literature.js';
 import { isValidStepKeyForUser, recordTopic, registeredTopic } from './journey.js';
 import { buildSupervisorContext } from './supervisor-context.js';
 import { buildSystemPrompt } from './supervisor-prompt.js';
 import { addStrike, summarizeConversation } from './supervisor-memory.js';
 import { balanceOf, chargeUsage, deductCredits, estimateReservation, logUsage, normalizeUsage, refundCredits } from './tokens.js';
+import { detectStepCompletion } from './step-review.js';
 
 /**
  * شات المشرف الذكي (1F): المحادثات ورسائلها في conversations/messages.
@@ -230,6 +231,8 @@ export async function askSupervisor({
    * التكلفة: بلا خصم نقاط (نداء خارجي رخيص) مع تسجيله في سجل الاستهلاك.
    */
   let references = null;
+  // هل ما زال في خطوة تحديد المشكلة؟ (topic أولى خطوات كل مسارات الرحلة).
+  const inTopicStep = String(context.currentStepKey || stepKey || '') === 'topic';
   // الموضوع المُسجَّل (خطوة اختيار الموضوع أو عنوان الملف) — مصدر واحد معتمد.
   let registered = { topic: '', origin: 'none' };
   try {
@@ -261,14 +264,18 @@ export async function askSupervisor({
       return /(عنوان|موضوع)/.test(text) && /(مراجع|مصادر)/.test(text) && /[؟?]/.test(text);
     });
 
-    references = await literatureToolFor(question, {
-      limit: 6,
-      userId,
-      field: String(profile?.research_field || context.field || '').slice(0, 80),
-      title: String(profile?.research_title || context.title || '').slice(0, 160),
-      context: conversationTopic,
-      askedBefore
-    });
+    // بوابة مرحلة topic: لا أداة مراجع قبل اكتمال تعريف المشكلة وحدودها —
+    // تسجيل موضوع عام وحده لا يكفي (المراجع تعود بعد اكتمال الخطوة).
+    references = inTopicStep
+      ? null
+      : await literatureToolFor(question, {
+          limit: 6,
+          userId,
+          field: String(profile?.research_field || context.field || '').slice(0, 80),
+          title: String(profile?.research_title || context.title || '').slice(0, 160),
+          context: conversationTopic,
+          askedBefore
+        });
   } catch (error) {
     console.warn(`فشل بحث المراجع التلقائي: ${error?.code || error?.message}`);
   }
@@ -304,12 +311,29 @@ export async function askSupervisor({
   }
 
   /*
+   * طلب مراجع أثناء خطوة topic: البوابة أعلاه منعت الأداة، ونوجّه المشرفة
+   * لرفض لطيف ثم سؤال إرشادي واحد يستكمل به تحديد المشكلة وحدودها —
+   * لا مراجع ولا روابط ولا وعود بها في هذه المرحلة.
+   */
+  if (inTopicStep && references === null && wantsLiterature(question)) {
+    messages[messages.length - 1] = {
+      role: 'user',
+      content:
+        '== لا ترسل مراجع أو روابط في هذه الرسالة ==\n' +
+        'الباحث ما زال في خطوة تحديد المشكلة والفرضيات: تعريف مشكلته وحدودها غير مكتمل، وتسجيل موضوع عام وحده لا يكفي لجلب مراجع مرتبطة ببحثه.\n' +
+        'المطلوب ممنك: جملة رفض واحدة بلطف، ثم سؤال إرشادي واحد فقط يستكمل به تحديد المشكلة أو نطاق الدراسة، مثل: «قبل البحث عن المراجع نحتاج أولاً إلى تحديد المشكلة ونطاق الدراسة حتى تكون المراجع مرتبطة ببحثك، ما الجانب المحدد الذي تريد دراسته؟».\n' +
+        'لا تذكري أي مرجع أو رابط أو كتاب من معرفتكِ، ولا تَعِدْه بمراجع في رسالة لاحقة.\n' +
+        'سؤال واحد فقط في الرد كله.'
+    };
+  }
+
+  /*
    * إكمال خطوة «اختيار الموضوع»: إن كتب الباحث موضوعه صراحةً في رسالة
    * (أو أجاب على سؤال المشرفة عنه) نُسجّله في خطته — بعبارته هو، بلا تأليف.
    * وتبقى الخطوة «جاري» حتى هو يقرّر أنها تمّت.
    */
   let topicRecordedBySystem = '';
-  if (String(context.currentStepKey || stepKey || '') === 'topic') {
+  if (inTopicStep) {
     const stated = extractStatedTopic(question);
     if (stated) {
       try {
@@ -434,10 +458,21 @@ export async function askSupervisor({
     }
   }
 
-  // عدّاد أسئلة المناقشة (8–12 سؤالاً ⇒ تلخيص)
+  // عدّاد أسئلة المناقشة (الإجمالي 11 سؤالاً حتى التقييم النهائي)
   if (conversation.mode === 'defense') {
     const state = readDefenseState(conversation);
     await writeDefenseState(conversation.id, { ...state, asked: state.asked + 1, startedAt: state.startedAt || new Date().toISOString() });
+  }
+
+  // مراجعة اكتمال الخطوة: كشف حتمي يضع بطاقة معلّقة فقط — لا يمسّ المسار
+  // ولا يمسّ هذا الرد؛ الإتمام قرار الباحث بزر «حفظ» (routes/chat.js).
+  try {
+    await detectStepCompletion({
+      userId,
+      conversation: { ...conversation, step_key: conversation.step_key || stepKey || '' }
+    });
+  } catch (error) {
+    console.warn(`تعذّر كشف اكتمال الخطوة: ${error?.code || error?.message}`);
   }
 
   return {

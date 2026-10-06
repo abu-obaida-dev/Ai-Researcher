@@ -1,5 +1,5 @@
 import express from 'express';
-import { requireAccount, requireService } from '../middleware/auth.js';
+import { requireAccount, requireCoreOnboarding, requireService } from '../middleware/auth.js';
 import { degreeOfUser, getJourney, setStepStatus } from '../services/journey.js';
 import { unreadCount } from '../services/notifications.js';
 import { getProfile } from '../services/users.js';
@@ -29,7 +29,7 @@ function flashFromQuery(query) {
   return FLASH[key] || null;
 }
 
-router.get('/journey', requireService('journey'), async (req, res) => {
+router.get('/journey', requireService('journey'), requireCoreOnboarding, async (req, res) => {
   try {
     const userId = req.account.id;
     const [degree, profile, unread] = await Promise.all([
@@ -59,7 +59,7 @@ router.get('/journey', requireService('journey'), async (req, res) => {
 });
 
 /** تغيير حالة خطوة (لم يبدأ / جاري / تم) مع ملاحظة المخرجات. */
-router.post('/journey/steps/:key', requireService('journey'), async (req, res) => {
+router.post('/journey/steps/:key', requireService('journey'), requireCoreOnboarding, async (req, res) => {
   const stepKey = String(req.params.key || '').slice(0, 100);
 
   try {

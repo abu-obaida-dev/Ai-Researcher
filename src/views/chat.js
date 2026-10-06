@@ -191,6 +191,67 @@ function renderReferencesFound(conversation) {
 </details>`;
 }
 
+/**
+ * بطاقة مراجعة اكتمال الخطوة داخل الحوار: تظهر بعد آخر رد إن وُجدت بطاقة
+ * معلّقة (conversations.pending_review). بلا جافاسكربت: «تعديل» يعيد POST
+ * يفتح الحقول، و«حفظ» يُنجز الخطوة فعلاً، و«إلغاء» يمسح البطاقة فقط —
+ * ولمس المسار كله يتوقف عند زر الحفظ.
+ */
+function renderStepReviewCard(conversation) {
+  const card = conversation?.pending_review;
+  if (!card?.stepKey || !Array.isArray(card.fields)) return '';
+
+  const action = `/chat/${encodeURIComponent(conversation.id)}/step-review`;
+  const hidden = `<input type="hidden" name="step" value="${escapeHtml(conversation.step_key || card.stepKey)}" />`;
+  const head = `<header class="sr-head">${icon('check', 'icon-sm')} <b>مراجعة اكتمال الخطوة</b> — ${escapeHtml(
+    card.stepTitle || ''
+  )}</header>`;
+  const hint = `<p class="sr-hint">هذه بيانات استخرجناها من حديثك مع المشرفة. لا يُحتسب شيء في مسارك إلا بعد الضغط على «حفظ وإتمام الخطوة».</p>`;
+
+  let content;
+  if (card.editing) {
+    content = `<form class="sr-form" method="post" action="${action}">
+  ${hidden}
+  ${card.fields
+    .map(
+      (field) => `<label class="sr-field">
+    <span>${escapeHtml(field.label)}</span>
+    <input type="text" name="f_${escapeHtml(field.key)}" value="${escapeHtml(field.value || '')}" maxlength="300" required />
+  </label>`
+    )
+    .join('\n  ')}
+  <div class="sr-actions">
+    <button class="btn btn-primary btn-sm" type="submit" name="action" value="save">حفظ وإتمام الخطوة</button>
+    <button class="btn btn-quiet btn-sm" type="submit" name="action" value="cancel">إلغاء المراجعة</button>
+  </div>
+</form>`;
+  } else {
+    content = `<dl class="sr-list">
+  ${card.fields
+    .map(
+      (field) => `<div><dt>${escapeHtml(field.label)}</dt><dd>${escapeHtml(field.value || '—')}</dd></div>`
+    )
+    .join('\n  ')}
+</dl>
+<div class="sr-actions">
+  <form method="post" action="${action}" class="inline-form">
+    ${hidden}<input type="hidden" name="action" value="save" />
+    <button class="btn btn-primary btn-sm" type="submit">حفظ وإتمام الخطوة</button>
+  </form>
+  <form method="post" action="${action}" class="inline-form">
+    ${hidden}<input type="hidden" name="action" value="edit" />
+    <button class="btn btn-sm" type="submit">تعديل</button>
+  </form>
+  <form method="post" action="${action}" class="inline-form">
+    ${hidden}<input type="hidden" name="action" value="cancel" />
+    <button class="btn btn-quiet btn-sm" type="submit">إلغاء</button>
+  </form>
+</div>`;
+  }
+
+  return `<section class="step-review" id="step-review">${head}${hint}${content}</section>`;
+}
+
 /** صفحة الشات كاملة. */
 export function renderChatPage({
   account,
@@ -202,12 +263,18 @@ export function renderChatPage({
   prefill = '',
   attachableFiles = [],
   providers = [],
-  flash = null
+  flash = null,
+  profileNotice = ''
 }) {
   const flashHtml = flash
     ? flash.type === 'error'
       ? `<div class="alert chat-flash">${escapeHtml(flash.message)}</div>`
       : `<div class="notice chat-flash">${escapeHtml(flash.message)}</div>`
+    : '';
+
+  // رسالة ذكية (وليست منعاً): تشرح ما الذي ينقص لتفعيل الإشراف المخصص مع رابط مباشر
+  const profileNoticeHtml = profileNotice
+    ? `<div class="notice chat-flash"><b>ملفك البحثي غير مكتمل.</b> ${profileNotice}</div>`
     : '';
 
   const providerWarning = providers.length
@@ -229,10 +296,11 @@ export function renderChatPage({
 
   const body = `<section class="card chat-card">
   ${providerWarning}
+  ${profileNoticeHtml}
   ${flashHtml}
   ${stepContext}
   ${renderModeBar(conversation)}
-  <div class="chat-body" id="messages">${messagesHtml}</div>
+  <div class="chat-body" id="messages">${messagesHtml}${renderStepReviewCard(conversation)}</div>
 
   ${renderReferencesFound(conversation)}
 

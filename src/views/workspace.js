@@ -233,7 +233,7 @@ function renderWebSearchPanel({ web, webQuery, webSource, webSources = [], stepK
 }
 
 /** صفحة المراجع: بحث في المكتبة + إضافة يدوية + «مراجعي» مع تغيير الحالة. */
-export function renderReferencesPage({ account, unread = 0, query = '', results = [], references = [], counts = {}, stepKey = '', stepOptions = [], stepTitles = {}, flash = null, web = null, webQuery = '', webSource = '', webSources = [], resolved = null, resolveError = '', resolveQuery = '' }) {
+export function renderReferencesPage({ account, unread = 0, query = '', results = [], references = [], counts = {}, stepKey = '', stepOptions = [], stepTitles = {}, flash = null, web = null, webQuery = '', webSource = '', webSources = [], resolved = null, resolveError = '', resolveQuery = '', profileNotice = '' }) {
   const libraryHtml = query
     ? results.length
       ? `<div class="lib-list">${results.map((item) => renderLibraryItem(item, stepKey)).join('')}</div>`
@@ -275,6 +275,12 @@ export function renderReferencesPage({ account, unread = 0, query = '', results 
 </div>
 
 ${renderWebSearchPanel({ web, webQuery, webSource, webSources, stepKey, resolved, resolveError, resolveQuery })}
+
+${
+  profileNotice
+    ? `<div class="notice"><b>ترشيح المراجع يحتاج تخصصك.</b> ${profileNotice}</div>`
+    : ''
+}
 
 ${flashBox(flash)}
 

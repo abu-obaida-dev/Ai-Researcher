@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream';
 import express from 'express';
-import { requireAccount, requireService } from '../middleware/auth.js';
+import { needsOnboarding, requireAccount, requireService } from '../middleware/auth.js';
 import { concurrencyLimit, rateLimitUser } from '../middleware/security.js';
 import { degreeOfUser, resolvePathForDegree, stepOptionsForDegree, stepTitle } from '../services/journey.js';
 import { unreadCount } from '../services/notifications.js';
@@ -129,7 +129,11 @@ router.get('/references', requireService('library'), async (req, res) => {
         resolved: resolveResult?.record || null,
         resolveError: resolveResult?.error || '',
         resolveQuery,
-        flash: flashFromQuery(req.query)
+        flash: flashFromQuery(req.query),
+        // بوابة جزئية: البحث اليدوي مفتوح، لكن الترشيح حسب التخصص يحتاج الملف
+        profileNotice: needsOnboarding(req.account)
+          ? 'أضف تخصصك ومرحلتك الأكاديمية وهدفك الحالي ليرشّح لك المشرف الذكي المراجع الأقرب لموضوعك. <a href="/onboarding?next=/references">أكمل ملفك الآن</a>.'
+          : ''
       })
     );
   } catch (error) {

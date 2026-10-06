@@ -14,6 +14,10 @@ import { buildSearchQuery, extractTopic, isTopicSpecific, normalizeArabic, relev
 import { saveSupportWhatsapp } from '../src/services/settings.js';
 import { assertContentMatchesExtension, contentMatchesExtension } from '../src/services/upload-guard.js';
 import { safeEqual } from '../src/middleware/security.js';
+import { needsOnboarding, requireCoreOnboarding } from '../src/middleware/auth.js';
+import { renderOnboardingPage } from '../src/views/auth.js';
+import { buildSystemPrompt } from '../src/services/supervisor-prompt.js';
+import { evaluateStepCompletion, specForStep } from '../src/services/step-review.js';
 import { isUuid } from '../src/constants.js';
 
 /* ------------------------------- النقاط ------------------------------- */
@@ -217,4 +221,244 @@ test('isUuid: يقبل UUID حقيقياً ويرفض كل ما عداه', () =>
   for (const value of bad) {
     assert.equal(isUuid(value), false, `${String(value)} يجب أن يُرفض`);
   }
+});
+
+/* ------------- بوابة الملف الجزئية (P0-2): قراءة مفتوحة، سياق محمي ------------- */
+
+/** وسيطات وهمية: يلتقط التوجيه أو الاكتمال بلا خادم. */
+function mockRes() {
+  const res = { statusCode: 302, location: '', redirected: false };
+  res.redirect = (_code, url) => {
+    res.redirected = true;
+    res.location = url;
+  };
+  return res;
+}
+
+test('needsOnboarding: المدير وباحث مكمل بلا حاجة، والباحث الجديد بحاجة', () => {
+  assert.equal(needsOnboarding(null), false, 'بلا حساب لا طلب');
+  assert.equal(needsOnboarding({ role: 'admin' }), false, 'المدير لا يحتاج ملفاً');
+  assert.equal(needsOnboarding({ role: 'researcher', onboarding_complete: true }), false);
+  assert.equal(needsOnboarding({ role: 'researcher', onboarding_complete: false }), true);
+  assert.equal(needsOnboarding({ role: 'researcher' }), true, 'غياب العلامة = غير مكتمل');
+});
+
+test('requireCoreOnboarding: يحوّل غير المكمل إلى /onboarding بالعودة ?next=', () => {
+  const req = { account: { role: 'researcher', onboarding_complete: false }, originalUrl: '/chat?step=methodology' };
+  const res = mockRes();
+  let continued = false;
+
+  requireCoreOnboarding(req, res, () => {
+    continued = true;
+  });
+
+  assert.equal(continued, false, 'لا يمرّ لغير المكمل');
+  assert.equal(res.redirected, true);
+  assert.ok(res.location.startsWith('/onboarding?next='), res.location);
+  assert.ok(res.location.includes(encodeURIComponent('/chat?step=methodology')), 'يحفظ وجهة العودة');
+
+  // المكتمل يمرّ بلا توجيه
+  const okReq = { account: { role: 'researcher', onboarding_complete: true }, originalUrl: '/chat' };
+  const okRes = mockRes();
+  let passed = false;
+  requireCoreOnboarding(okReq, okRes, () => {
+    passed = true;
+  });
+  assert.equal(passed, true, 'الباحث المكمل يمرّ');
+  assert.equal(okRes.redirected, false);
+
+  // بلا حساب ⇒ صفحة الدخول
+  const anonReq = { account: null, originalUrl: '/journey' };
+  const anonRes = mockRes();
+  requireCoreOnboarding(anonReq, anonRes, () => {});
+  assert.ok(anonRes.location.startsWith('/login?next='), anonRes.location);
+});
+
+test('صفحة الملف: مستقلة بلا سايدبار قبل الإكمال، وداخل اللوحة بعده', () => {
+  const values = { degree_level: '', research_field: '', custom_field: '', research_stage: '', progress_stage: '' };
+
+  const fresh = renderOnboardingPage({
+    account: { role: 'researcher', email: 'new@example.com', full_name: 'باحث جديد', onboarding_complete: false },
+    values
+  });
+  assert.ok(!fresh.includes('<aside class="app-side">'), 'لا سايدبار قبل إكمال الملف');
+  assert.ok(!fresh.includes('<header class="app-top">'), 'لا شريط علوي قبل إكمال الملف');
+  assert.ok(fresh.includes('class="onboarding-standalone"'), 'حاوية الصفحة المستقلة موجودة');
+  assert.ok(fresh.includes('أكمل ملفك البحثي'), 'عنوان واضح للمهمة');
+  assert.ok(fresh.includes('href="/logout"'), 'طريق للخروج من الصفحة المستقلة');
+
+  const done = renderOnboardingPage({
+    account: { role: 'researcher', email: 'done@example.com', full_name: 'باحث مكمل', onboarding_complete: true },
+    values,
+    profile: { research_field: 'الحقوق' }
+  });
+  assert.ok(done.includes('<aside class="app-side">'), 'السايدبار يظهر بعد إكمال الملف');
+  assert.ok(done.includes('<header class="app-top">'), 'الشريط العلوي يظهر بعد الإكمال');
+  assert.ok(!done.includes('class="onboarding-standalone"'), 'لا حاوية مستقلة بعد الإكمال');
+});
+
+test('المشرف: أول رد يستعمل سياق الـ onboarding ويقود بخطوة واحدة لا بسؤال عام', () => {
+  const ctx = {
+    userName: 'gik knk',
+    degree: 'باحث ماجستير',
+    field: 'علوم الحاسب',
+    title: 'غير محدد',
+    university: 'غير محدد',
+    language: 'العربية',
+    citationStyle: 'APA 7',
+    currentStage: 'اختيار الموضوع',
+    researchGoal: 'اختيار فكرة أو موضوع البحث',
+    researchGoalKey: 'topic',
+    progressLevel: 'لم أبدأ بعد',
+    stepsStatus: 'تحديد المشكلة: لم يبدأ',
+    journeyCompleted: false,
+    memorySummary: '',
+    openTask: '',
+    daysSinceLast: 0,
+    strikes: 0,
+    mode: 'normal',
+    files: '',
+    fileNames: [],
+    replyCap: 900
+  };
+
+  const first = buildSystemPrompt({ ...ctx, isFirstMessageEver: true });
+
+  // بيانات الملف تصل السياق كاملاً (الهدف + الحالة إلى جانب الدرجة والتخصص)
+  assert.ok(first.includes('الدرجة: باحث ماجستير'));
+  assert.ok(first.includes('الهدف الحالي من إنجاز البحث: اختيار فكرة أو موضوع البحث'));
+  assert.ok(first.includes('حالة تقدّمه في مشروعه: لم أبدأ بعد'));
+
+  // سلوك الترحيب: يقود للخطوة التالية ولا يسأل سؤالاً عاماً
+  assert.ok(first.includes('# الترحيب والبداية (أول رسالة في تاريخه)'));
+  assert.ok(first.includes('نقطة الانطلاق المناسبة لهدفه'), 'يقترح أول خطوة تناسب هدفه');
+  assert.ok(first.includes('لا تقترحي له موضوعاً أو عنواناً جاهزاً'), 'لا تكتب الموضوع للباحث');
+  assert.ok(first.includes('سؤال واحد في الرد كله'), 'قاعدة السؤال الواحد محفوظة');
+  assert.ok(!first.includes('اسأليه عما يريد إنجازه اليوم'), 'لا سؤال عام بعد');
+
+  // بلا هدف مطابق للقوائم: يبقى توجيه عام بخطوة واحدة بدل فقدان التوجيه
+  const noKey = buildSystemPrompt({ ...ctx, researchGoalKey: '', isFirstMessageEver: true });
+  assert.ok(noKey.includes('اختاري أول خطوة منطقية من مساره الحالية'));
+
+  // بعد أول رسالة: لا ترحيب ولا قسم ترحيب إطلاقاً
+  const later = buildSystemPrompt({ ...ctx, isFirstMessageEver: false });
+  assert.ok(later.includes('لا ترحيب إطلاقاً'));
+  assert.ok(!later.includes('# الترحيب والبداية (أول رسالة في تاريخه)'));
+  assert.ok(!later.includes('نقطة الانطلاق المناسبة لهدفه'));
+});
+
+test('المشرف في خطوة topic: تستخرج المشكلة بالأسئلة ولا تصيغ مشكلة أو فرضية جاهزة', () => {
+  const base = {
+    userName: 'سارة',
+    degree: 'باحثة ماجستير',
+    field: 'علوم الحاسب',
+    title: 'غير محدد',
+    university: 'غير محدد',
+    language: 'العربية',
+    citationStyle: 'APA 7',
+    currentStage: 'تحديد المشكلة والفرضيات',
+    researchGoal: 'اختيار فكرة أو موضوع البحث',
+    researchGoalKey: 'topic',
+    progressLevel: 'لدي موضوع محدد',
+    stepsStatus: 'تحديد المشكلة والفرضيات: جاري',
+    journeyCompleted: false,
+    memorySummary: '',
+    openTask: '',
+    daysSinceLast: 0,
+    isFirstMessageEver: false,
+    strikes: 0,
+    mode: 'normal',
+    files: '',
+    fileNames: [],
+    replyCap: 900,
+    currentStepKey: 'topic'
+  };
+
+  const atTopic = buildSystemPrompt(base);
+  assert.ok(atTopic.includes('# مرحلة المشكلة والفرضيات: تستخرجين ولا تكتبين'), 'قسم الخطوة موجود');
+  assert.ok(atTopic.includes('لا تكتبي له مشكلة بحثية جاهزة ولا فرضية جاهزة'), 'ممنوع تأليف المشكلة/الفرضيات');
+  assert.ok(atTopic.includes('بأسئلة إرشادية، سؤالاً واحداً في كل رد'), 'الاستخلاص بأسئلة وسؤال واحد');
+  assert.ok(atTopic.includes('ناقشين قابليتها للقياس والاختبار'), 'الفرضيات نقاش لا اقتراح جاهز');
+
+  // قاعدة الطلب الصريح: رفض بلا صياغة بديلة وبلا مثال قريب + سؤال واحد فقط
+  assert.ok(atTopic.includes('لا تكتبي أي صياغة بديلة، ولا تضعي مثالاً قريباً من موضوعه'), 'لا صياغة بديلة ولا مثال قريب');
+  assert.ok(atTopic.includes('اسأليه سؤالاً إرشادياً واحداً فقط في هذا الرد'), 'سؤال إرشادي واحد فقط');
+
+  // المراجع ممنوعة كلياً في topic: تسجيل موضوع عام وحده لا يكفي
+  assert.ok(atTopic.includes('المراجع ممنوعة تماماً في هذه المرحلة'), 'ممنوع المراجع في topic');
+  assert.ok(atTopic.includes('وتسجيله وحده لا يكفي'), 'العنوان العام لا يفتح المراجع');
+  assert.ok(atTopic.includes('قبل البحث عن المراجع نحتاج أولاً إلى تحديد المشكلة'), 'رفض لطيف ثم سؤال الحدود');
+  assert.ok(atTopic.includes('سؤال إرشادي واحد فقط يستكمل به تحديد المشكلة'), 'سؤال إرشادي واحد في الرد');
+  const registered = buildSystemPrompt({ ...base, topicRecorded: 'الذكاء الاصطناعي في التعليم' }, { references: 5 });
+  assert.ok(registered.includes('المراجع ممنوعة تماماً'), 'المسجَّل العام لا يرفع المنعية');
+  assert.ok(!registered.includes('# أداة المراجع (نتائج حقيقية من قواعد البيانات)'), 'لا يُحقن قسم الأداة في topic');
+  assert.ok(registered.includes('لا تكتبي أي صياغة بديلة'), 'قاعدة الرفض تبقى بعد التسجيل');
+
+  // خارج الخطوة: لا القسم (حتى لو كانت الرسالة في مرحلة أخرى) — وقسم الأداة يعود
+  const later = buildSystemPrompt({ ...base, currentStepKey: 'proposal' }, { references: 5 });
+  assert.ok(!later.includes('# مرحلة المشكلة والفرضيات'), 'يسقط بعد topic');
+  assert.ok(later.includes('# أداة المراجع (نتائج حقيقية من قواعد البيانات)'), 'خارج topic يُحقن قسم الأداة');
+
+  // وضع المناقشة يستثناه (لا تُحقن فيه أقسام الرحلة)
+  const def = buildSystemPrompt({ ...base, mode: 'defense' });
+  assert.ok(!def.includes('# مرحلة المشكلة والفرضيات'), 'غائب في وضع المناقشة');
+});
+
+/* -------- بطاقة مراجعة اكتمال الخطوة: الكشف الحتمي (نقافي بلا قاعدة بيانات) -------- */
+
+test('specForStep: مواصفة حتمية لكل خطوة معروفة وسقوط آمن للمجهول', () => {
+  for (const key of ['topic', 'proposal', 'literature', 'methodology', 'data', 'analysis', 'writing', 'discussion', 'defense']) {
+    const spec = specForStep(key);
+    assert.ok(spec.fields.length >= 3, `${key}: ٣ حقول على الأقل`);
+    assert.ok(
+      spec.fields.every((field) => field.key && field.label && field.pattern instanceof RegExp),
+      `${key}: كل حقل له مفتاح وسمّي ونمط`
+    );
+    assert.equal(spec.isFallback, undefined, `${key}: مواصفة معروفة لا تُعدّ سقوطاً`);
+  }
+
+  const fallback = specForStep('does-not-exist');
+  assert.equal(fallback.isFallback, true);
+  assert.ok(fallback.fields.length >= 1, 'السقوط الآمن يبقى بحقول حقيقية');
+  assert.equal(specForStep('').isFallback, true, 'مفتاح فارغ ⇒ السقوط الآمن');
+});
+
+test('evaluateStepCompletion: مؤشرات الخطوة كاملة ⇒ بطاقة مكتملة بالقيم', () => {
+  const transcript = [
+    'الباحث: اعتمدت المنهج الوصفي لدراستي وحددت العينة بحجم 200 مستجيب، والأداة المعدّة استبانة ميدانية.',
+    'المشرفة: ممتاز — المنهج والعينة والأداة واضحة، انتقل لجمع البيانات.'
+  ].join('\n');
+
+  const result = evaluateStepCompletion({ stepKey: 'methodology', transcript, stepTitle: 'المنهجية وعينة البحث' });
+  assert.equal(result.complete, true, 'المنهج + العينة + الأداة كلها وُجدت');
+  assert.equal(result.matched, result.total);
+  assert.equal(result.stepTitle, 'المنهجية وعينة البحث');
+  assert.equal(result.fields.length, 3);
+  assert.ok(
+    result.fields.every((field) => field.matched && field.value.length > 0),
+    'كل حقل حمل قيمة مستخرجة من النص'
+  );
+  assert.ok(result.fields.find((field) => field.key === 'method').value.includes('المنهج الوصفي'));
+  assert.ok(result.fields.every((field) => !field.value.includes('\n')), 'القيمة سطر واحد');
+});
+
+test('evaluateStepCompletion: حديث ناقص لا يكتمل والحقول غير الموقّعة تبقى فارغة', () => {
+  const result = evaluateStepCompletion({ stepKey: 'methodology', transcript: 'كيف أكتب مقدمة بحثي؟' });
+  assert.equal(result.complete, false, 'لا كشف بلا مؤشرات كافية');
+  assert.ok(result.matched < result.total);
+  assert.ok(result.fields.some((field) => !field.matched && field.value === ''));
+  assert.equal(evaluateStepCompletion({}).complete, false, 'بلا نص لا اكتمال');
+});
+
+test('evaluateStepCompletion: السقوط الآمن لخطوة غير معرّفة (إنجاز معلن + ملخص)', () => {
+  const done = evaluateStepCompletion({
+    stepKey: 'brand-new-step',
+    transcript: 'أنجزت المطلوب في هذه الخطوة. ملخص: أكملت كل البنود المطلوبة.'
+  });
+  assert.equal(done.isFallback, true);
+  assert.equal(done.complete, true, 'إنجاز معلن + ملخص يكفيان في السقوط الآمن');
+  assert.ok(done.fields.every((field) => field.value.length > 0));
+
+  const notDone = evaluateStepCompletion({ stepKey: 'brand-new-step', transcript: 'ما رأيك في الطقس اليوم؟' });
+  assert.equal(notDone.complete, false, 'حديث بلا إنجاز لا يولّد بطاقة');
 });

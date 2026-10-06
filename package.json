@@ -25,7 +25,8 @@
     "test:unit": "node --test scripts/unit-tests.mjs",
     "test:smoke": "node scripts/smoke-phase1.mjs",
     "check:deploy": "node --env-file=.env scripts/check-deploy-env.mjs",
-    "test": "npm run test:unit"
+    "test": "npm run test:unit",
+    "test:gate": "node --env-file=.env scripts/gate-check.mjs"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",

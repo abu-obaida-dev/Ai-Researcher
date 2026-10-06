@@ -79,7 +79,10 @@ export function requireAccount(req, res, next) {
 /**
  * بوابة الخدمات: تمنع فتح صفحة خدمة لا تسمح بها صلاحيات دور الحساب
  * (دور الباقة أو دور المشرف) — وتعرض صفحة عربية تشرح الخدمة والباقة المطلوبة.
- * تُستخدم في /references (المكتبة) و /notes (المفكرة) و /files (الملفات) و /defense (المناقشة).
+ * تُستخدم في /references (المكتبة) و /notes (المفكرة) و /files (الملفات)
+ * و /defense (المناقشة) و /journey (مسار البحث).
+ * /chat خارج هذه البوابة قصداً (الشات متاح لكل الباقات بمجرد التسجيل) — حمايته
+ * من بوابة الملف الجزئية requireCoreOnboarding على الإرسال فقط (قراءة مفتوحة).
  */
 export function requireService(serviceKey) {
   const service = PLATFORM_SERVICES.find((item) => item.key === serviceKey);
@@ -137,4 +140,25 @@ export function needsOnboarding(account) {
   if (!account) return false;
   if (account.role === 'admin' || hasPanelAccess(account)) return false;
   return account.onboarding_complete !== true;
+}
+
+/**
+ * البوابة الجزئية التدريجية: الملف الأكاديمي نقطة بداية ضرورية للإشراف
+ * المخصص — لا حاجزاً على كل النظام.
+ *
+ * القاعدة: الوظائف التي تحتاج سياقاً بحثياً (الشات/المراجع/مسار البحث/المناقشة)
+ * تتطلب إكمال الأساسيات الثلاث (المرحلة الأكاديمية + التخصص + الهدف الحالي).
+ * من لم يكملها يُحوَّل إلى /onboarding مع حفظ وجهته (?next=) ليعود بعد الإكمال.
+ * القراءة العامة (لوحة الباحث/الحساب/الدفع) تبقى مفتوحة دائماً.
+ */
+export function requireCoreOnboarding(req, res, next) {
+  if (!req.account) {
+    res.redirect(302, `/login?next=${encodeURIComponent(req.originalUrl || '/dashboard')}`);
+    return;
+  }
+  if (needsOnboarding(req.account)) {
+    res.redirect(302, `/onboarding?next=${encodeURIComponent(req.originalUrl || '/dashboard')}`);
+    return;
+  }
+  next();
 }

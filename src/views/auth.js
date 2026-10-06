@@ -12,6 +12,7 @@ import { formatDate, formatDateTime, formatNumber } from './format.js';
 import { formatStorageMb } from '../services/plans.js';
 import { googleIcon, icon } from './icons.js';
 import { BRAND, escapeHtml, renderLayout } from './layout.js';
+import { needsOnboarding } from '../middleware/auth.js';
 
 /** اسم الخدمة بالعربية من مفتاحها (لعرض خدمات الباقة في اللوحة والحساب). */
 function serviceLabel(key) {
@@ -188,7 +189,12 @@ const ONBOARDING_REASONS = [
 ];
 
 /** صفحة إكمال الملف البحثي (خطوة واحدة بعد أول تسجيل دخول، وتُستخدم أيضاً للتعديل). */
-export function renderOnboardingPage({ account, values, errors = [], profile = null }) {
+export function renderOnboardingPage({ account, values, errors = [], profile = null, next = '' }) {
+  const backTarget = String(next || '').startsWith('/') && !String(next).startsWith('//') ? String(next) : '';
+  // قبل إكمال الملف: صفحة مستقلة (area:'auth') بلا شريط علوي ولا سايدبار —
+  // لوحة الباحث لا تُفتح إلا بعد إكمال التسجيل والملف. بعد الإكمال يُفتح
+  // تعديل الملف من داخل اللوحة (area:'app') كالسابق.
+  const standalone = needsOnboarding(account);
   const reasons = ONBOARDING_REASONS.map(
     (reason) => `<div class="feature-card">
   <span class="feature-icon">${icon(reason.icon)}</span>
@@ -203,7 +209,7 @@ export function renderOnboardingPage({ account, values, errors = [], profile = n
 
   const body = `<div class="onboarding-grid">
   <div>
-    <form class="form-card" method="post" action="/onboarding">
+    <form class="form-card" method="post" action="/onboarding${backTarget ? `?next=${encodeURIComponent(backTarget)}` : ''}">
       ${errorBox}
 
       <section class="form-section first">
@@ -241,16 +247,25 @@ export function renderOnboardingPage({ account, values, errors = [], profile = n
   <aside class="onboarding-aside">${reasons}</aside>
 </div>`;
 
+  // الصفحة المستقلة تحمل عنوانها وطريق العودة بنفسها (لا توب بار ولا سايدبار يحملهما)
+  const heading = `<div class="page-head">
+    <h1>${profile ? 'ملفي البحثي' : 'أكمل ملفك البحثي'}</h1>
+    <p>خطوة واحدة لتخصيص إشراف المشرف الذكي لمجالك ومرحلتك</p>
+  </div>`;
+  const exitLinks = `<div class="auth-links">
+    <a href="/">العودة إلى الصفحة الرئيسية</a> · <a href="/logout">تسجيل الخروج</a>
+  </div>`;
+
   return renderLayout({
     title: profile ? 'ملفي البحثي' : 'أكمل ملفك البحثي',
     subtitle: 'خطوة واحدة لتخصيص إشراف المشرف الذكي لمجالك ومرحلتك',
-    area: 'app',
+    area: standalone ? 'auth' : 'app',
     activeKey: 'onboarding',
     account,
     unread: 0,
-    scripts: ['/js/app-shell.js'],
+    scripts: standalone ? [] : ['/js/app-shell.js'],
     pageHead: !account,
-    body
+    body: standalone ? `<div class="onboarding-standalone">${heading}${body}${exitLinks}</div>` : body
   });
 }
 
