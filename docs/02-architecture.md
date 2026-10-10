@@ -5,6 +5,7 @@
 ```
 المتصفح (HTML + CSS + JS خفيف في public/js/)
    │  GET صفحات  /  POST نماذج (Forms) — بلا JSON API للواجهة
+   │  (استثناء واحد: إرسال الشات يقبل Accept: application/json لقطع محدّثة بلا تحميل)
    ▼
 server.js — نقطة التجميع الوحيدة
    │  helmet + cors + trust-proxy + dotenv + تشخيص ENV

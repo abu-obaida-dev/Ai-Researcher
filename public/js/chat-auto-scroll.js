@@ -11,8 +11,10 @@
   box.scrollTop = box.scrollHeight;
 
   // فتح لوحة المراجع يمرّرها هي فقط، ويُبقي الحوار في مكانه.
+  // نضع علامة الترابط حتى لا يُعيد chat-send.js ربط مستمع ثانٍ على العنصر نفسه.
   var refs = document.getElementById('chat-refs');
   if (!refs) return;
+  refs.setAttribute('data-refs-wired', '1');
   refs.addEventListener('toggle', function () {
     refs.scrollTop = refs.open ? 0 : refs.scrollHeight;
   });

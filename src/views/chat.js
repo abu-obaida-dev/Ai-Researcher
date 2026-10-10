@@ -252,6 +252,25 @@ function renderStepReviewCard(conversation) {
   return `<section class="step-review" id="step-review">${head}${hint}${content}</section>`;
 }
 
+/**
+ * قطع تحديث الشات بعد إرسال رسالة عبر الجافاسكربت (بلا إعادة تحميل الصفحة).
+ * تعيد نفس مخرجات دوال العرض الحالية — مصدر واحد للشكل — ليستبدلها chat-send.js
+ * في مواضعها: صندوق الرسائل (بما فيها بطاقة المراجعة)، شريط الوضع، لوحة المراجع،
+ * وقائمة المحادثات في السايدبار.
+ */
+export function renderChatUpdate({ conversation = null, conversations = [] }) {
+  const messagesHtml = conversation?.messages?.length
+    ? conversation.messages.map(renderMessage).join('') + renderStepReviewCard(conversation)
+    : renderStepReviewCard(conversation);
+
+  return {
+    messagesHtml,
+    modeBarHtml: renderModeBar(conversation),
+    refsHtml: renderReferencesFound(conversation),
+    conversationsHtml: renderConversations(conversations, conversation?.id || '')
+  };
+}
+
 /** صفحة الشات كاملة. */
 export function renderChatPage({
   account,
@@ -327,7 +346,7 @@ export function renderChatPage({
     unread,
     // لا سكرول في الصفحة: الشات يملأ ما تبقى من الشاشة والتمرير داخل صندوقه
     fitViewport: true,
-    scripts: ['/js/chat-auto-scroll.js', '/js/app-shell.js'],
+    scripts: ['/js/chat-auto-scroll.js', '/js/chat-send.js', '/js/app-shell.js'],
     // سجل الجلسات أسفل رابط «المشرف الذكي» داخل نفس القائمة
     navBottom: renderConversations(conversations, conversation?.id || ''),
     body

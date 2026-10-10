@@ -15,7 +15,7 @@ import { unreadCount } from '../services/notifications.js';
 import { getProfile } from '../services/users.js';
 import { listFiles } from '../services/files.js';
 import { renderNotice } from '../views/layout.js';
-import { renderChatPage } from '../views/chat.js';
+import { renderChatPage, renderChatUpdate } from '../views/chat.js';
 
 /**
  * مسارات الشات (1F):
@@ -118,11 +118,20 @@ router.get('/chat', requireAccount, async (req, res) => {
   }
 });
 
-/** إرسال رسالة للمشرف الذكي (يتطلب الملف الأساسي — سياق الإشراف). */
+/**
+ * إرسال رسالة للمشرف الذكي (يتطلب الملف الأساسي — سياق الإشراف).
+ *
+ * مساران في معالج واحد:
+ * - نموذج HTML عادي (بلا جافاسكربت): 303 مع flash في الرابط — كما كان دائماً.
+ * - طلب JSON (Accept: application/json من chat-send.js): قطع HTML محدّثة
+ *   (رسائل + شريط وضع + مراجع + سايدبار) — بلا إعادة تحميل الصفحة.
+ */
 router.post('/chat', requireCoreOnboarding, rateLimitUser('chat_message', { limit: 30, windowMs: 5 * 60 * 1000 }), async (req, res) => {
   const body = req.body || {};
   const stepKey = String(body.step || '').trim().slice(0, 100);
   const conversationId = String(body.conversation_id || '').trim();
+  // نكشف JSON من الترويسة الصريحة فقط — طلبات fetch الافتراضية (*/*) تبقى على مسار 303
+  const wantsJson = String(req.get('accept') || '').includes('application/json');
 
   try {
     const profile = await getProfile(req.account.id);
@@ -136,11 +145,35 @@ router.post('/chat', requireCoreOnboarding, rateLimitUser('chat_message', { limi
       fileIds: body.file_ids
     });
 
+    if (wantsJson) {
+      // نعيد قطعاً مُعرَّضة بنفس دوال عرض الصفحة — مصدر واحد للشكل.
+      const [conversation, conversations] = await Promise.all([
+        getConversation(req.account.id, result.conversationId),
+        listConversations(req.account.id)
+      ]);
+      return res.json({
+        ok: true,
+        conversationId: result.conversationId,
+        conversationUrl: `/chat?c=${result.conversationId}&step=${encodeURIComponent(stepKey)}`,
+        fragments: renderChatUpdate({ conversation, conversations })
+      });
+    }
+
     res.redirect(303, `/chat?c=${result.conversationId}&step=${encodeURIComponent(stepKey)}&ok=sent`);
   } catch (error) {
     console.warn(`فشل الشات (${error?.code || 'UNKNOWN'}): ${error?.message}`);
     // نقص الرصيد ورصيده وكم نحتاج: رسالة الكود أوضح من نص ثابت
     const message = error?.code === 'NO_TOKENS' ? error.message : '';
+
+    if (wantsJson) {
+      const key = flashKeyForError(error);
+      const status = { no_tokens: 402, no_provider: 503, failed: 502, bad_step: 400, missing_conversation: 404 }[key] || 400;
+      return res.status(status).json({
+        ok: false,
+        error: { code: key, message: message || FLASH[key].message }
+      });
+    }
+
     res.redirect(
       303,
       `/chat?c=${encodeURIComponent(conversationId)}&step=${encodeURIComponent(stepKey)}` +

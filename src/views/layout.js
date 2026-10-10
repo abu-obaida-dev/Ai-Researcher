@@ -1396,6 +1396,10 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .bubble-ai { background: #fff; color: var(--ink); border: 1px solid #cfe3f0; align-self: flex-end; }
 .bubble-text { white-space: pre-wrap; line-height: 1.9; overflow-wrap: anywhere; }
 .bubble-meta { font-size: 10.5px; color: var(--slate); margin-top: 6px; }
+/* مؤشر «يكتب…» وفقاعة معلّقة أثناء الإرسال بلا إعادة تحميل (chat-send.js) */
+.bubble.is-thinking { color: var(--slate); font-size: 12.5px; animation: chat-think 1.2s ease-in-out infinite; }
+.bubble.is-pending { opacity: 0.85; }
+@keyframes chat-think { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
 .chat-composer {
   display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--mist); padding-top: 11px;
 }

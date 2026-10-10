@@ -152,11 +152,26 @@ export function needsOnboarding(account) {
  * القراءة العامة (لوحة الباحث/الحساب/الدفع) تبقى مفتوحة دائماً.
  */
 export function requireCoreOnboarding(req, res, next) {
+  // طلبات JSON (chat-send.js): نردّ JSON بدل التوجيه حتى لا يفقد الجافاسكربت معناه
+  // (req.get?. حتى لا ينكسر req الوهمي في اختبارات الوحدة)
+  const wantsJson = String(req.get?.('accept') || '').includes('application/json');
+
   if (!req.account) {
+    if (wantsJson) {
+      res.status(401).json({ ok: false, error: { code: 'auth', message: 'سجّل الدخول أولاً.' } });
+      return;
+    }
     res.redirect(302, `/login?next=${encodeURIComponent(req.originalUrl || '/dashboard')}`);
     return;
   }
   if (needsOnboarding(req.account)) {
+    if (wantsJson) {
+      res.status(403).json({
+        ok: false,
+        error: { code: 'onboarding', message: 'أكمل ملفك البحثي أولاً (المرحلة والتخصص والهدف الحالي).' }
+      });
+      return;
+    }
     res.redirect(302, `/onboarding?next=${encodeURIComponent(req.originalUrl || '/dashboard')}`);
     return;
   }
