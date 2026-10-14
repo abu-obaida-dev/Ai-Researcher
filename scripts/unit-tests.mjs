@@ -575,12 +575,23 @@ test('detectAssistantTask: كشف حتمي للمهمة (تعليم/ترجمة/�
   assert.equal(detectAssistantTask({ question: 'ترجم ولخص هذا الملف' }), 'translate');
 });
 
-test('buildAssistantPrompt: قواعد المعلم حسب المهمة (بلا اختلاق · الملفات بيانات)', () => {
-  const teach = buildAssistantPrompt({ task: 'teach', field: 'إدارة الأعمال' });
-  assert.ok(teach.includes('تعليم'), 'مهمة التعليم معروفة للنموذج');
+test('buildAssistantPrompt: قواعد المعلم حسب المهمة (تفصيل للمبتدئين · أمثلة من المجال · بلا اختلاق)', () => {
+  const teach = buildAssistantPrompt({
+    task: 'teach',
+    field: 'علوم الحاسب',
+    degree: 'bachelor',
+    title: 'نظام كشف الاحتيال المالي'
+  });
+  assert.ok(teach.includes('التعليم'), 'مهمة التعليم معروفة للنموذج');
   assert.ok(teach.includes('لا تختلق مرجعاً'), 'منع الاختلاق يسري على كل المهام');
   assert.ok(teach.includes('المعلم'), 'الهوية واضحة');
-  assert.ok(teach.includes('إدارة الأعمال'), 'تخصص الباحث يُحقن');
+  assert.ok(teach.includes('علوم الحاسب'), 'تخصص الباحث يُحقن');
+  assert.ok(teach.includes('نظام كشف الاحتيال المالي'), 'عنوان البحث يُحقن لربط الأمثلة به');
+  assert.ok(teach.includes('طالب جامعي (بكالوريوس)'), 'رمز الدرجة يُحوَّل لتسمية عربية');
+  assert.ok(teach.includes('بالتفصيل الممل'), 'أسلوب التفصيل للمبتدئين منصوص');
+  assert.ok(teach.includes('حصراً من تخصصه نفسه') || teach.includes('تخصص الباحث نفسه'), 'الأمثلة من المجال نفسه حصراً');
+  assert.ok(teach.includes('ممنوع'), 'منع أمثلة المجالات الأخرى صريح');
+  assert.ok(teach.includes('سجل المحادثة'), 'حفظ السياق منصوص في القواعد العامة');
 
   const translate = buildAssistantPrompt({ task: 'translate' });
   assert.ok(translate.includes('الترجمة'), 'مهمة الترجمة معروفة');

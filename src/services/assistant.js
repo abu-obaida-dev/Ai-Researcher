@@ -376,7 +376,8 @@ export async function askAssistant({ userId, prompt, conversationId = null, file
     task,
     field: String(profile?.research_field || '').slice(0, 80),
     degree: String(profile?.degree_level || '').slice(0, 80),
-    goal: String(profile?.goal || profile?.research_goal || '').slice(0, 120)
+    title: String(profile?.research_title || '').slice(0, 160),
+    goal: String(profile?.goal || profile?.research_goal || profile?.research_interests || '').slice(0, 120)
   });
 
   const history = conversation.messages
