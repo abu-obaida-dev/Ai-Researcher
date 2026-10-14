@@ -109,6 +109,9 @@ const APP_NAV = [
 /** رابط المشرف الذكي منفصلاً: يُعرض أسفل القائمة وفوق سجل الجلسات (ChatGPT/Claude). */
 const APP_CHAT_NAV = { href: '/chat', label: 'المشرف الذكي', key: 'chat', icon: 'message', service: 'chat' };
 
+/** رابط «المعلم» — مساعد تعليمي مستقل (تعليم · ترجمة · تلخيص من المكتبة). */
+const APP_ASSISTANT_NAV = { href: '/assistant', label: 'المعلم', key: 'assistant', icon: 'sparkles', service: 'chat' };
+
 /**
  * روابط الحساب (legacy): لم تعد تُستخدم في السايدبار — الحساب/الملف البحثي/الخروج
  * في قائمة صورة الحساب بالشريط العلوي (renderUserMenu). تُبقى مُصدَّرة للتوافق فقط.
@@ -1682,6 +1685,7 @@ function renderAppSidebar(activeKey, account, navBottom = '') {
     <div class="app-nav-foot">
       <div class="app-nav-sep"></div>
       ${visible(APP_CHAT_NAV) ? link(APP_CHAT_NAV) : ''}
+      ${visible(APP_ASSISTANT_NAV) ? link(APP_ASSISTANT_NAV) : ''}
       ${navBottom}
     </div>
   </nav>

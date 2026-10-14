@@ -18,6 +18,11 @@ import { needsOnboarding, requireCoreOnboarding } from '../src/middleware/auth.j
 import { renderOnboardingPage } from '../src/views/auth.js';
 import { buildSystemPrompt } from '../src/services/supervisor-prompt.js';
 import { evaluateStepCompletion, specForStep } from '../src/services/step-review.js';
+import {
+  ASSISTANT_SOURCE_ORDER,
+  assistantSourceBatches
+} from '../src/services/assistant.js';
+import { ASSISTANT_REPLY_CAPS, buildAssistantPrompt, detectAssistantTask } from '../src/services/assistant-prompt.js';
 import { isUuid } from '../src/constants.js';
 
 /* ------------------------------- النقاط ------------------------------- */
@@ -528,4 +533,41 @@ test('evaluateStepCompletion: السقوط الآمن لخطوة غير معرّ
 
   const notDone = evaluateStepCompletion({ stepKey: 'brand-new-step', transcript: 'ما رأيك في الطقس اليوم؟' });
   assert.equal(notDone.complete, false, 'حديث بلا إنجاز لا يولّد بطاقة');
+});
+/* ------------------------------- المعلم ------------------------------- */
+
+test('detectAssistantTask: كشف حتمي للمهمة (تعليم/ترجمة/تلخيص)', () => {
+  assert.equal(detectAssistantTask({ question: 'أريد أن أتعلم كيف أهيكل بحثي' }), 'teach');
+  assert.equal(detectAssistantTask({ question: 'ما هو الإطار النظري؟' }), 'teach');
+  assert.equal(detectAssistantTask({ question: 'ترجم هذا الملف' }), 'translate');
+  assert.equal(detectAssistantTask({ question: 'translate the attached file' }), 'translate');
+  assert.equal(detectAssistantTask({ question: 'لخص لي مراجع عن التسويق الرقمي' }), 'summarize');
+  assert.equal(detectAssistantTask({ question: 'ابحث لي في المكتبة عن مصادر' }), 'summarize');
+  // الترجمة تتقدّم على التلخيص لو جاءتا معاً (الملف هو المقصد)
+  assert.equal(detectAssistantTask({ question: 'ترجم ولخص هذا الملف' }), 'translate');
+});
+
+test('buildAssistantPrompt: قواعد المعلم حسب المهمة (بلا اختلاق · الملفات بيانات)', () => {
+  const teach = buildAssistantPrompt({ task: 'teach', field: 'إدارة الأعمال' });
+  assert.ok(teach.includes('تعليم'), 'مهمة التعليم معروفة للنموذج');
+  assert.ok(teach.includes('لا تختلق مرجعاً'), 'منع الاختلاق يسري على كل المهام');
+  assert.ok(teach.includes('المعلم'), 'الهوية واضحة');
+  assert.ok(teach.includes('إدارة الأعمال'), 'تخصص الباحث يُحقن');
+
+  const translate = buildAssistantPrompt({ task: 'translate' });
+  assert.ok(translate.includes('الترجمة'), 'مهمة الترجمة معروفة');
+
+  const summarize = buildAssistantPrompt({ task: 'summarize' });
+  assert.ok(summarize.includes('نتائج بحث حقيقية'), 'التلخيص يقيَّد بنتائج محقونة');
+});
+
+test('assistantSourceBatches: كل المصادر مغطاة وكل دفعة ≤ ٦ (حدّ searchLiterature)', () => {
+  const [first, second] = assistantSourceBatches();
+  const all = [...first, ...second];
+  assert.equal(all.length, ASSISTANT_SOURCE_ORDER.length, 'لا مصدر ساقط');
+  assert.equal(new Set(all).size, all.length, 'لا مصدر مكرر بين الدفعتين');
+  assert.ok(first.length <= 6 && second.length <= 6, 'كل دفعة تمرّ من searchLiterature كما هي');
+  assert.equal(ASSISTANT_SOURCE_ORDER[0], 'crossref', 'بيانات الاستشهاد أولاً');
+  assert.equal(ASSISTANT_SOURCE_ORDER.length, 9, 'كل المصادر التسعة بالترتيب');
+  assert.equal(ASSISTANT_REPLY_CAPS.translate > ASSISTANT_REPLY_CAPS.teach, true, 'سقف الترجمة أطول');
 });

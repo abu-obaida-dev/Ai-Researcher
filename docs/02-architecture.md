@@ -14,8 +14,8 @@ server.js — نقطة التجميع الوحيدة
 src/routes/*.js — 8 مسارات، كل مسار: تحقق → خدمة → View
    │  auth · chat · journey · workspace · defense · payments · notifications · admin
    ▼
-src/services/*.js — منطق العمل الحقيقي (25 خدمة)
-   │  ai · tokens · chat · supervisor-* · literature · journey · workspace
+src/services/*.js — منطق العمل الحقيقي (26 خدمة)
+   │  ai · tokens · chat · assistant · supervisor-* · literature · journey · workspace
    │  files · documents · library* · payments · plans · access · users
    │  settings · dashboard · notifications · firebase · spreadsheet
    ▼
@@ -40,6 +40,16 @@ PostgreSQL — ~20 جدولاً (انظر 03-database)
    h. تلخيص الجلسة السابقة إن بدأت جديدة (على حساب المنصة)
 4. الرد: صفحة HTML محدثة (SSR) — لا JSON
 ```
+
+## «المعلم» — مساعد تعليمي مستقل (/assistant)
+
+مسار POST /assistant (جداول خاصة: `assistant_conversations` / `assistant_messages` — لا تلمس المشرف ولا الرحلة):
+
+1. assistant.js: تنظيف المدخل + تحميل نصوص الملفات المرفقة (ملكية مُتحقَّقة)
+2. detectAssistantTask() حتمياً: **تعليم** (يهيكل بحثه) · **ترجمة** (ملف مرفوع) · **تلخيص**
+3. في التلخيص: طبقة البحث بالكود — مكتبة المنصة أولاً ثم **كل** المصادر بالترتيب (Crossref → OpenAlex → Semantic → arXiv → EuropePMC → DOAJ → OpenLibrary → IEEE → ACM) على دفعتين — والمعلم يجيب من النتائج المحقونة فقط (بلا اختلاق)
+4. buildAssistantPrompt(task) → نفس السباق المموّه (runSupervisor) + نفس الانضباط المالي (حجز → نداء → تسوية → ردّ الفرق)
+
 
 ## خريطة المجلدات
 

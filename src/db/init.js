@@ -284,6 +284,40 @@ const MESSAGES_TABLE = `
   );
 `;
 
+/**
+ * جداول «المعلم» — مساعد تعليمي مستقل تماماً عن المشرف الذكي:
+ * جداول منفصلة (لا تلمس conversations/messages ولا خطوات الرحلة ولا الذاكرة).
+ * مهمته: تعليم الباحث كيف يهيكل بحثه + ترجمة ملفاته + تلخيص من نتائج بحث حقيقية.
+ */
+const ASSISTANT_CONVERSATIONS_TABLE = `
+  CREATE TABLE IF NOT EXISTS assistant_conversations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(255),
+    provider VARCHAR(100),
+    sources_found JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`;
+
+const ASSISTANT_MESSAGES_TABLE = `
+  CREATE TABLE IF NOT EXISTS assistant_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID NOT NULL REFERENCES assistant_conversations(id) ON DELETE CASCADE,
+    role VARCHAR(50) NOT NULL,
+    content TEXT NOT NULL,
+    tokens_used INTEGER NOT NULL DEFAULT 0,
+    model VARCHAR(255),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`;
+
+const ASSISTANT_INDEXES = `
+  CREATE INDEX IF NOT EXISTS idx_assistant_conversations_user ON assistant_conversations(user_id);
+  CREATE INDEX IF NOT EXISTS idx_assistant_messages_conversation ON assistant_messages(conversation_id);
+`;
+
 /** مراقبة مزودي الذكاء الاصطناعي (زمن الاستجابة والحالة والأخطاء). */
 const AI_REQUESTS_TABLE = `
   CREATE TABLE IF NOT EXISTS ai_requests (
@@ -758,6 +792,8 @@ async function initializeDatabase() {
     await pool.query(FILES_TABLE);
     await pool.query(CONVERSATIONS_TABLE);
     await pool.query(MESSAGES_TABLE);
+    await pool.query(ASSISTANT_CONVERSATIONS_TABLE);
+    await pool.query(ASSISTANT_MESSAGES_TABLE);
     await pool.query(AI_REQUESTS_TABLE);
     await pool.query(USAGE_LOGS_TABLE);
     await pool.query(SETTINGS_TABLE);
@@ -785,6 +821,7 @@ async function initializeDatabase() {
     await pool.query(STEP_KEY_INDEXES);
     await pool.query(NOTIFICATION_INDEXES);
     await pool.query(SUPERVISOR_INDEXES);
+    await pool.query(ASSISTANT_INDEXES);
     await pool.query(PAYMENT_INDEXES);
 
     // بذرة خفيفة: عملة الموقع + طرق الدفع الافتراضية (مرة واحدة، ولا نلمس تعديلات المدير)

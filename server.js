@@ -11,6 +11,7 @@ import { hintForDatabaseError } from './src/db/errors.js';
 import { adminRouter } from './src/routes/admin.js';
 import { authRouter } from './src/routes/auth.js';
 import { chatRouter } from './src/routes/chat.js';
+import { assistantRouter } from './src/routes/assistant.js';
 import { defenseRouter } from './src/routes/defense.js';
 import { paymentsRouter } from './src/routes/payments.js';
 import { requireSameOrigin, securityHeaders } from './src/middleware/security.js';
@@ -419,6 +420,7 @@ app.get('/manifest.webmanifest', (_req, res) => {
     ],
     shortcuts: [
       { name: 'المشرف الذكي', url: '/chat' },
+      { name: 'المعلم', url: '/assistant' },
       { name: 'مراجعي', url: '/references' },
       { name: 'مسار البحث', url: '/journey' }
     ]
@@ -437,6 +439,7 @@ app.get('/robots.txt', (req, res) => {
         'Disallow: /admin',
         'Disallow: /dashboard',
         'Disallow: /chat',
+        'Disallow: /assistant',
         'Disallow: /journey',
         'Disallow: /defense',
         'Disallow: /references',
@@ -492,6 +495,7 @@ app.use(notificationsRouter);
 app.use(journeyRouter);
 app.use(workspaceRouter);
 app.use(chatRouter);
+app.use(assistantRouter);
 app.use(defenseRouter);
 
 // الاشتراك والدفع اليدوي خارج المنصة (الباحث)
