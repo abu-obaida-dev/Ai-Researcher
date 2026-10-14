@@ -599,3 +599,38 @@ test('assistantSourceBatches: كل المصادر مغطاة وكل دفعة ≤
   assert.equal(ASSISTANT_SOURCE_ORDER.length, 9, 'كل المصادر التسعة بالترتيب');
   assert.equal(ASSISTANT_REPLY_CAPS.translate > ASSISTANT_REPLY_CAPS.teach, true, 'سقف الترجمة أطول');
 });
+
+test('مرجع الهياكل الأكاديمية: الأنواع السبعة كاملة وأسلوب «التفصيل داخل التفصيل»', () => {
+  const ctx = {
+    userName: 'سارة', degree: 'باحثة ماجستير', field: 'العلوم التربوية',
+    title: 'فعالية التعلم النشط', university: 'غير محدد', language: 'العربية',
+    citationStyle: 'APA 7', currentStage: 'الإطار النظري', researchGoal: 'كتابة الفصول',
+    researchGoalKey: 'writing', progressLevel: 'أكتب فصول البحث', stepsStatus: 'الإطار النظري: جاري',
+    journeyCompleted: false, memorySummary: '', openTask: '', daysSinceLast: 0,
+    isFirstMessageEver: false, strikes: 0, mode: 'normal', files: '', fileNames: [],
+    replyCap: 900, currentStepKey: 'literature'
+  };
+  const prompt = buildSystemPrompt(ctx);
+
+  // الأنواع السبعة كلها موجودة
+  for (const marker of [
+    'هيكلية ورقة العمل (Working Paper)',
+    'هيكلية الورقة البحثية (Research Paper)',
+    'هيكلية مشروع البكالوريوس',
+    'هيكلية مشروع الدبلوم',
+    'هيكلية مقترح رسالة الماجستير',
+    'هيكلية رسالة الماجستير',
+    'هيكلية أطروحة الدكتوراه',
+    'الفرق الأساسي بين المستويات'
+  ]) {
+    assert.ok(prompt.includes(marker), `النوع مفقود: ${marker}`);
+  }
+
+  // أسلوب التفصيل: كل جزء باسمه ووظيفته (عيّنة من ثلاث هيئات)
+  assert.ok(prompt.includes('الملخص — نبذة مختصرة'), 'شرح وظيفة الملخص في ورقة العمل');
+  assert.ok(prompt.includes('مراجعة الأدبيات): أوسع وأكثر نقداً من ماجستير'), 'تمييز أطروحة الدكتوراه');
+  assert.ok(prompt.includes('الإطار النظري المختصر'), 'خصوصية الدبلوم');
+
+  // حدود: شرح بنية فقط — لا كتابة محتوى
+  assert.ok(prompt.includes('ولا تكتبي محتوى أي قسم من بحثه'), 'الهيكلية لا تعني كتابة المحتوى');
+});
