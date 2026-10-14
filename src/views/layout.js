@@ -1264,6 +1264,11 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .ref-table, .file-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .ref-table th, .file-table th { text-align: right; color: var(--slate); font-size: 12px; padding: 8px; border-bottom: 1px solid var(--mist); }
 .ref-table td, .file-table td { padding: 9px 8px; border-bottom: 1px solid var(--mist); vertical-align: top; }
+/* تناسق أزرار صفوف الجداول: مقاس موحّد بلا هوامش عمودية زائدة */
+.ref-table .row-actions, .file-table .row-actions { margin-top: 0; gap: 6px; align-items: center; }
+.ref-table .row-actions .btn, .file-table td .btn { margin-top: 0; }
+.ref-table .ref-status select { max-width: 128px; min-width: 110px; }
+.ref-table td:last-child, .file-table td:last-child { white-space: nowrap; }
 .ref-citation { font-size: 12px; margin-top: 3px; }
 .lib-list { display: grid; gap: 10px; }
 .lib-item { border: 1px solid var(--mist); border-radius: 14px; padding: 11px 13px; background: #fff; }

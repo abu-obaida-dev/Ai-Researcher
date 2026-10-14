@@ -70,32 +70,32 @@ function renderReferenceRow(reference, stepTitles) {
   )}</span></td>
   <td>${escapeHtml(stepLabel(stepTitles, reference.stepKey))}</td>
   <td>
-    <form method="post" action="/references/${escapeHtml(reference.id)}/status" class="inline-form">
+    <form method="post" action="/references/${escapeHtml(reference.id)}/status" class="inline-form ref-status">
       <select name="status" aria-label="حالة قراءة المرجع">${statusOptions}</select>
-      <button class="btn" type="submit">تحديث</button>
+      <button class="btn btn-sm" type="submit">تحديث</button>
     </form>
   </td>
   <td>
-    <div class="links">
+    <div class="links row-actions">
     ${
       reference.hasFile
-        ? `<a class="btn btn-sm" href="/library/${encodeURIComponent(reference.libraryItemId)}/file?inline=1" target="_blank" rel="noopener">${icon(
+        ? `<a class="btn btn-sm btn-quiet" href="/library/${encodeURIComponent(reference.libraryItemId)}/file?inline=1" target="_blank" rel="noopener">${icon(
             'book',
             'icon-sm'
           )} الكتاب</a>
-           <a class="btn btn-sm" href="/library/${escapeHtml(reference.libraryItemId)}/file">${icon(
+           <a class="btn btn-sm btn-quiet" href="/library/${escapeHtml(reference.libraryItemId)}/file">${icon(
              'download',
              'icon-sm'
            )} تحميل</a>`
         : reference.externalUrl
-          ? `<a class="btn btn-sm" href="${escapeHtml(reference.externalUrl)}" target="_blank" rel="noopener">المصدر ↗</a>`
+          ? `<a class="btn btn-sm btn-quiet" href="${escapeHtml(reference.externalUrl)}" target="_blank" rel="noopener">المصدر ↗</a>`
           : ''
     }
-      <a class="btn btn-quiet" href="/notes?ref=${escapeHtml(reference.id)}">ملاحظات (${escapeHtml(
+      <a class="btn btn-sm btn-quiet" href="/notes?ref=${escapeHtml(reference.id)}">ملاحظات (${escapeHtml(
     reference.notesCount || 0
   )})</a>
       <form method="post" action="/references/${escapeHtml(reference.id)}/delete" class="inline-form">
-        <button class="btn btn-danger" type="submit">حذف</button>
+        <button class="btn btn-sm btn-danger" type="submit">حذف</button>
       </form>
     </div>
   </td>
@@ -434,7 +434,7 @@ ${flashBox(flash)}`;
 /** صف ملف: النوع والحجم والخطوة + أزرار العرض والتحميل والحذف. */
 function renderFileRow(file, stepTitles) {
   const viewBtn = file.previewable
-    ? `<a class="btn btn-quiet" href="/files/${escapeHtml(file.id)}/view">${icon('searchCheck', 'icon-sm')} عرض</a>`
+    ? `<a class="btn btn-sm btn-quiet" href="/files/${escapeHtml(file.id)}/view">${icon('searchCheck', 'icon-sm')} عرض</a>`
     : '';
 
   return `<tr>
@@ -447,9 +447,9 @@ function renderFileRow(file, stepTitles) {
   <td>${escapeHtml(formatDate(file.createdAt))}</td>
   <td>
     ${viewBtn}
-    <a class="btn btn-quiet" href="/files/${escapeHtml(file.id)}/raw">${icon('download', 'icon-sm')} تحميل</a>
+    <a class="btn btn-sm btn-quiet" href="/files/${escapeHtml(file.id)}/raw">${icon('download', 'icon-sm')} تحميل</a>
     <form method="post" action="/files/${escapeHtml(file.id)}/delete" class="inline-form">
-      <button class="btn btn-danger" type="submit">${icon('trash', 'icon-sm')} حذف</button>
+      <button class="btn btn-sm btn-danger" type="submit">${icon('trash', 'icon-sm')} حذف</button>
     </form>
   </td>
 </tr>`;
