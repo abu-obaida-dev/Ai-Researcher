@@ -181,10 +181,10 @@ function renderWebReference(item, stepKey) {
 }
 
 /**
- * لوحة «ابحث في قواعد البيانات العلمية» — تحلّ أكبر مشكلة عند الباحثين:
- * نموذج بحث عام + نموذج «لديّ DOI أو رابط» للحلّ المباشر.
+ * لوحة «ابحث في قواعد البيانات العلمية» — نموذج بحث عام في المصادر الخارجية
+ * مع إحصائية واضحة لعدد المراجع الظاهرة.
  */
-function renderWebSearchPanel({ web, webQuery, webSource, webYearFrom = 0, webYearTo = 0, webSources = [], stepKey, resolved = null, resolveError = '', resolveQuery = '' }) {
+function renderWebSearchPanel({ web, webQuery, webSource, webYearFrom = 0, webYearTo = 0, webSources = [], stepKey }) {
   const optionTag = (source) =>
     `<option value="${escapeHtml(source.id)}"${source.id === webSource ? ' selected' : ''}>${escapeHtml(source.label)}</option>`;
   // تقسيم القائمة إلى مجموعات مفهومة: عالمية · تخصصية · ناشرون · كتب ومراجع عربية وعالمية
@@ -200,6 +200,11 @@ function renderWebSearchPanel({ web, webQuery, webSource, webYearFrom = 0, webYe
   const results = web?.items || [];
   const errors = (web?.errors || []).filter((entry) => entry.error);
 
+  // إحصائية عدد المراجع الظاهرة بعد البحث — تُعرض أعلى القائمة بوضوح.
+  const countBadge = webQuery
+    ? `<div class="notice mt-12" role="status"><b>عدد المراجع الظاهرة:</b> ${String(results.length)}</div>`
+    : '';
+
   // فلتر فترة الإصدار الفعّال — يُعرض مع النتائج وحالة «لا نتائج» ليعرف الباحث ما يُرشَّح.
   const periodNote =
     webYearFrom || webYearTo ? `فترة الإصدار: ${webYearFrom || '…'}–${webYearTo || '…'}` : '';
@@ -207,13 +212,6 @@ function renderWebSearchPanel({ web, webQuery, webSource, webYearFrom = 0, webYe
     ? `بحثنا في: ${web.tried.map((entry) => `${escapeHtml(entry.source)} (${entry.count})`).join(' · ')}`
     : '';
   const metaLine = [triedLine, periodNote].filter(Boolean).join(' · ');
-
-  const resolvedCard = resolved
-    ? `<div class="notice mt-16">استخرجنا بيانات هذا المرجع كاملة — راجعها قبل الاستشهاد.</div>
-       ${renderWebReference({ ...resolved, sources: ['Crossref'], isOpenAccess: Boolean(resolved.pdfUrl) }, stepKey)}`
-    : resolveError
-      ? `<div class="alert mt-16">${escapeHtml(resolveError)}</div>`
-      : '';
 
   return `<section class="card">
   <div class="card-head">
@@ -242,15 +240,7 @@ function renderWebSearchPanel({ web, webQuery, webSource, webYearFrom = 0, webYe
     <button class="btn btn-primary" type="submit">${icon('searchCheck', 'icon-sm')} ابحث</button>
   </form>
 
-  <form class="toolbar mt-12" method="get" action="/library">
-    <h3 class="field-label">لديّ DOI أو رابط مرجع — استخرجه لي</h3>
-    ${stepKey ? `<input type="hidden" name="step" value="${escapeHtml(stepKey)}" />` : ''}
-    <input type="hidden" name="q" value="" />
-    <input type="search" name="resolve" value="${escapeHtml(resolveQuery || '')}" placeholder="ألصق DOI أو رابط المجلة (10.xxxx/… أو https://doi.org/…)" />
-    <button class="btn" type="submit">${icon('searchCheck', 'icon-sm')} استخراج البيانات</button>
-  </form>
-  ${resolvedCard}
-
+  ${countBadge}
   ${
     results.length
       ? `<div class="lib-list mt-16">${results.map((item) => renderWebReference(item, stepKey)).join('')}</div>
@@ -263,8 +253,8 @@ function renderWebSearchPanel({ web, webQuery, webSource, webYearFrom = 0, webYe
 }
 
 /**
- * صفحة المكتبة (رابط مستقل): البحث في القواعد العلمية أولاً ثم مكتبة المنصة
- * ثم كتب الباحث المرفوعة — بالترتيب: الخارجي ← المنصة ← ملفاتك.
+ * صفحة المكتبة (رابط مستقل): صفحة بحث فقط — البحث في القواعد العلمية أولاً
+ * ثم مكتبة المنصة. كتب الباحث المرفوعة تُدار من صفحة الملفات.
  */
 export function renderLibraryPage({
   account,
@@ -279,10 +269,6 @@ export function renderLibraryPage({
   webYearFrom = 0,
   webYearTo = 0,
   webSources = [],
-  resolved = null,
-  resolveError = '',
-  resolveQuery = '',
-  files = [],
   profileNotice = ''
 }) {
   const platformHtml = query
@@ -291,32 +277,6 @@ export function renderLibraryPage({
       : '<div class="empty">لا نتائج في مكتبة المنصة لهذا البحث — جرّب كلمة أخرى أو <a href="/references">أضف المرجع يدوياً</a>.</div>'
     : '<div class="empty">اكتب كلمة بحث (عنوان، مؤلف، أو مصدر) للبحث في مكتبة المنصة.</div>';
 
-  const mineRows = files
-    .map(
-      (file) => `<tr>
-  <td><b>${escapeHtml(file.title)}</b><p class="muted">${escapeHtml(file.fileName)}</p></td>
-  <td><span class="muted">${escapeHtml(formatFileSize(file.sizeBytes))}</span></td>
-  <td>${escapeHtml(formatDate(file.createdAt))}</td>
-  <td>
-    ${
-      file.previewable
-        ? `<a class="btn btn-quiet" href="/files/${escapeHtml(file.id)}/view">${icon('searchCheck', 'icon-sm')} عرض</a>`
-        : ''
-    }
-    <a class="btn btn-quiet" href="/files/${escapeHtml(file.id)}/raw">${icon('download', 'icon-sm')} تحميل</a>
-  </td>
-</tr>`
-    )
-    .join('\n  ');
-
-  const mineHtml = files.length
-    ? `<table class="file-table">
-  <thead><tr><th>الكتاب/الملف</th><th>الحجم</th><th>التاريخ</th><th>إجراءات</th></tr></thead>
-  <tbody>${mineRows}</tbody>
-</table>
-  <p class="muted mt-8">أدر ملفاتك كاملة (رفع · حذف · معاينة) من <a href="/files">صفحة ملفاتي</a>.</p>`
-    : '<div class="empty">لم ترفع كتاباً أو ملفاً بعد — ارفعه من <a href="/files">صفحة ملفاتي</a>.</div>';
-
   const body = `${flashBox(flash)}
 ${
   profileNotice
@@ -324,7 +284,7 @@ ${
     : ''
 }
 
-${renderWebSearchPanel({ web, webQuery, webSource, webYearFrom, webYearTo, webSources, stepKey, resolved, resolveError, resolveQuery })}
+${renderWebSearchPanel({ web, webQuery, webSource, webYearFrom, webYearTo, webSources, stepKey })}
 
 <section class="card">
   <div class="card-head">
@@ -337,19 +297,11 @@ ${renderWebSearchPanel({ web, webQuery, webSource, webYearFrom, webYearTo, webSo
     <button class="btn btn-primary" type="submit">${icon('searchCheck', 'icon-sm')} بحث</button>
   </form>
   ${platformHtml}
-</section>
-
-<section class="card">
-  <div class="card-head">
-    <h2>${icon('paperclip', 'icon-sm')} كتبك المرفوعة</h2>
-    <a class="btn btn-quiet btn-sm" href="/files">${icon('upload', 'icon-sm')} ارفع كتاباً</a>
-  </div>
-  ${mineHtml}
 </section>`;
 
   return renderLayout({
     title: 'المكتبة',
-    subtitle: 'ابحث في القواعد العلمية ومكتبة المنصة — وارفع كتبك الخاصة',
+    subtitle: 'ابحث في القواعد العلمية ومكتبة المنصة',
     area: 'app',
     activeKey: 'library',
     account,

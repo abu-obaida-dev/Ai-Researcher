@@ -29,7 +29,7 @@
  *   2) عند غموض الطلب نستخدم **ملف الباحث** (عنوان البحث + التخصص) لا لفظ «مراجع».
  *   3) ترشيح بالملاءمة: نُسقط أي نتيجة لا تتقاطع كلماتها مع الموضوع.
  */
-import { LIBRARY_SOURCES, fetchCitationMetadata, googleScholarUrl, normalizeYearRange, resolveDoiRecord, searchExternalLibrary } from './library-sources.js';
+import { LIBRARY_SOURCES, fetchCitationMetadata, googleScholarUrl, normalizeYearRange, searchExternalLibrary } from './library-sources.js';
 import { registeredTopic } from './journey.js';
 import { normalizeArabic, searchLibraryItems } from './workspace.js';
 
@@ -708,7 +708,7 @@ export async function literatureToolFor(
   };
 }
 
-export { googleScholarUrl, resolveDoiRecord };
+export { googleScholarUrl };
 
 /**
  * مراجع من مكتبة المنصة (ما أضافه المدير): تُبحث بسؤال الباحث وبتخصّصه،
@@ -778,24 +778,4 @@ export async function searchPlatformLibrary({ query, field = '', userId = null, 
   );
 
   return chosen.map((item) => enrichedById.get(item.id) || item);
-}
-
-/**
- * أداة الباحث اليدوية: يكتب العنوان **أو رابطاً أو DOI** فيُحلّ إلى بيانات مرجعية
- * كاملة (المؤلفون · المجلة · الناشر · السنة · المجلد/العدد/الصفحات · رابط الناشر
- * · نسخة PDF مفتوحة عبر Unpaywall). تعيد { record } أو { record: null, error }.
- */
-export async function resolveReference(input) {
-  const raw = String(input || '').trim();
-  if (!raw) return { record: null, error: 'اكتب عنواناً أو رابطاً أو DOI.' };
-
-  // DOI أو رابط doi.org ⇒ الحلّ المباشر (أدق وأسرع).
-  const record = await resolveDoiRecord(raw);
-  if (record) return { record };
-
-  // غير DOI ⇒ نبحث بالعبارة كما هي ثم نعيد أول نتيجة مؤكَّدة.
-  const result = await searchLiterature({ query: raw, limit: 1, sources: ['crossref', 'openalex'] });
-  if (result.items.length) return { record: result.items[0] };
-
-  return { record: null, error: 'لم أجد عملاً بهذه العبارة — جرّب عنواناً إنجليزياً أو DOI.' };
 }

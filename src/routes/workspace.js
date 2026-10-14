@@ -35,7 +35,7 @@ import { renderFileViewerPage, renderFilesPage, renderLibraryPage, renderNotesPa
 import { readSpreadsheet, spreadsheetErrorMessage } from '../services/spreadsheet.js';
 import { readLibraryItem } from '../services/library.js';
 import { LIBRARY_SOURCES, normalizeYearRange } from '../services/library-sources.js';
-import { searchLiterature, resolveReference, buildSearchQuery } from '../services/literature.js';
+import { searchLiterature, buildSearchQuery } from '../services/literature.js';
 
 /**
  * مسارات مساحة عمل الباحث (1E): المراجع والمفكرة والملفات.
@@ -132,14 +132,9 @@ router.get('/library', requireService('library'), async (req, res) => {
     const webSource = String(req.query.wsrc || '').trim().slice(0, 30);
     // فلتر سنة الإصدار في البحث الخارجي: من (wfrom) — إلى (wto)، بتوحيد واحد.
     const years = normalizeYearRange(req.query.wfrom, req.query.wto);
-    const resolveQuery = String(req.query.resolve || '').trim().slice(0, 300);
 
-    // أداة «لديّ DOI أو رابط» — تُحلَّل بالتوازي مع البحث العام (وحدها إن وُجدت).
-    const resolveResult = resolveQuery ? await resolveReference(resolveQuery) : null;
-
-    const [results, files, unread, web] = await Promise.all([
+    const [results, unread, web] = await Promise.all([
       query ? searchLibraryItems({ userId, q: query }) : Promise.resolve([]),
-      listFiles(userId, { step: stepKey }),
       unreadCount(userId),
       // أداة الباحث: بحث في قواعد البيانات العلمية الحقيقية (Crossref · IEEE · ACM · arXiv …)
       webQuery
@@ -167,10 +162,6 @@ router.get('/library', requireService('library'), async (req, res) => {
         webYearFrom: years.from,
         webYearTo: years.to,
         webSources: LIBRARY_SOURCES,
-        resolved: resolveResult?.record || null,
-        resolveError: resolveResult?.error || '',
-        resolveQuery,
-        files,
         flash: flashFromQuery(req.query),
         // بوابة جزئية: البحث مفتوح، لكن الترشيح حسب التخصص يحتاج الملف
         profileNotice: needsOnboarding(req.account)
