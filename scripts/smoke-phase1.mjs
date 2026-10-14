@@ -483,7 +483,7 @@ async function testChat(userId, cookie) {
     check('1F الاستهلاك الفعلي أقل من الحجز المسبق', spent <= 200, `الحجز الأقصى ≈ ${Math.ceil(spent * 1.5)}`);
   } else {
     // مزوّدو الذكاء الاصطناعي خدمة خارجية: نُبقيها تحذيراً لا فشلاً، وال deduct أُعيد فعلاً
-    console.log('⚠️  1F لم يصل رد من أي مزوّد (خدمة خارجية: رصيد OpenRouter/Grok أو ازدحام Gemini)');
+    console.log('⚠️  1F لم يصل رد من أي مزوّد (خدمة خارجية: رصيد OpenRouter أو ازدحام Gemini/Groq)');
     const usage = await pool.query('SELECT type FROM usage_logs WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1', [userId]);
     check('1F سُجّل الفشل وأُعيدت التوكنز للباحث', usage.rows[0]?.type === 'chat_failed' && after.rows[0].tokens_balance === before.rows[0].tokens_balance);
   }
@@ -605,7 +605,7 @@ async function testChat(userId, cookie) {
   check('1H كل مزوّد يحمل قائمة نماذج لا نموذجاً واحداً', statusRows.every((row) => Array.isArray(row.models) && row.models.length >= 1) && (geminiStatus?.models.length || 0) >= 2, `${geminiStatus?.models.length} نماذج لـ Gemini`);
   check('1H الحالة تُميّز المُعدّ من غير المُعدّ', statusRows.some((row) => row.configured) && statusRows.every((row) => typeof row.down === 'boolean'));
   const labels = providerStatus().map((row) => row.label);
-  check('1H أسماء المزوّدين عربية في التقارير', labels.includes('OpenRouter') && labels.includes('Grok (xAI)') && labels.includes('Groq'), labels.join(' · '));
+  check('1H أسماء المزوّدين عربية في التقارير', labels.includes('OpenRouter') && labels.includes('Groq') && labels.includes('Gemini'), labels.join(' · '));
 
   // مفاتيح متعدّدة: مفتاح نُفد رصيده لا يطعن في أخيه، والحالة تُعرض لكل مفتاح
   const multi = providerStatus().find((row) => row.keyCount > 1);
@@ -643,8 +643,7 @@ async function testChat(userId, cookie) {
     'OPENROUTER_API_KEY', 'OPENROUTER_API_KEYS',
     'GEMINI_API_KEY', 'GEMINI_API_KEYS',
     'GEMINI_API_KEY_FALLBACK', 'GEMINI_API_KEY_FALLBACKS',
-    'GROQ_API_KEY', 'GROQ_API_KEYS',
-    'GROK_API_KEY', 'GROK_API_KEYS'
+    'GROQ_API_KEY', 'GROQ_API_KEYS'
   ]) {
     savedKeys[key] = process.env[key];
     delete process.env[key];

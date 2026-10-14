@@ -80,8 +80,7 @@ export const PROVIDER_LABELS = {
   openrouter: 'OpenRouter',
   groq: 'Groq',
   gemini: 'Gemini',
-  'gemini-fallback': 'Gemini احتياطي',
-  grok: 'Grok (xAI)'
+  'gemini-fallback': 'Gemini احتياطي'
 };
 
 /**
@@ -260,6 +259,39 @@ async function geminiCall({ apiKey, models, system, messages, temperature, maxTo
 /** المزوّدون بالترتيب مع دالة نداء لكل واحد. كل مزوّد يحمل قائمة نماذج. */
 const PROVIDERS = [
   {
+    key: 'groq',
+    envKey: 'GROQ_API_KEY',
+    // qwen3.8-27b سريع جداً (≈٦٦٠ms) وأفضله عربياً بين نماذج Groq؛ ثم بدائل.
+    // نستبعد whisper (صوت) و llama-prompt-guard (تصنيف لا توليد).
+    models: modelList(process.env.AI_MODEL_GROQ, 'qwen/qwen3.8-27b,openai/gpt-oss-20b,allam-2-7b'),
+    async call({ apiKey, models, system, messages, temperature, maxTokens = MAX_TOKENS, signal = null }) {
+      const failures = [];
+      for (const model of models) {
+        try {
+          const data = await callOnce({
+            label: 'Groq',
+            url: 'https://api.groq.com/openai/v1/chat/completions',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+            body: { model, messages: [{ role: 'system', content: system }, ...messages], temperature, max_tokens: maxTokens },
+            model,
+            signal
+          });
+
+          const text = data?.choices?.[0]?.message?.content;
+          if (!text) throw new Error('ردّ فارغ');
+          return { text, model: data?.model || model, usage: data?.usage || null };
+        } catch (error) {
+          failures.push(`${model}: ${error.message.slice(0, 90)}`);
+          if ([401, 402, 403, 404, 422].includes(error.status) || signal?.aborted) break;
+        }
+      }
+      const last = failures.at(-1) || 'بلا تفاصيل';
+      const error = new Error(`Groq فشل على ${models.length} نموذج — ${last}`);
+      error.status = /402|403|401/.test(last) ? 402 : 503;
+      throw error;
+    }
+  },
+  {
     key: 'openrouter',
     envKey: 'OPENROUTER_API_KEY',
     models: modelList(process.env.AI_MODEL_OPENROUTER, 'openai/gpt-4o-mini'),
@@ -296,39 +328,6 @@ const PROVIDERS = [
     }
   },
   {
-    key: 'groq',
-    envKey: 'GROQ_API_KEY',
-    // qwen3.8-27b سريع جداً (≈٦٦٠ms) وأفضله عربياً بين نماذج Groq؛ ثم بدائل.
-    // نستبعد whisper (صوت) و llama-prompt-guard (تصنيف لا توليد).
-    models: modelList(process.env.AI_MODEL_GROQ, 'qwen/qwen3.8-27b,openai/gpt-oss-20b,allam-2-7b'),
-    async call({ apiKey, models, system, messages, temperature, maxTokens = MAX_TOKENS, signal = null }) {
-      const failures = [];
-      for (const model of models) {
-        try {
-          const data = await callOnce({
-            label: 'Groq',
-            url: 'https://api.groq.com/openai/v1/chat/completions',
-            headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
-            body: { model, messages: [{ role: 'system', content: system }, ...messages], temperature, max_tokens: maxTokens },
-            model,
-            signal
-          });
-
-          const text = data?.choices?.[0]?.message?.content;
-          if (!text) throw new Error('ردّ فارغ');
-          return { text, model: data?.model || model, usage: data?.usage || null };
-        } catch (error) {
-          failures.push(`${model}: ${error.message.slice(0, 90)}`);
-          if ([401, 402, 403, 404, 422].includes(error.status) || signal?.aborted) break;
-        }
-      }
-      const last = failures.at(-1) || 'بلا تفاصيل';
-      const error = new Error(`Groq فشل على ${models.length} نموذج — ${last}`);
-      error.status = /402|403|401/.test(last) ? 402 : 503;
-      throw error;
-    }
-  },
-  {
     key: 'gemini',
     envKey: 'GEMINI_API_KEY',
     models: modelList(process.env.AI_MODEL_GEMINI, 'gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-flash-latest'),
@@ -339,25 +338,6 @@ const PROVIDERS = [
     envKey: 'GEMINI_API_KEY_FALLBACK',
     models: modelList(process.env.AI_MODEL_GEMINI_FALLBACK, 'gemini-3.6-flash,gemini-3.5-flash,gemini-3.1-flash-lite'),
     call: geminiCall
-  },
-  {
-    key: 'grok',
-    envKey: 'GROK_API_KEY',
-    models: modelList(process.env.AI_MODEL_GROK, 'grok-3-mini'),
-    async call({ apiKey, models, system, messages, temperature, maxTokens = MAX_TOKENS, signal = null }) {
-      const data = await callOnce({
-        label: 'Grok',
-        url: 'https://api.x.ai/v1/chat/completions',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
-        body: { model: models[0], messages: [{ role: 'system', content: system }, ...messages], temperature, max_tokens: maxTokens },
-        model: models[0],
-        signal
-      });
-
-      const text = data?.choices?.[0]?.message?.content;
-      if (!text) throw new Error('Grok أعاد رداً فارغاً.');
-      return { text, model: data?.model || models[0], usage: data?.usage || null };
-    }
   }
 ];
 
@@ -476,7 +456,7 @@ export async function runSupervisor({ userId = null, messages, system, temperatu
 
   if (!all.length) {
     const error = new Error(
-      'لم يُضبط أي مزوّد ذكاء اصطناعي بعد (OPENROUTER_API_KEY أو GROQ_API_KEY أو GEMINI_API_KEY أو GROK_API_KEY).'
+      'لم يُضبط أي مزوّد ذكاء اصطناعي بعد (GROQ_API_KEY أو OPENROUTER_API_KEY أو GEMINI_API_KEY).'
     );
     error.code = 'NO_PROVIDER';
     throw error;

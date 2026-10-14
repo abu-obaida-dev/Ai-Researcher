@@ -26,7 +26,7 @@ npm run dev                     # node --watch server.js → http://localhost:30
 
 ## 4. متغيرات البيئة (الكاملة في `.env.example`)
 - **إلزامية إنتاجاً**: `DATABASE_URL`, `SESSION_SECRET`, `ADMIN_TOKEN`, `APP_BASE_URL`, `SITE_URL`, `ADMIN_EMAILS`, `GOOGLE_CLIENT_ID/SECRET`.
-- **الذكاء**: `OPENROUTER_API_KEYS` (فواصل) / `GEMINI_API_KEY(+_FALLBACK)` / `GROQ_API_KEY` / `GROK_API_KEY` + `AI_HEDGE_MS/AI_*_COOLDOWN/AI_MAX_TOKENS/AI_TIMEOUT_MS/AI_PRICE_MULTIPLIER`.
+- **الذكاء**: `OPENROUTER_API_KEYS` (فواصل) / `GEMINI_API_KEY(+_FALLBACK)` / `GROQ_API_KEY` + `AI_HEDGE_MS/AI_*_COOLDOWN/AI_MAX_TOKENS/AI_TIMEOUT_MS/AI_PRICE_MULTIPLIER`.
 - **المراجع**: `UNPAYWALL_EMAIL` + `SEMANTIC_SCHOLAR_API_KEY` (اختياري).
 - **التخزين**: `MAX_UPLOAD_MB/MAX_STORAGE_MB` (fallback — الحقيقي في اللوحة).
 - **الشبكة**: `TRUST_PROXY` (عدد الوكلاء — لا `true` أبداً) + `SUPPORT_WHATSAPP` + `SITE_URL`.
