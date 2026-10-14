@@ -198,6 +198,11 @@ export const LIBRARY_SOURCES = [
     id: 'ssrn',
     label: 'SSRN — أبحاث اقتصادية وقانونية',
     hint: 'شبكة العلوم الاجتماعية (Elsevier) عبر بادئة DOI (10.2139) — أكثر من مليون ورقة أعمال ومسودة.'
+  },
+  {
+    id: 'toubkal',
+    label: 'Toubkal — مستودع الجامعات المغربية (محمد الخامس وغيرهما)',
+    hint: 'أطروحات ومقالات المستودع الرقمي Toubkal (DSpace) لجامعة محمد الخامس وجامعة محمد الأول — بلا مفتاح، مع تحميل الملف الأصلي عند توفره.'
   }
 ];
 
@@ -209,7 +214,8 @@ export const SOURCE_GROUPS = [
   { id: 'global', label: 'أبحاث ودوريات عالمية' },
   { id: 'specialized', label: 'أبحاث تخصصية (هندسة · حاسوب · طب · اقتصاد وقانون)' },
   { id: 'publishers', label: 'دوريات الناشرين العالميين' },
-  { id: 'books', label: 'كتب ومراجع عربية وعالمية' }
+  { id: 'books', label: 'كتب ومراجع عربية وعالمية' },
+  { id: 'arabic', label: 'مستودعات وبوابات عربية' }
 ];
 
 /** مجموعة مصدر في الواجهة (يُرجع '' للمصدر غير المعروف فلا يظهر في القائمة). */
@@ -236,7 +242,8 @@ export function sourceGroup(id) {
     pmc: 'specialized',
     hal: 'global',
     base: 'global',
-    ssrn: 'specialized'
+    ssrn: 'specialized',
+    toubkal: 'arabic'
   };
   return groups[String(id || '')] || '';
 }
@@ -1255,6 +1262,60 @@ async function searchUnpaywall({ q, subject, limit, years = {} }) {
   return items;
 }
 
+/**
+ * Toubkal — المستودع الرقمي للجامعات المغربية (DSpace 7 REST API) بلا مفتاح:
+ * أطروحات ومقالات جامعة محمد الخامس (UM5) وجامعة محمد الأول (Oujda).
+ * الفلترة بسنة الإصدار تتم عند المصدر عبر صيغة Discover
+ * (dc.date.issued:[من TO إلى]) والتحميل لاحقاً عبر downloadFromToubkal.
+ */
+const TOUBKAL_BASE = 'https://toubkal.imist.ma';
+
+async function searchToubkal({ q, subject, limit, years = {} }) {
+  const query = [q, subject].filter(Boolean).join(' ').trim();
+  // نطاق السنة يُضاف للـquery بصيغة Discover الموثّقة حيّاً (اختُبرت: 2020-2025 → كل النتائج داخل المدى)
+  const ranged =
+    years.from || years.to
+      ? `(${query}) AND dc.date.issued:[${years.from || '*'} TO ${years.to || '*'}]`
+      : query;
+  const url = `${TOUBKAL_BASE}/server/api/discover/search/objects?query=${encodeURIComponent(
+    ranged
+  )}&size=${Math.min(Math.max(Number(limit) || 10, 1), 25)}`;
+  assertPublicUrl(url);
+
+  const data = await fetchJson(url);
+  const objects = data?._embedded?.searchResult?._embedded?.objects || [];
+
+  return objects
+    .map((entry) => {
+      const item = entry?._embedded?.indexableObject;
+      if (!item?.uuid) return null;
+      const meta = item.metadata || {};
+      const value = (key) => String(meta[key]?.[0]?.value || '').trim();
+      const yearRaw = value('dc.date.issued');
+      const authors = (Array.isArray(meta['dc.contributor.author']) ? meta['dc.contributor.author'] : [])
+        .map((node) => String(node?.value || '').trim())
+        .filter(Boolean);
+      const subjects = (Array.isArray(meta['dc.subject']) ? meta['dc.subject'] : [])
+        .map((node) => String(node?.value || '').trim())
+        .filter(Boolean);
+      const publisher = value('dc.publisher');
+
+      return {
+        key: String(item.uuid),
+        title: stripHtml(value('name') || item.name || '(بدون عنوان)'),
+        authors: authors.slice(0, 5).join('، '),
+        year: Number(yearRaw.slice(0, 4)) || null,
+        source: publisher ? `${publisher} — Toubkal` : 'Toubkal — المستودع المغربي',
+        abstract: stripHtml(value('dc.description.abstract')).slice(0, 600),
+        subjects: subjects.slice(0, 6).join(' · '),
+        url: item.handle ? `${TOUBKAL_BASE}/handle/${item.handle}` : `${TOUBKAL_BASE}/items/${item.uuid}`,
+        downloadable: Boolean(item.uuid),
+        locator: `toubkal:${item.uuid}`
+      };
+    })
+    .filter(Boolean);
+}
+
 /** جدول البحثات حسب معرّف المصدر — بعد تعريف كل دالة. */
 const SEARCHERS = {
   crossref: (args) => searchCrossref(args),
@@ -1283,6 +1344,8 @@ const SEARCHERS = {
   pmc: (args) => searchPmc(args),
   hal: (args) => searchHal(args),
   base: (args) => searchBase(args),
+  // مستودع الجامعات المغربية Toubkal (DSpace 7 REST — أطروحات ومقالات UM5)
+  toubkal: (args) => searchToubkal(args),
   ssrn: (args) => searchCrossref({ ...args, prefix: PUBLISHER_PREFIX_SETS.ssrn })
 };
 
@@ -1631,6 +1694,37 @@ async function downloadFromZenodo(recordId) {
  * يعيد { buffer, fileName, mime } عند النجاح أو { buffer: null, note } عند
  * تعذّر/امتناع التنزيل (يُستورد العنصر كبيانات فقط).
  */
+/**
+ * تنزيل ملف أصلي من مستودع Toubkal (DSpace 7): العنصر → حزمته ORIGINAL →
+ * أول ملف (عادة PDF) → رابط content. بعض السجلات وصفية بلا ملف — يعود
+ * برسالة عربية واضحة بدل الفشل.
+ */
+async function downloadFromToubkal(uuid) {
+  const safeId = encodeURIComponent(String(uuid || '').trim());
+  if (!safeId) return { buffer: null, note: 'لا يوجد معرّف ملف في مستودع Toubkal — البيانات فقط.' };
+
+  const bundlesUrl = `${TOUBKAL_BASE}/server/api/core/items/${safeId}/bundles?size=20`;
+  assertPublicUrl(bundlesUrl);
+  const bundles = await fetchJson(bundlesUrl);
+  const list = Array.isArray(bundles?._embedded?.bundles) ? bundles._embedded.bundles : [];
+  const original = list.find((bundle) => bundle?.name === 'ORIGINAL');
+  const streamsHref = original?._links?.bitstreams?.href;
+  if (!streamsHref) {
+    return { buffer: null, note: 'هذا السجل في Toubkal ببليوغرافي فقط (بلا ملف أصلي) — البيانات والرابط الدائم.' };
+  }
+
+  assertPublicUrl(streamsHref);
+  const streams = await fetchJson(streamsHref);
+  const bitstreams = Array.isArray(streams?._embedded?.bitstreams) ? streams._embedded.bitstreams : [];
+  const content = bitstreams[0]?._links?.content?.href;
+  if (!content) {
+    return { buffer: null, note: 'لا يوجد ملف مباشر في حزمة ORIGINAL — البيانات والرابط فقط.' };
+  }
+
+  assertPublicUrl(content);
+  return await downloadDirectPdf(content);
+}
+
 export async function downloadExternalFile({ source, locator } = {}) {
   const id = String(source || '');
   const loc = String(locator || '').trim();
@@ -1658,6 +1752,12 @@ export async function downloadExternalFile({ source, locator } = {}) {
     }
     if (id === 'loc') {
       return { buffer: null, note: 'سجل ببليوغرافي من مكتبة الكونجرس — البيانات والرابط الدائم فقط.' };
+    }
+    if (id === 'toubkal') {
+      if (!loc.startsWith('toubkal:')) {
+        return { buffer: null, note: 'العنصر من مستودع Toubkal — البيانات والرابط فقط.' };
+      }
+      return await downloadFromToubkal(loc.slice('toubkal:'.length));
     }
     if (id === 'core') {
       if (/^https?:\/\//i.test(loc)) return await downloadDirectPdf(loc);

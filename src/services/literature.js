@@ -29,7 +29,7 @@
  *   2) عند غموض الطلب نستخدم **ملف الباحث** (عنوان البحث + التخصص) لا لفظ «مراجع».
  *   3) ترشيح بالملاءمة: نُسقط أي نتيجة لا تتقاطع كلماتها مع الموضوع.
  */
-import { fetchCitationMetadata, googleScholarUrl, normalizeYearRange, resolveDoiRecord, searchExternalLibrary } from './library-sources.js';
+import { LIBRARY_SOURCES, fetchCitationMetadata, googleScholarUrl, normalizeYearRange, resolveDoiRecord, searchExternalLibrary } from './library-sources.js';
 import { registeredTopic } from './journey.js';
 import { normalizeArabic, searchLibraryItems } from './workspace.js';
 
@@ -42,8 +42,8 @@ export { registeredTopic };
 /** المصادر التي نبحث فيها بالتوازي افتراضياً (الأسرع والأغنى بيانات). */
 export const DEFAULT_SEARCH_SOURCES = ['crossref', 'openalex', 'semantic'];
 
-/** كل المصادر المتاحة للباحث في واجهة البحث. */
-export const WEB_SOURCES = ['crossref', 'openalex', 'ieee', 'acm', 'semantic', 'arxiv', 'europepmc', 'doaj', 'openlibrary'];
+/** كل المصادر المتاحة للباحث في واجهة البحث — تُشتق من السجل الموحّد فلا تتقادم. */
+export const WEB_SOURCES = LIBRARY_SOURCES.map((entry) => entry.id);
 
 /** مهلة قصوى لمصدر واحد داخل البحث المتعدد (لا نبطئ الباحث بسبب مصدر متعطّل). */
 const SOURCE_BUDGET_MS = 12000;

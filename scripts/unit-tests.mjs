@@ -127,7 +127,7 @@ test('normalizeYearRange: فلتر سنة الإصدار — قلب المعكو
 });
 
 test('LIBRARY_SOURCES: كل المصدر مسجّل ببيانات مكتملة ومجموعة معروفة', () => {
-  for (const id of ['springer', 'wiley', 'tandf', 'sage', 'unpaywall', 'internetarchive', 'loc', 'core', 'pmc', 'hal', 'base', 'ssrn']) {
+  for (const id of ['springer', 'wiley', 'tandf', 'sage', 'unpaywall', 'internetarchive', 'loc', 'core', 'pmc', 'hal', 'base', 'ssrn', 'toubkal']) {
     const entry = LIBRARY_SOURCES.find((item) => item.id === id);
     assert.ok(entry, `المصدر مفقود: ${id}`);
     assert.ok(entry.label && entry.hint, `بيانات ناقصة: ${id}`);
