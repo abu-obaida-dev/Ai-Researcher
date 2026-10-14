@@ -31,7 +31,7 @@ import {
   textPreview
 } from '../services/files.js';
 import { renderNotice } from '../views/layout.js';
-import { renderFileViewerPage, renderFilesPage, renderLibraryPage, renderNotesPage, renderReferencesPage } from '../views/workspace.js';
+import { renderFileViewerPage, renderFilesPage, renderLibraryPage, renderNotesPage } from '../views/workspace.js';
 import { readSpreadsheet, spreadsheetErrorMessage } from '../services/spreadsheet.js';
 import { readLibraryItem } from '../services/library.js';
 import { LIBRARY_SOURCES, normalizeYearRange } from '../services/library-sources.js';
@@ -79,49 +79,15 @@ async function stepTitlesForUser(userId) {
   return Object.fromEntries(path.steps.map((step) => [step.key, `${step.no}. ${step.title}`]));
 }
 
-/** صفحة المراجع: «راجعي» + إضافة يدوية + رفع مرجع/كتاب — والبحث في المكتبة صفحة /library المستقلة. */
-router.get('/references', requireService('library'), async (req, res) => {
-  try {
-    const userId = req.account.id;
-    const stepKey = String(req.query.step || '').trim().slice(0, 100);
-    const status = String(req.query.status || '').trim();
-
-    const [references, counts, stepOptions, stepTitles, unread, maxBytes] = await Promise.all([
-      listUserReferences(userId, { step: stepKey, status }),
-      referenceStatusCounts(userId),
-      stepOptionsForDegree(await degreeOfUser(userId)),
-      stepTitlesForUser(userId),
-      unreadCount(userId),
-      maxUploadBytes()
-    ]);
-
-    res.type('html').send(
-      renderReferencesPage({
-        account: req.account,
-        unread,
-        references,
-        counts,
-        stepKey,
-        stepOptions,
-        stepTitles,
-        maxMb: Math.round(maxBytes / (1024 * 1024)),
-        allowedTypes: allowedTypesLabel(),
-        flash: flashFromQuery(req.query)
-      })
-    );
-  } catch (error) {
-    const { html } = renderNotice({
-      title: 'تعذّر تحميل المراجع',
-      message: 'حدث خطأ أثناء قراءة مراجعك — أعد المحاولة.',
-      details: error?.message || ''
-    });
-    res.status(500).type('html').send(html);
-  }
+/** الصفحة القديمة «مراجعي» — دُمجت في /files (ملفاتي ومراجعي) فتُحوَّل رابطاً. */
+router.get('/references', (req, res) => {
+  const qs = String(req.originalUrl || '').split('?')[1];
+  res.redirect(303, `/files${qs ? `?${qs}` : ''}`);
 });
 
 /**
- * صفحة المكتبة — رابط مستقل: بحث في القواعد العلمية أولاً ثم مكتبة المنصة
- * ثم كتب الباحث المرفوعة (ملفاتيه). زر «أضف إلى المراجع» يعود بPOST إلى /references.
+ * صفحة المكتبة — رابط مستقل: بحث في القواعد العلمية أولاً ثم مكتبة المنصة.
+ * زر «أضف إلى المراجع» يعود بPOST إلى /references فيظهر بمراجعي (صفحة الملفات).
  */
 router.get('/library', requireService('library'), async (req, res) => {
   try {
@@ -250,7 +216,7 @@ router.post(
   async (req, res) => {
     const body = req.body || {};
     const step = String(body.step || '').trim().slice(0, 100);
-    const back = `/references${step ? `?step=${encodeURIComponent(step)}` : ''}`;
+    const back = `/files${step ? `?step=${encodeURIComponent(step)}` : ''}`;
 
     try {
       await addCustomReference(req.account.id, {
@@ -272,25 +238,18 @@ router.post(
   }
 );
 
-/** إضافة مرجع: من المكتبة (library_item_id) أو يدوياً (title). */
+/** إضافة مرجع: من المكتبة (library_item_id) — يظهر في قسم «مراجعي» بصفحة الملفات. */
 router.post('/references', requireService('library'), async (req, res) => {
   const body = req.body || {};
   const step = String(body.step || '').trim().slice(0, 100);
-  const back = step ? `/references?step=${encodeURIComponent(step)}` : '/references';
+  const back = step ? `/files?step=${encodeURIComponent(step)}` : '/files';
 
   try {
-    if (body.library_item_id) {
-      await addLibraryReference(req.account.id, String(body.library_item_id), { step });
-    } else {
-      await addCustomReference(req.account.id, {
-        title: body.title,
-        authors: body.authors,
-        year: body.year,
-        source: body.source,
-        note: body.note,
-        step
-      });
+    if (!body.library_item_id) {
+      res.redirect(303, `${back}${back.includes('?') ? '&' : '?'}err=ref_bad`);
+      return;
     }
+    await addLibraryReference(req.account.id, String(body.library_item_id), { step });
     res.redirect(303, `${back}${back.includes('?') ? '&' : '?'}ok=ref_added`);
   } catch (error) {
     const key = error?.code === 'NOT_ADDED' ? 'ref_exists' : error?.code === 'BAD_STEP' ? 'ref_bad' : 'ref_bad';
@@ -302,16 +261,16 @@ router.post('/references', requireService('library'), async (req, res) => {
 router.post('/references/:id/status', requireService('library'), async (req, res) => {
   try {
     await updateReferenceStatus(req.account.id, String(req.params.id), String(req.body?.status || 'to_read'));
-    res.redirect(303, '/references?ok=ref_status');
+    res.redirect(303, '/files?ok=ref_status');
   } catch (error) {
-    res.redirect(303, `/references?err=${error?.code === 'NOT_FOUND' ? 'ref_missing' : 'ref_bad'}`);
+    res.redirect(303, `/files?err=${error?.code === 'NOT_FOUND' ? 'ref_missing' : 'ref_bad'}`);
   }
 });
 
 /** حذف مرجع من قائمة الباحث. */
 router.post('/references/:id/delete', requireService('library'), async (req, res) => {
   const deleted = await deleteReference(req.account.id, String(req.params.id));
-  res.redirect(303, `/references?${deleted ? 'ok' : 'err'}=${deleted ? 'ref_deleted' : 'ref_missing'}`);
+  res.redirect(303, `/files?${deleted ? 'ok' : 'err'}=${deleted ? 'ref_deleted' : 'ref_missing'}`);
 });
 
 /** صفحة المفكرة. */
@@ -413,15 +372,18 @@ router.post('/notes/:id/delete', requireService('notes'), async (req, res) => {
   res.redirect(303, `/notes?${deleted ? 'ok' : 'err'}=${deleted ? 'note_deleted' : 'note_missing'}`);
 });
 
-/** صفحة الملفات. */
+/** صفحة الملفات والمراجع (صفحة واحدة): الرفع + المراجع المُضافة من المكتبة. */
 router.get('/files', requireService('files'), async (req, res) => {
   try {
     const userId = req.account.id;
     const stepKey = String(req.query.step || '').trim().slice(0, 100);
+    const status = String(req.query.status || '').trim();
 
-    const [files, summary, stepOptions, stepTitles, unread, maxBytes] = await Promise.all([
+    const [files, summary, references, refCounts, stepOptions, stepTitles, unread, maxBytes] = await Promise.all([
       listFiles(userId, { step: stepKey }),
       filesSummary(userId),
+      listUserReferences(userId, { step: stepKey, status }),
+      referenceStatusCounts(userId),
       stepOptionsForDegree(await degreeOfUser(userId)),
       stepTitlesForUser(userId),
       unreadCount(userId),
@@ -434,6 +396,8 @@ router.get('/files', requireService('files'), async (req, res) => {
         unread,
         files,
         summary,
+        references,
+        refCounts,
         stepKey,
         stepOptions,
         stepTitles,

@@ -300,7 +300,7 @@ export const PLATFORM_SERVICES = [
     label: 'المكتبة العلمية',
     short: 'المكتبة',
     icon: 'book',
-    href: '/references',
+    href: '/files',
     permission: 'library:browse',
     planFeature: 'المكتبة العلمية ومراجعها (بحث + مراجعك + توثيق APA)',
     note: 'مكتبة المنصة: مراجع وكتب يضيفها المدير ويقرأها كل الباحثين.'

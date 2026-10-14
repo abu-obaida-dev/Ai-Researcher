@@ -43,9 +43,8 @@ function stepLinks(step) {
 
   return `<div class="step-links">
   <a class="btn btn-primary step-chat" href="${chatHref}">${icon('message', 'icon-sm')} ابدأ مع المشرف</a>
-  <a class="btn btn-quiet" href="/references?step=${key}">${icon('book', 'icon-sm')} مراجع الخطوة</a>
+  <a class="btn btn-quiet" href="/files?step=${key}">${icon('clipboard', 'icon-sm')} ملفاتي ومراجعي</a>
   <a class="btn btn-quiet" href="/notes?step=${key}">${icon('list', 'icon-sm')} ملاحظات الخطوة</a>
-  <a class="btn btn-quiet" href="/files?step=${key}">${icon('clipboard', 'icon-sm')} ملفات الخطوة</a>
 </div>`;
 }
 

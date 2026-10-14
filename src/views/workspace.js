@@ -274,7 +274,7 @@ export function renderLibraryPage({
   const platformHtml = query
     ? results.length
       ? `<div class="lib-list">${results.map((item) => renderLibraryItem(item, stepKey)).join('')}</div>`
-      : '<div class="empty">لا نتائج في مكتبة المنصة لهذا البحث — جرّب كلمة أخرى أو <a href="/references">أضف المرجع يدوياً</a>.</div>'
+      : '<div class="empty">لا نتائج في مكتبة المنصة لهذا البحث — جرّب كلمة أخرى أو أضف مرجعاً من نتائج البحث الخارجي أعلاه.</div>'
     : '<div class="empty">اكتب كلمة بحث (عنوان، مؤلف، أو مصدر) للبحث في مكتبة المنصة.</div>';
 
   const body = `${flashBox(flash)}
@@ -311,78 +311,6 @@ ${renderWebSearchPanel({ web, webQuery, webSource, webYearFrom, webYearTo, webSo
   });
 }
 
-/** صفحة المراجع: قائمة المراجع الخاصة + إضافة يدوية + رفع مرجع/كتاب — والبحث في المكتبة صفحة /library. */
-export function renderReferencesPage({ account, unread = 0, references = [], counts = {}, stepKey = '', stepOptions = [], stepTitles = {}, flash = null, maxMb = 100, allowedTypes = '' }) {
-  const mineHtml = references.length
-    ? `<table class="ref-table">
-  <thead><tr><th>المرجع</th><th>السنة والمصدر</th><th>الخطوة</th><th>الحالة</th><th>إجراءات</th></tr></thead>
-  <tbody>${references.map((item) => renderReferenceRow(item, stepTitles)).join('')}</tbody>
-</table>`
-    : '<div class="empty">لا مراجع بعد — أضف من <a href="/library">المكتبة</a> أو يدوياً من النموذج بالأعلى.</div>';
-
-  // نموذج الرفع (مرجع/كتاب) يظهر فقط لمن تسمح باقته بخدمة الملفات.
-  const uploadCard = serviceOpen(account, 'files')
-    ? `<section class="card">
-    <h2>${icon('upload', 'icon-sm')} ارفع مرجعاً أو كتاباً</h2>
-    <form method="post" action="/files" enctype="multipart/form-data" class="form-card">
-      <div class="field">
-        <label for="ref_file">الملف (كتاب · بحث · فصل · مسوّدة)</label>
-        <input type="file" id="ref_file" name="file" required />
-        <p class="form-hint">الأنواع المسموحة: ${escapeHtml(allowedTypes)} · حتى ${escapeHtml(String(maxMb))} MB</p>
-      </div>
-      <div class="field"><label for="ref_file_title">اسم وصفي (اختياري)</label><input type="text" id="ref_file_title" name="title" maxlength="255" placeholder="مثال: مسوّدة الفصل الثاني" /></div>
-      ${stepSelect(stepOptions, stepKey, 'step', 'ref_file_step')}
-      <div class="form-actions"><button class="btn btn-primary" type="submit">${icon('upload', 'icon-sm')} رفع الملف</button></div>
-    </form>
-    <p class="muted">تدير ملفاتك كاملة من <a href="/files">صفحة ملفاتي</a>.</p>
-  </section>`
-    : '';
-
-  const body = `${flashBox(flash)}
-
-<div class="grid">
-  <section class="card">
-    <h2>أضف مرجعاً يدوياً</h2>
-    <form method="post" action="/references" class="form-card">
-      <div class="field"><label for="r_title">العنوان *</label><input type="text" id="r_title" name="title" required maxlength="500" /></div>
-      <div class="field-row">
-        <div class="field"><label for="r_authors">المؤلف/المؤلفون</label><input type="text" id="r_authors" name="authors" maxlength="500" /></div>
-        <div class="field"><label for="r_year">السنة</label><input type="text" id="r_year" name="year" inputmode="numeric" maxlength="4" /></div>
-      </div>
-      <div class="field"><label for="r_source">المصدر (مجلة / موقع / قسم)</label><input type="text" id="r_source" name="source" maxlength="255" /></div>
-      <div class="field"><label for="r_note">لماذا أضفته؟</label><textarea id="r_note" name="note" rows="2" maxlength="2000"></textarea></div>
-      ${stepSelect(stepOptions, stepKey)}
-      <div class="form-actions"><button class="btn btn-primary" type="submit">${icon('book', 'icon-sm')} إضافة إلى المراجع</button></div>
-    </form>
-  </section>
-  ${uploadCard}
-</div>
-
-<section class="card">
-  <div class="notif-head">
-    <h2>مراجعي (${formatNumber(counts.total || 0)})</h2>
-    <div class="chips">
-      ${READING_STATUSES.map(
-        (item) => `<a class="chip" href="/references?status=${escapeHtml(item.value)}">${escapeHtml(item.label)}: ${formatNumber(
-          counts[item.value] || 0
-        )}</a>`
-      ).join('')}
-    </div>
-  </div>
-  ${mineHtml}
-</section>`;
-
-  return renderLayout({
-    title: 'مراجعي',
-    subtitle: 'نظّم مراجعك واربطها بخطوات بحثك — والبحث في المكتبة صفحة المكتبة',
-    area: 'app',
-    activeKey: 'references',
-    account,
-    unread,
-    scripts: ['/js/app-shell.js'],
-    body
-  });
-}
 
 /** بطاقة ملاحظة: نصها، وسومها، خطوتها، وأزرار التثبيت/التعديل/الحذف. */
 function renderNoteCard(note, { stepTitles, editing = false, focus = false }) {
@@ -701,13 +629,35 @@ export function renderFileViewerPage({
 }
 
 /** صفحة الملفات: نموذج رفع (multipart) + جدول الملفات مع فلترة بخطوة. */
-export function renderFilesPage({ account, unread = 0, files = [], summary = { total: 0, bytes: 0, usedMb: 0, quotaMb: 0, remainingMb: 0, percent: 0, barWidth: 0, usedLabel: '0 بايت', quotaLabel: '500 MB', remainingLabel: '500 MB' }, stepKey = '', stepOptions = [], stepTitles = {}, maxMb = 100, allowedTypes = '', flash = null }) {
+export function renderFilesPage({ account, unread = 0, files = [], summary = { total: 0, bytes: 0, usedMb: 0, quotaMb: 0, remainingMb: 0, percent: 0, barWidth: 0, usedLabel: '0 بايت', quotaLabel: '500 MB', remainingLabel: '500 MB' }, references = [], refCounts = {}, stepKey = '', stepOptions = [], stepTitles = {}, maxMb = 100, allowedTypes = '', flash = null }) {
   const rows = files.length
     ? `<table class="file-table">
   <thead><tr><th>الملف</th><th>النوع والحجم</th><th>الخطوة</th><th>التاريخ</th><th>إجراءات</th></tr></thead>
   <tbody>${files.map((file) => renderFileRow(file, stepTitles)).join('')}</tbody>
 </table>`
     : '<div class="empty">لا ملفات بعد — ارفع أول مستند (PDF أو Word) ليعمل عليه المشرف الذكي.</div>';
+
+  // قسم المراجع: ما أضافه الباحث من المكتبة (الخارجية أو مكتبة المنصة) — بلا إضافة يدوية.
+  const refsHtml = references.length
+    ? `<table class="ref-table">
+  <thead><tr><th>المرجع</th><th>السنة والمصدر</th><th>الخطوة</th><th>الحالة</th><th>إجراءات</th></tr></thead>
+  <tbody>${references.map((item) => renderReferenceRow(item, stepTitles)).join('')}</tbody>
+</table>`
+    : '<div class="empty">لا مراجع بعد — أضفها من نتائج <a href="/library">المكتبة</a> بزر «أضف إلى مراجعي».</div>';
+
+  const refsCard = `<section class="card">
+  <div class="notif-head">
+    <h2>${icon('book', 'icon-sm')} مراجعي (${formatNumber(refCounts.total || 0)})</h2>
+    <div class="chips">
+      ${READING_STATUSES.map(
+        (item) => `<a class="chip" href="/files?status=${escapeHtml(item.value)}">${escapeHtml(item.label)}: ${formatNumber(
+          refCounts[item.value] || 0
+        )}</a>`
+      ).join('')}
+    </div>
+  </div>
+  ${refsHtml}
+</section>`;
 
   const body = `<div class="grid">
   <section class="card">
@@ -752,13 +702,15 @@ export function renderFilesPage({ account, unread = 0, files = [], summary = { t
 
 ${flashBox(flash)}
 
+${refsCard}
+
 <section class="card">
   ${rows}
 </section>`;
 
   return renderLayout({
-    title: 'ملفاتي',
-    subtitle: 'ارفع مستنداتك (مقترح، نتائج، كود) ليتناولها المشرف الذكي',
+    title: 'ملفاتي ومراجعي',
+    subtitle: 'ارفع مستنداتك وأدر مراجعك التي أضفتها من المكتبة في مكان واحد',
     area: 'app',
     activeKey: 'files',
     account,

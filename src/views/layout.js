@@ -100,9 +100,8 @@ const APP_NAV = [
   { href: '/dashboard', label: 'الإحصائية', key: 'dashboard', icon: 'coins' },
   { href: '/journey', label: 'مسار البحث', key: 'journey', icon: 'graduation', service: 'journey' },
   { href: '/library', label: 'المكتبة', key: 'library', icon: 'searchCheck', service: 'library' },
-  { href: '/references', label: 'مراجعي', key: 'references', icon: 'book', service: 'library' },
   { href: '/notes', label: 'المفكرة', key: 'notes', icon: 'list', service: 'notes' },
-  { href: '/files', label: 'ملفاتى', key: 'files', icon: 'clipboard', service: 'files' },
+  { href: '/files', label: 'ملفاتي ومراجعي', key: 'files', icon: 'clipboard', service: 'files' },
   { href: '/defense', label: 'المناقشة', key: 'defense', icon: 'graduation', service: 'defense' },
   { href: '/payments', label: 'الاشتراك والدفع', key: 'payments', icon: 'coins' }
 ];
