@@ -63,6 +63,12 @@
       payload.file_ids = [];
       for (var i = 0; i < files.length; i++) payload.file_ids.push(files[i].value);
     }
+    // مراجع «مراجعي» المحدّدة (صفحة المعلم) — تُقرأ نصوصها من الخادم
+    var refs = form.querySelectorAll('input[name="ref_ids"]:checked');
+    if (refs.length) {
+      payload.ref_ids = [];
+      for (var r = 0; r < refs.length; r++) payload.ref_ids.push(refs[r].value);
+    }
 
     fetch(form.action, {
       method: 'POST',

@@ -79,6 +79,28 @@ function renderAttachRow(files = []) {
 </div>`;
 }
 
+/** إرفاق مرجع من «مراجعي» (نصّه الكامل إن كان من مكتبة المنصة وبملف). */
+function renderRefsRow(refs = []) {
+  if (!refs.length) return '';
+
+  const rows = refs
+    .slice(0, 12)
+    .map(
+      (ref) => `<label class="chat-attach-chip" title="${escapeHtml(ref.citation || ref.title || '')}">
+    <input type="checkbox" name="ref_ids" value="${escapeHtml(ref.id)}" />
+    <span class="attach-name">${escapeHtml(String(ref.title || 'بدون عنوان').slice(0, 60))}</span>
+    <span class="attach-tag ${ref.hasFile ? 'is-ok' : 'is-off'}">${ref.hasFile ? 'نص كامل' : 'بيانات'}</span>
+  </label>`
+    )
+    .join('\n  ');
+
+  return `<div class="chat-attach" id="chat-refs-attach">
+  <span class="chat-attach-label">${icon('book', 'icon-sm')} من مراجعك:</span>
+  ${rows}
+  <span class="chat-attach-hint">اختر المرجع ثم اكتب «لخّص» أو «ترجم» · حتى ٣ مراجع · «نص كامل» يُقرأ كله، و«بيانات» تُلخَّص من بياناتها</span>
+</div>`;
+}
+
 /** نتائج البحث — تظهر تحت آخر رد: بيانات المصدر ورابط فتحه/تحميله. */
 function renderSourcesFound(conversation) {
   const items = Array.isArray(conversation?.sources_found) ? conversation.sources_found : [];
@@ -154,7 +176,7 @@ function renderTaskButtons() {
         `<a class="btn btn-quiet btn-sm" href="/assistant?prompt=${encodeURIComponent(task.prompt)}">${escapeHtml(task.label)}</a>`
     )
     .join('\n  ')}
-  <span class="chat-tasks-hint">للترجمة: أرفق الملف من الأسفل واكتب «ترجم».</span>
+  <span class="chat-tasks-hint">للترجمة: أرفق الملف من الأسفل واكتب «ترجم» · وللتلخيص من مراجعك: اختر المرجع ثم اكتب «لخّص».</span>
 </div>`;
 }
 
@@ -166,6 +188,7 @@ export function renderAssistantPage({
   conversations = [],
   prefill = '',
   attachableFiles = [],
+  attachableRefs = [],
   providers = [],
   flash = null
 }) {
@@ -203,6 +226,7 @@ export function renderAssistantPage({
       <button class="btn btn-primary chat-send" type="submit" title="إرسال" aria-label="إرسال">${icon('send')}</button>
     </div>
     ${renderAttachRow(attachableFiles)}
+    ${renderRefsRow(attachableRefs)}
   </form>
 </section>`;
 

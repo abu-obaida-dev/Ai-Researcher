@@ -6,6 +6,7 @@ import { askAssistant, deleteConversation, getConversation, listConversations } 
 import { unreadCount } from '../services/notifications.js';
 import { getProfile } from '../services/users.js';
 import { listFiles } from '../services/files.js';
+import { listUserReferences } from '../services/workspace.js';
 import { renderNotice } from '../views/layout.js';
 import { renderAssistantPage, renderAssistantUpdate } from '../views/assistant.js';
 
@@ -74,6 +75,7 @@ router.get('/assistant', requireAccount, async (req, res) => {
         conversations,
         prefill: seedPrompt,
         attachableFiles: await listFiles(userId, { limit: 12 }),
+        attachableRefs: await listUserReferences(userId).catch(() => []),
         providers: availableProviders(),
         flash: flashFromQuery(req.query)
       })
@@ -111,6 +113,8 @@ router.post(
         conversationId: conversationId || null,
         // ملفات يرفقها الباحث بهذه الرسالة (من ملفاته المرفوعة فقط — تُتحقّق الملكية)
         fileIds: body.file_ids,
+        // مراجع من «مراجعي» يحدّدها الباحث (نصّها الكامل إن كان لها ملف — تُتحقّق الملكية)
+        refIds: body.ref_ids,
         profile
       });
 
