@@ -37,6 +37,13 @@ function flashBox(flash) {
   return flash.type === 'error' ? `<div class="alert">${escapeHtml(flash.message)}</div>` : `<div class="notice">${escapeHtml(flash.message)}</div>`;
 }
 
+/** خدمة مفتوحة لهذا الحساب؟ (نفس منطق السايدبار: بلا بيانات خدمات ⇒ نعرض كل شيء). */
+function serviceOpen(account, key) {
+  const services = account?.services;
+  if (!Array.isArray(services)) return true;
+  return services.some((item) => (typeof item === 'string' ? item === key : item?.key === key && item?.enabled !== false));
+}
+
 /** تسمية الخطوة من مفاتيحها (مصفوفة مرتّبة لعرضها في الجداول). */
 function stepLabel(stepTitles, key) {
   return key ? stepTitles[key] || key : '—';
@@ -204,7 +211,7 @@ function renderWebSearchPanel({ web, webQuery, webSource, webSources = [], stepK
     Digital Library وOpenAlex وSemantic Scholar وarXiv وEurope PMC — فتحصل على المؤلفين والمجلة
     والسنة وDOI ورابط المصدر ونسخة PDF مفتوحة إن وُجدت.
   </p>
-  <form class="toolbar" method="get" action="/references">
+  <form class="toolbar" method="get" action="/library">
     ${stepKey ? `<input type="hidden" name="step" value="${escapeHtml(stepKey)}" />` : ''}
     <input type="hidden" name="q" value="" />
     <input type="search" name="wq" value="${escapeHtml(webQuery || '')}" placeholder="مثال: machine learning in higher education" />
@@ -212,7 +219,7 @@ function renderWebSearchPanel({ web, webQuery, webSource, webSources = [], stepK
     <button class="btn btn-primary" type="submit">${icon('searchCheck', 'icon-sm')} ابحث</button>
   </form>
 
-  <form class="toolbar mt-12" method="get" action="/references">
+  <form class="toolbar mt-12" method="get" action="/library">
     <h3 class="field-label">لديّ DOI أو رابط مرجع — استخرجه لي</h3>
     ${stepKey ? `<input type="hidden" name="step" value="${escapeHtml(stepKey)}" />` : ''}
     <input type="hidden" name="q" value="" />
@@ -232,32 +239,131 @@ function renderWebSearchPanel({ web, webQuery, webSource, webSources = [], stepK
 </section>`;
 }
 
-/** صفحة المراجع: بحث في المكتبة + إضافة يدوية + «مراجعي» مع تغيير الحالة. */
-export function renderReferencesPage({ account, unread = 0, query = '', results = [], references = [], counts = {}, stepKey = '', stepOptions = [], stepTitles = {}, flash = null, web = null, webQuery = '', webSource = '', webSources = [], resolved = null, resolveError = '', resolveQuery = '', profileNotice = '' }) {
-  const libraryHtml = query
+/**
+ * صفحة المكتبة (رابط مستقل): البحث في القواعد العلمية أولاً ثم مكتبة المنصة
+ * ثم كتب الباحث المرفوعة — بالترتيب: الخارجي ← المنصة ← ملفاتك.
+ */
+export function renderLibraryPage({
+  account,
+  unread = 0,
+  query = '',
+  results = [],
+  stepKey = '',
+  flash = null,
+  web = null,
+  webQuery = '',
+  webSource = '',
+  webSources = [],
+  resolved = null,
+  resolveError = '',
+  resolveQuery = '',
+  files = [],
+  profileNotice = ''
+}) {
+  const platformHtml = query
     ? results.length
       ? `<div class="lib-list">${results.map((item) => renderLibraryItem(item, stepKey)).join('')}</div>`
-      : '<div class="empty">لا نتائج في المكتبة لهذا البحث — جرّب كلمة أخرى أو أضف المرجع يدوياً.</div>'
+      : '<div class="empty">لا نتائج في مكتبة المنصة لهذا البحث — جرّب كلمة أخرى أو <a href="/references">أضف المرجع يدوياً</a>.</div>'
     : '<div class="empty">اكتب كلمة بحث (عنوان، مؤلف، أو مصدر) للبحث في مكتبة المنصة.</div>';
 
+  const mineRows = files
+    .map(
+      (file) => `<tr>
+  <td><b>${escapeHtml(file.title)}</b><p class="muted">${escapeHtml(file.fileName)}</p></td>
+  <td><span class="muted">${escapeHtml(formatFileSize(file.sizeBytes))}</span></td>
+  <td>${escapeHtml(formatDate(file.createdAt))}</td>
+  <td>
+    ${
+      file.previewable
+        ? `<a class="btn btn-quiet" href="/files/${escapeHtml(file.id)}/view">${icon('searchCheck', 'icon-sm')} عرض</a>`
+        : ''
+    }
+    <a class="btn btn-quiet" href="/files/${escapeHtml(file.id)}/raw">${icon('download', 'icon-sm')} تحميل</a>
+  </td>
+</tr>`
+    )
+    .join('\n  ');
+
+  const mineHtml = files.length
+    ? `<table class="file-table">
+  <thead><tr><th>الكتاب/الملف</th><th>الحجم</th><th>التاريخ</th><th>إجراءات</th></tr></thead>
+  <tbody>${mineRows}</tbody>
+</table>
+  <p class="muted mt-8">أدر ملفاتك كاملة (رفع · حذف · معاينة) من <a href="/files">صفحة ملفاتي</a>.</p>`
+    : '<div class="empty">لم ترفع كتاباً أو ملفاً بعد — ارفعه من <a href="/files">صفحة ملفاتي</a>.</div>';
+
+  const body = `${flashBox(flash)}
+${
+  profileNotice
+    ? `<div class="notice"><b>ترشيح المراجع يحتاج تخصصك.</b> ${profileNotice}</div>`
+    : ''
+}
+
+${renderWebSearchPanel({ web, webQuery, webSource, webSources, stepKey, resolved, resolveError, resolveQuery })}
+
+<section class="card">
+  <div class="card-head">
+    <h2>${icon('book', 'icon-sm')} مكتبة المنصة</h2>
+    <span class="muted">كتب ومراجع تملكها المنصة — معاينة وتحميل وإضافة إلى المراجع</span>
+  </div>
+  <form class="toolbar" method="get" action="/library">
+    ${stepKey ? `<input type="hidden" name="step" value="${escapeHtml(stepKey)}" />` : ''}
+    <input type="search" name="q" value="${escapeHtml(query)}" placeholder="ابحث بالعنوان أو المؤلف أو المجلة" />
+    <button class="btn btn-primary" type="submit">${icon('searchCheck', 'icon-sm')} بحث</button>
+  </form>
+  ${platformHtml}
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h2>${icon('paperclip', 'icon-sm')} كتبك المرفوعة</h2>
+    <a class="btn btn-quiet btn-sm" href="/files">${icon('upload', 'icon-sm')} ارفع كتاباً</a>
+  </div>
+  ${mineHtml}
+</section>`;
+
+  return renderLayout({
+    title: 'المكتبة',
+    subtitle: 'ابحث في القواعد العلمية ومكتبة المنصة — وارفع كتبك الخاصة',
+    area: 'app',
+    activeKey: 'library',
+    account,
+    unread,
+    scripts: ['/js/app-shell.js'],
+    body
+  });
+}
+
+/** صفحة المراجع: قائمة المراجع الخاصة + إضافة يدوية + رفع مرجع/كتاب — والبحث في المكتبة صفحة /library. */
+export function renderReferencesPage({ account, unread = 0, references = [], counts = {}, stepKey = '', stepOptions = [], stepTitles = {}, flash = null, maxMb = 100, allowedTypes = '' }) {
   const mineHtml = references.length
     ? `<table class="ref-table">
   <thead><tr><th>المرجع</th><th>السنة والمصدر</th><th>الخطوة</th><th>الحالة</th><th>إجراءات</th></tr></thead>
   <tbody>${references.map((item) => renderReferenceRow(item, stepTitles)).join('')}</tbody>
 </table>`
-    : '<div class="empty">لا مراجع بعد — أضف من المكتبة أو يدوياً من النموذج بالأعلى.</div>';
+    : '<div class="empty">لا مراجع بعد — أضف من <a href="/library">المكتبة</a> أو يدوياً من النموذج بالأعلى.</div>';
 
-  const body = `<div class="grid">
-  <section class="card">
-    <h2>مكتبة المنصة</h2>
-    <form class="toolbar" method="get" action="/references">
-      ${stepKey ? `<input type="hidden" name="step" value="${escapeHtml(stepKey)}" />` : ''}
-      <input type="search" name="q" value="${escapeHtml(query)}" placeholder="ابحث بالعنوان أو المؤلف أو المجلة" />
-      <button class="btn btn-primary" type="submit">${icon('searchCheck', 'icon-sm')} بحث</button>
+  // نموذج الرفع (مرجع/كتاب) يظهر فقط لمن تسمح باقته بخدمة الملفات.
+  const uploadCard = serviceOpen(account, 'files')
+    ? `<section class="card">
+    <h2>${icon('upload', 'icon-sm')} ارفع مرجعاً أو كتاباً</h2>
+    <form method="post" action="/files" enctype="multipart/form-data" class="form-card">
+      <div class="field">
+        <label for="ref_file">الملف (كتاب · بحث · فصل · مسوّدة)</label>
+        <input type="file" id="ref_file" name="file" required />
+        <p class="form-hint">الأنواع المسموحة: ${escapeHtml(allowedTypes)} · حتى ${escapeHtml(String(maxMb))} MB</p>
+      </div>
+      <div class="field"><label for="ref_file_title">اسم وصفي (اختياري)</label><input type="text" id="ref_file_title" name="title" maxlength="255" placeholder="مثال: مسوّدة الفصل الثاني" /></div>
+      ${stepSelect(stepOptions, stepKey, 'step', 'ref_file_step')}
+      <div class="form-actions"><button class="btn btn-primary" type="submit">${icon('upload', 'icon-sm')} رفع الملف</button></div>
     </form>
-    ${libraryHtml}
-  </section>
+    <p class="muted">تدير ملفاتك كاملة من <a href="/files">صفحة ملفاتي</a>.</p>
+  </section>`
+    : '';
 
+  const body = `${flashBox(flash)}
+
+<div class="grid">
   <section class="card">
     <h2>أضف مرجعاً يدوياً</h2>
     <form method="post" action="/references" class="form-card">
@@ -269,20 +375,11 @@ export function renderReferencesPage({ account, unread = 0, query = '', results 
       <div class="field"><label for="r_source">المصدر (مجلة / موقع / قسم)</label><input type="text" id="r_source" name="source" maxlength="255" /></div>
       <div class="field"><label for="r_note">لماذا أضفته؟</label><textarea id="r_note" name="note" rows="2" maxlength="2000"></textarea></div>
       ${stepSelect(stepOptions, stepKey)}
-      <div class="form-actions"><button class="btn btn-primary" type="submit">${icon('book', 'icon-sm')} إضافة إلى مراجعي</button></div>
+      <div class="form-actions"><button class="btn btn-primary" type="submit">${icon('book', 'icon-sm')} إضافة إلى المراجع</button></div>
     </form>
   </section>
+  ${uploadCard}
 </div>
-
-${renderWebSearchPanel({ web, webQuery, webSource, webSources, stepKey, resolved, resolveError, resolveQuery })}
-
-${
-  profileNotice
-    ? `<div class="notice"><b>ترشيح المراجع يحتاج تخصصك.</b> ${profileNotice}</div>`
-    : ''
-}
-
-${flashBox(flash)}
 
 <section class="card">
   <div class="notif-head">
@@ -300,7 +397,7 @@ ${flashBox(flash)}
 
   return renderLayout({
     title: 'مراجعي',
-    subtitle: 'ابحث في مكتبة المنصة ونظّم مراجعك مع ربطها بخطوات بحثك',
+    subtitle: 'نظّم مراجعك واربطها بخطوات بحثك — والبحث في المكتبة صفحة المكتبة',
     area: 'app',
     activeKey: 'references',
     account,

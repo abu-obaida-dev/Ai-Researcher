@@ -93,13 +93,14 @@ const ADMIN_NAV = [
 
 /**
  * روابط الشريط الجانبي في لوحة الباحث (area: 'app').
- * المصدر الواحد لأدوات المستخدم: الإحصائية، مسار البحث، المشرف الذكي، المراجع، المفكرة، ملفاتى، المناقشة.
+ * المصدر الواحد لأدوات المستخدم: الإحصائية، مسار البحث، المكتبة (بحث خارجي + المنصة)، المراجع، المفكرة، ملفاتى، المناقشة.
  * المفتاح service يربط الرابط بخدمة من PLATFORM_SERVICES — ما لا تسمح به باقة الحساب لا يظهر.
  */
 const APP_NAV = [
   { href: '/dashboard', label: 'الإحصائية', key: 'dashboard', icon: 'coins' },
   { href: '/journey', label: 'مسار البحث', key: 'journey', icon: 'graduation', service: 'journey' },
-  { href: '/references', label: 'المراجع', key: 'references', icon: 'book', service: 'library' },
+  { href: '/library', label: 'المكتبة', key: 'library', icon: 'searchCheck', service: 'library' },
+  { href: '/references', label: 'مراجعي', key: 'references', icon: 'book', service: 'library' },
   { href: '/notes', label: 'المفكرة', key: 'notes', icon: 'list', service: 'notes' },
   { href: '/files', label: 'ملفاتى', key: 'files', icon: 'clipboard', service: 'files' },
   { href: '/defense', label: 'المناقشة', key: 'defense', icon: 'graduation', service: 'defense' },

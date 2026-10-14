@@ -31,7 +31,7 @@ import {
   textPreview
 } from '../services/files.js';
 import { renderNotice } from '../views/layout.js';
-import { renderFileViewerPage, renderFilesPage, renderNotesPage, renderReferencesPage } from '../views/workspace.js';
+import { renderFileViewerPage, renderFilesPage, renderLibraryPage, renderNotesPage, renderReferencesPage } from '../views/workspace.js';
 import { readSpreadsheet, spreadsheetErrorMessage } from '../services/spreadsheet.js';
 import { readLibraryItem } from '../services/library.js';
 import { LIBRARY_SOURCES } from '../services/library-sources.js';
@@ -79,26 +79,65 @@ async function stepTitlesForUser(userId) {
   return Object.fromEntries(path.steps.map((step) => [step.key, `${step.no}. ${step.title}`]));
 }
 
-/** صفحة المراجع: بحث في المكتبة + «مراجعي» + نموذج إضافة يدوية. */
+/** صفحة المراجع: «راجعي» + إضافة يدوية + رفع مرجع/كتاب — والبحث في المكتبة صفحة /library المستقلة. */
 router.get('/references', requireService('library'), async (req, res) => {
   try {
     const userId = req.account.id;
-    const query = String(req.query.q || '').trim().slice(0, 120);
     const stepKey = String(req.query.step || '').trim().slice(0, 100);
     const status = String(req.query.status || '').trim();
-    const webQuery = String(req.query.wq || '').trim().slice(0, 160);
-    const webSource = String(req.query.wsrc || '').trim().slice(0, 30);
-  const resolveQuery = String(req.query.resolve || '').trim().slice(0, 300);
 
-  // أداة «لديّ DOI أو رابط» — تُحلَّل بالتوازي مع البحث العام (وحدها إن وُجدت).
-  const resolveResult = resolveQuery ? await resolveReference(resolveQuery) : null;
-
-    const [results, references, counts, stepOptions, stepTitles, unread, web] = await Promise.all([
-      query ? searchLibraryItems({ userId, q: query }) : Promise.resolve([]),
+    const [references, counts, stepOptions, stepTitles, unread, maxBytes] = await Promise.all([
       listUserReferences(userId, { step: stepKey, status }),
       referenceStatusCounts(userId),
       stepOptionsForDegree(await degreeOfUser(userId)),
       stepTitlesForUser(userId),
+      unreadCount(userId),
+      maxUploadBytes()
+    ]);
+
+    res.type('html').send(
+      renderReferencesPage({
+        account: req.account,
+        unread,
+        references,
+        counts,
+        stepKey,
+        stepOptions,
+        stepTitles,
+        maxMb: Math.round(maxBytes / (1024 * 1024)),
+        allowedTypes: allowedTypesLabel(),
+        flash: flashFromQuery(req.query)
+      })
+    );
+  } catch (error) {
+    const { html } = renderNotice({
+      title: 'تعذّر تحميل المراجع',
+      message: 'حدث خطأ أثناء قراءة مراجعك — أعد المحاولة.',
+      details: error?.message || ''
+    });
+    res.status(500).type('html').send(html);
+  }
+});
+
+/**
+ * صفحة المكتبة — رابط مستقل: بحث في القواعد العلمية أولاً ثم مكتبة المنصة
+ * ثم كتب الباحث المرفوعة (ملفاتيه). زر «أضف إلى المراجع» يعود بPOST إلى /references.
+ */
+router.get('/library', requireService('library'), async (req, res) => {
+  try {
+    const userId = req.account.id;
+    const query = String(req.query.q || '').trim().slice(0, 120);
+    const stepKey = String(req.query.step || '').trim().slice(0, 100);
+    const webQuery = String(req.query.wq || '').trim().slice(0, 160);
+    const webSource = String(req.query.wsrc || '').trim().slice(0, 30);
+    const resolveQuery = String(req.query.resolve || '').trim().slice(0, 300);
+
+    // أداة «لديّ DOI أو رابط» — تُحلَّل بالتوازي مع البحث العام (وحدها إن وُجدت).
+    const resolveResult = resolveQuery ? await resolveReference(resolveQuery) : null;
+
+    const [results, files, unread, web] = await Promise.all([
+      query ? searchLibraryItems({ userId, q: query }) : Promise.resolve([]),
+      listFiles(userId, { step: stepKey }),
       unreadCount(userId),
       // أداة الباحث: بحث في قواعد البيانات العلمية الحقيقية (Crossref · IEEE · ACM · arXiv …)
       webQuery
@@ -112,16 +151,12 @@ router.get('/references', requireService('library'), async (req, res) => {
     ]);
 
     res.type('html').send(
-      renderReferencesPage({
+      renderLibraryPage({
         account: req.account,
         unread,
         query,
         results,
-        references,
-        counts,
         stepKey,
-        stepOptions,
-        stepTitles,
         web,
         webQuery,
         webSource,
@@ -129,17 +164,18 @@ router.get('/references', requireService('library'), async (req, res) => {
         resolved: resolveResult?.record || null,
         resolveError: resolveResult?.error || '',
         resolveQuery,
+        files,
         flash: flashFromQuery(req.query),
-        // بوابة جزئية: البحث اليدوي مفتوح، لكن الترشيح حسب التخصص يحتاج الملف
+        // بوابة جزئية: البحث مفتوح، لكن الترشيح حسب التخصص يحتاج الملف
         profileNotice: needsOnboarding(req.account)
-          ? 'أضف تخصصك ومرحلتك الأكاديمية وهدفك الحالي ليرشّح لك المشرف الذكي المراجع الأقرب لموضوعك. <a href="/onboarding?next=/references">أكمل ملفك الآن</a>.'
+          ? 'أضف تخصصك ومرحلتك الأكاديمية وهدفك الحالي ليرشّح لك المشرف الذكي المراجع الأقرب لموضوعك. <a href="/onboarding?next=/library">أكمل ملفك الآن</a>.'
           : ''
       })
     );
   } catch (error) {
     const { html } = renderNotice({
-      title: 'تعذّر تحميل المراجع',
-      message: 'حدث خطأ أثناء قراءة مراجعك — أعد المحاولة.',
+      title: 'تعذّر تحميل المكتبة',
+      message: 'حدث خطأ أثناء فتح المكتبة — أعد المحاولة.',
       details: error?.message || ''
     });
     res.status(500).type('html').send(html);
