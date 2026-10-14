@@ -187,7 +187,7 @@ function renderWebSearchPanel({ web, webQuery, webSource, webYearFrom = 0, webYe
   const options = [
     `<option value=""${!webSource ? ' selected' : ''}>كل المصادر (الأسرع والأغنى)</option>`,
     ...webSources
-      .filter((source) => ['crossref', 'openalex', 'ieee', 'acm', 'semantic', 'arxiv', 'europepmc', 'doaj', 'openlibrary'].includes(source.id))
+      .filter((source) => ['crossref', 'openalex', 'ieee', 'acm', 'semantic', 'arxiv', 'europepmc', 'doaj', 'openlibrary', 'springer', 'wiley', 'tandf', 'sage', 'unpaywall'].includes(source.id))
       .map((source) => `<option value="${escapeHtml(source.id)}"${source.id === webSource ? ' selected' : ''}>${escapeHtml(source.label)}</option>`)
   ].join('');
 
@@ -215,8 +215,9 @@ function renderWebSearchPanel({ web, webQuery, webSource, webYearFrom = 0, webYe
     <span class="muted">مرجع كامل برابطه خلال ثوانٍ</span>
   </div>
   <p class="muted">
-    ابحث بالكلمات المفتاحية (عنوان · مفهوم · كلمات مفتاحية إنجليزية) في Crossref وIEEE Xplore وACM
-    Digital Library وOpenAlex وSemantic Scholar وarXiv وEurope PMC — فتحصل على المؤلفين والمجلة
+    ابحث بالكلمات المفتاحية (عنوان · مفهوم · كلمات مفتاحية إنجليزية) في المصادر العالمية:
+    Crossref وIEEE Xplore وACM Digital Library وOpenAlex وSemantic Scholar وarXiv وEurope PMC
+    وSpringer وWiley وTaylor &amp; Francis وSAGE وUnpaywall — فتحصل على المؤلفين والمجلة
     والسنة وDOI ورابط المصدر ونسخة PDF مفتوحة إن وُجدت. ونقّص النتائج بفلتر
     <b>فترة الإصدار (من – إلى)</b> إن تبحث عن مراجع زمن محدّد.
   </p>

@@ -30,6 +30,21 @@ const PUBLISHER_PREFIXES = {
   acm: '10.1145'
 };
 
+/**
+ * مجموعات بادئات ناشرين عالميين — بحث مجاني عبر Crossref مباشرة (بلا مفاتيح API).
+ * متحقَّق حيّاً من /members ومن عينات /works: Crossref يقبل تكرار المفتاح
+ * (prefix:10.1002,prefix:10.1111) لكن لا يقبل عدة قيم لمفتاح واحد.
+ *   - Springer (10.1007) · Nature (10.1038) · BMC (10.1186) — عائلة Springer Nature
+ *   - Wiley (10.1002) · Blackwell (10.1111 · 10.1046) · Hindawi (10.1155)
+ *   - Taylor & Francis (10.1080 — Informa UK) · SAGE (10.1177)
+ */
+const PUBLISHER_PREFIX_SETS = {
+  springer: ['10.1007', '10.1038', '10.1186'],
+  wiley: ['10.1002', '10.1111', '10.1046', '10.1155'],
+  tandf: ['10.1080'],
+  sage: ['10.1177']
+};
+
 /** هل هذا المعرّف DOI؟ (يقبل الرابط الكامل أو 10.x/y) */
 function isDoi(value) {
   const raw = String(value || '')
@@ -122,6 +137,31 @@ export const LIBRARY_SOURCES = [
     id: 'zenodo',
     label: 'Zenodo — منشورات بحثية',
     hint: 'منشورات CERN المفتوحة: أوراق وملفات بحثية بصيغة PDF.'
+  },
+  {
+    id: 'springer',
+    label: 'Springer — دار Springer',
+    hint: 'مجلات Springer وNature وBMC عبر بادئات DOI (10.1007 · 10.1038 · 10.1186) — بيانات استشهاد كاملة ورابط الناشر.'
+  },
+  {
+    id: 'wiley',
+    label: 'Wiley — دار Wiley',
+    hint: 'مجلات Wiley وBlackwell وHindawi عبر بادئات DOI (10.1002 · 10.1111 · 10.1046 · 10.1155).'
+  },
+  {
+    id: 'tandf',
+    label: 'Taylor & Francis — دوريات Taylor & Francis',
+    hint: 'مجلات Taylor & Francis عبر بادئة DOI (10.1080).'
+  },
+  {
+    id: 'sage',
+    label: 'SAGE — دوريات SAGE',
+    hint: 'مجلات SAGE (اجتماعية · إدارة · طب) عبر بادئة DOI (10.1177).'
+  },
+  {
+    id: 'unpaywall',
+    label: 'Unpaywall — نصوص PDF مفتوحة قانونياً',
+    hint: 'بحث واسع ثم تحقّق من نسخة PDF مفتوحة لكل DOI عبر Unpaywall — رابط النص الكامل عند توفره.'
   }
 ];
 
@@ -413,9 +453,12 @@ async function searchCrossref({ q, subject, limit, prefix = '', years = {} }) {
     select:
       'DOI,title,author,issued,container-title,publisher,volume,issue,page,type,URL,subject,is-referenced-by-count,link,abstract,score'
   });
-  // فلتر واحد يجمع بادئة الناشر وفترة الإصدار (Crossref: from-pub-date / until-pub-date)
+  // أزواج فلتر key:val — بادئة واحدة أو عدّة بادئات (تُكرَّر المفتاح كما يقبل Crossref)
+  // مضافاً إليها فترة الإصدار (from-pub-date / until-pub-date).
   const filters = [];
-  if (prefix) filters.push(`prefix:${prefix}`);
+  for (const value of (Array.isArray(prefix) ? prefix : [prefix]).filter(Boolean)) {
+    filters.push(`prefix:${value}`);
+  }
   if (years.from) filters.push(`from-pub-date:${years.from}-01-01`);
   if (years.to) filters.push(`until-pub-date:${years.to}-12-31`);
   if (filters.length) params.set('filter', filters.join(','));
@@ -741,6 +784,28 @@ export function normalizeYearRange(yearFrom, yearTo) {
   return { from, to };
 }
 
+/**
+ * بحث «Unpaywall»: نتائج واسعة من Crossref ثم نتحقّق من أقرب نسخة PDF مفتوحة
+ * قانونياً لكل DOI عبر Unpaywall (مجاني ببريد التواصل) — يعطي الباحث رابط النص
+ * الكامل المباشر حين يملكه الناشر أو المستودع المؤسسي. حدّ لبقائية الخدمة:
+ * أول 6 DOIs بلا رابط فقط في كل بحث.
+ */
+async function searchUnpaywall({ q, subject, limit, years = {} }) {
+  const items = await searchCrossref({ q, subject, limit, years });
+  const missing = items.filter((item) => item.doi && !item.pdfUrl).slice(0, 6);
+  await Promise.allSettled(
+    missing.map(async (item) => {
+      const pdf = await openAccessPdfUrl(item.doi);
+      if (!pdf) return;
+      item.pdfUrl = pdf;
+      item.isOpenAccess = true;
+      item.downloadable = true;
+      item.locator = pdf;
+    })
+  );
+  return items;
+}
+
 /** جدول البحثات حسب معرّف المصدر — بعد تعريف كل دالة. */
 const SEARCHERS = {
   crossref: (args) => searchCrossref(args),
@@ -748,6 +813,13 @@ const SEARCHERS = {
   // IEEE Xplore و ACM Digital Library عبر بادئة DOI الرسمية لهما في Crossref
   ieee: (args) => searchCrossref({ ...args, prefix: PUBLISHER_PREFIXES.ieee }),
   acm: (args) => searchCrossref({ ...args, prefix: PUBLISHER_PREFIXES.acm }),
+  // ناشرون عالميون (مجانيون البحث) عبر مجموعات بادئاتهم في Crossref
+  springer: (args) => searchCrossref({ ...args, prefix: PUBLISHER_PREFIX_SETS.springer }),
+  wiley: (args) => searchCrossref({ ...args, prefix: PUBLISHER_PREFIX_SETS.wiley }),
+  tandf: (args) => searchCrossref({ ...args, prefix: PUBLISHER_PREFIX_SETS.tandf }),
+  sage: (args) => searchCrossref({ ...args, prefix: PUBLISHER_PREFIX_SETS.sage }),
+  // Unpaywall: بحث Crossref مع تحقّق PDF مفتوح لكل DOI
+  unpaywall: (args) => searchUnpaywall(args),
   semantic: (args) => searchSemanticScholar(args),
   arxiv: (args) => searchArxiv(args),
   europepmc: (args) => searchEuropePmc(args),
@@ -757,7 +829,7 @@ const SEARCHERS = {
 };
 
 /** المصادر التي بحثها Crossref بـ DOI (تعطي بيانات استشهاد كاملة + رابط ناشر). */
-const CROSSREF_BASED = new Set(['crossref', 'ieee', 'acm']);
+const CROSSREF_BASED = new Set(['crossref', 'ieee', 'acm', 'springer', 'wiley', 'tandf', 'sage', 'unpaywall']);
 
 /**
  * يحوّل DOI (أو أي رابط يحتوي DOI) إلى سجل مرجعي كامل — أداة الباحث حين يعرف

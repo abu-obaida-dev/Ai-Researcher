@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { chargeUsage, estimateReservation, estimateTokens, normalizeUsage } from '../src/services/tokens.js';
 import { normalizeCurrency } from '../src/services/payments.js';
 import { buildSearchQuery, extractTopic, isTopicSpecific, normalizeArabic, relevanceScore } from '../src/services/literature.js';
-import { normalizeYearRange } from '../src/services/library-sources.js';
+import { LIBRARY_SOURCES, normalizeYearRange } from '../src/services/library-sources.js';
 import { saveSupportWhatsapp } from '../src/services/settings.js';
 import { assertContentMatchesExtension, contentMatchesExtension } from '../src/services/upload-guard.js';
 import { safeEqual } from '../src/middleware/security.js';
@@ -124,6 +124,14 @@ test('normalizeYearRange: فلتر سنة الإصدار — قلب المعكو
   assert.deepEqual(normalizeYearRange('', '2024'), { from: 0, to: 2024 });
   // المدى السليم يبقى كما هو
   assert.deepEqual(normalizeYearRange('2010', '2024'), { from: 2010, to: 2024 });
+});
+
+test('LIBRARY_SOURCES: الناشرون الجدد مسجّلون ببيانات مكتملة', () => {
+  for (const id of ['springer', 'wiley', 'tandf', 'sage', 'unpaywall']) {
+    const entry = LIBRARY_SOURCES.find((item) => item.id === id);
+    assert.ok(entry, `المصدر مفقود: ${id}`);
+    assert.ok(entry.label && entry.hint, `بيانات ناقصة: ${id}`);
+  }
 });
 
 test('relevanceScore: العنوان المطابق يتقدّم على غير المطابق', () => {
