@@ -223,8 +223,8 @@ function renderWebSearchPanel({ web, webQuery, webSource, webYearFrom = 0, webYe
   <p class="muted">
     ابحث بالكلمات المفتاحية (عنوان · مفهوم · كلمات مفتاحية إنجليزية وعربية) في المصادر العالمية
     والأوروبية والعربية: Crossref وOpenAlex وSemantic Scholar وDOAJ وCORE وIEEE Xplore
-    وACM وarXiv وEurope PMC وSpringer وWiley وTaylor &amp; Francis وSAGE وUnpaywall
-    وInternet Archive ومكتبة الكونجرس — فتحصل على المؤلفين والمجلة
+    وACM وarXiv وEurope PMC وPubMed Central وHAL وBASE وSSRN وSpringer وWiley
+    وTaylor &amp; Francis وSAGE وUnpaywall وInternet Archive ومكتبة الكونجرس — فتحصل على المؤلفين والمجلة
     والسنة وDOI ورابط المصدر ونسخة PDF مفتوحة إن وُجدت. ونقّص النتائج بفلتر
     <b>فترة الإصدار (من – إلى)</b> إن تبحث عن مراجع زمن محدّد.
   </p>

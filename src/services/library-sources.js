@@ -42,7 +42,8 @@ const PUBLISHER_PREFIX_SETS = {
   springer: ['10.1007', '10.1038', '10.1186'],
   wiley: ['10.1002', '10.1111', '10.1046', '10.1155'],
   tandf: ['10.1080'],
-  sage: ['10.1177']
+  sage: ['10.1177'],
+  ssrn: ['10.2139'] // SSRN (Elsevier) — موثّق حيّاً: 1.5 مليون ورقة اقتصادية وقانونية
 };
 
 /** هل هذا المعرّف DOI؟ (يقبل الرابط الكامل أو 10.x/y) */
@@ -177,6 +178,26 @@ export const LIBRARY_SOURCES = [
     id: 'core',
     label: 'CORE — أبحاث مفتوحة الوصول',
     hint: 'أضخم تجميع عالمي للأبحاث مفتوحة الوصول مع نصوص كاملة — يحتاج مفتاحاً مجانياً (CORE_API_KEY).'
+  },
+  {
+    id: 'pmc',
+    label: 'PubMed Central — الطب مفتوح النصوص',
+    hint: 'أرشيف NCBI الطبي للنصوص الكاملة عبر E-utilities الرسمية — بلا مفتاح، مع DOI للمقال.'
+  },
+  {
+    id: 'hal',
+    label: 'HAL — الأرشيف العلمي المفتوح',
+    hint: 'مقالات ومسودات أوروبية عبر HAL (فرنسا) مع رابط PDF مباشر وملخصات — بلا مفتاح.'
+  },
+  {
+    id: 'base',
+    label: 'BASE — محرك بحث أكاديمي ألماني',
+    hint: 'ملايين الأوراق من مستودعات العالم — يحتاج تسجيلاً مجانياً (BASE_API_USER / BASE_API_PASS).'
+  },
+  {
+    id: 'ssrn',
+    label: 'SSRN — أبحاث اقتصادية وقانونية',
+    hint: 'شبكة العلوم الاجتماعية (Elsevier) عبر بادئة DOI (10.2139) — أكثر من مليون ورقة أعمال ومسودة.'
   }
 ];
 
@@ -186,7 +207,7 @@ export const LIBRARY_SOURCES = [
  */
 export const SOURCE_GROUPS = [
   { id: 'global', label: 'أبحاث ودوريات عالمية' },
-  { id: 'specialized', label: 'أبحاث تخصصية (هندسة · حاسوب · طب)' },
+  { id: 'specialized', label: 'أبحاث تخصصية (هندسة · حاسوب · طب · اقتصاد وقانون)' },
   { id: 'publishers', label: 'دوريات الناشرين العالميين' },
   { id: 'books', label: 'كتب ومراجع عربية وعالمية' }
 ];
@@ -211,7 +232,11 @@ export function sourceGroup(id) {
     sage: 'publishers',
     openlibrary: 'books',
     internetarchive: 'books',
-    loc: 'books'
+    loc: 'books',
+    pmc: 'specialized',
+    hal: 'global',
+    base: 'global',
+    ssrn: 'specialized'
   };
   return groups[String(id || '')] || '';
 }
@@ -617,6 +642,217 @@ async function searchCore({ q, subject, limit, years = {} }) {
       isOpenAccess: true,
       downloadable: Boolean(pdfUrl),
       locator: pdfUrl || doi
+    };
+  });
+}
+
+/**
+ * بحث في PubMed Central (NCBI) — أرشيف الطب مفتوح النصوص الكامل عبر
+ * E-utilities الرسمية بلا مفتاح: ESearch يعطي المعرّفات ثم ESummary بياناتها.
+ * نرسل tool/email لبقائية الخدمة كما توصي NCBI، وفلتر السنة يمرّ خادمياً
+ * عبر mindate/maxdate (datetype=pdat).
+ */
+async function searchPmc({ q, subject, limit, years = {} }) {
+  const query = [q, subject].filter(Boolean).join(' ').trim();
+  const size = Math.min(Math.max(Number(limit) || 20, 1), 20);
+  const tool = 'zena-ai-library';
+
+  const searchParams = new URLSearchParams({
+    db: 'pmc',
+    term: query,
+    retmode: 'json',
+    retmax: String(size),
+    // ترتيب NCBI الافتراضي «الأحدث» يعيد عناوين غير مطابقة للموضوع — نرتّب بالملاءمة
+    sort: 'relevance',
+    tool
+  });
+  if (UNPAYWALL_EMAIL) searchParams.set('email', UNPAYWALL_EMAIL);
+  if (years.from) searchParams.set('mindate', String(years.from));
+  if (years.to) searchParams.set('maxdate', String(years.to));
+  if (years.from || years.to) searchParams.set('datetype', 'pdat');
+
+  const search = await fetchJson(
+    `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?${searchParams.toString()}`
+  );
+  const ids = (Array.isArray(search?.esearchresult?.idlist) ? search.esearchresult.idlist : []).slice(0, size);
+  if (!ids.length) return [];
+
+  const summary = await fetchJson(
+    `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?${new URLSearchParams({
+      db: 'pmc',
+      id: ids.join(','),
+      retmode: 'json',
+      tool
+    })}`
+  );
+  const result = summary?.result || {};
+  return (Array.isArray(result.uids) ? result.uids : [])
+    .map((uid) => result[uid])
+    .filter(Boolean)
+    .map((paper) => {
+      const articleIds = Array.isArray(paper.articleids) ? paper.articleids : [];
+      const doi = String(articleIds.find((entry) => entry.idtype === 'doi')?.value || '');
+      const pmcid = String(articleIds.find((entry) => entry.idtype === 'pmcid')?.value || `PMC${paper.uid || ''}`);
+      const rawDate = String(paper.pubdate || paper.epubdate || '');
+      return {
+        key: doi || pmcid,
+        title: stripHtml(paper.title || '(بدون عنوان)'),
+        authors: (Array.isArray(paper.authors) ? paper.authors : [])
+          .map((author) => author?.name)
+          .filter(Boolean)
+          .slice(0, 6)
+          .join('، '),
+        year: Number((rawDate.match(/\d{4}/) || [])[0]) || null,
+        source: String(paper.fulljournalname || paper.source || 'PubMed Central'),
+        abstract: '',
+        subjects: '',
+        url: `https://pmc.ncbi.nlm.nih.gov/articles/${pmcid}/`,
+        doi,
+        venue: String(paper.source || ''),
+        publisher: '',
+        type: 'article',
+        volume: String(paper.volume || ''),
+        issue: String(paper.issue || ''),
+        pages: String(paper.pages || ''),
+        citations: 0,
+        isOpenAccess: true,
+        downloadable: Boolean(doi),
+        locator: doi || pmcid
+      };
+    });
+}
+
+/**
+ * بحث في HAL — الأرشيف العلمي المفتوح الفرنسي (بلا مفتاح): مقالات ومسودات
+ * من مئات المؤسسات الأوروبية مع رابط PDF مباشر (fileMain_s) وملخصات.
+ */
+async function searchHal({ q, subject, limit, years = {} }) {
+  const query = [q, subject].filter(Boolean).join(' ').trim();
+  const params = new URLSearchParams({
+    q: query,
+    fl: [
+      'title_s',
+      'authFullName_s',
+      'producedDateY_i',
+      'doiId_s',
+      'uri_s',
+      'fileMain_s',
+      'abstract_s',
+      'keyword_s',
+      'journalTitle_s'
+    ].join(','),
+    rows: String(Math.min(Math.max(Number(limit) || 20, 1), 25)),
+    wt: 'json'
+  });
+  if (years.from || years.to) {
+    params.set('fq', `producedDateY_i:[${years.from || '*'} TO ${years.to || '*'}]`);
+  }
+
+  const data = await fetchJson(`https://api.archives-ouvertes.fr/search/?${params.toString()}`);
+  return (Array.isArray(data?.response?.docs) ? data.response.docs : []).map((doc) => {
+    const doi = String(doc.doiId_s || '');
+    const pdfUrl = String(doc.fileMain_s || '');
+    const uri = String(doc.uri_s || '');
+    return {
+      key: doi || uri,
+      title: stripHtml([].concat(doc.title_s || [])[0] || '(بدون عنوان)'),
+      authors: [].concat(doc.authFullName_s || []).filter(Boolean).slice(0, 6).join('، '),
+      year: Number(doc.producedDateY_i) || null,
+      source: 'HAL — Open Archive',
+      abstract: stripHtml([].concat(doc.abstract_s || [])[0] || '').slice(0, 5000),
+      subjects: [].concat(doc.keyword_s || []).filter(Boolean).slice(0, 6).join(' · '),
+      url: uri || (doi ? `https://doi.org/${doi}` : ''),
+      pdfUrl,
+      doi,
+      venue: String(doc.journalTitle_s || ''),
+      publisher: '',
+      type: 'article',
+      volume: '',
+      issue: '',
+      pages: '',
+      citations: 0,
+      isOpenAccess: Boolean(pdfUrl),
+      downloadable: Boolean(pdfUrl),
+      locator: pdfUrl || doi || uri
+    };
+  });
+}
+
+/**
+ * بحث في BASE (Bielefeld) — محرك بحث أكاديمي ألماني ضخم يجمع مستودعات العالم.
+ * مجاني لكنه يطلب تسجيلاً مجانياً يشمل عنوان IP ووكيل المستخدم (BASE_API_USER
+ * وBASE_API_PASS على base-search.net) — بلا بيانات اعتماد يعود رسالة عربية
+ * واضحة. بنية حقول النتائج dc-prefixed (dctitle · dccreator · dcyear · dclink ·
+ * dcoa) حسب واجهة API المعلنة؛ dcoa=1 تعني نسخة مفتوحة.
+ */
+async function searchBase({ q, subject, limit }) {
+  const user = String(process.env.BASE_API_USER || '').trim();
+  const pass = String(process.env.BASE_API_PASS || '').trim();
+  if (!user || !pass) {
+    const error = new Error(
+      'مصدر BASE يحتاج تسجيلاً مجانياً — سجّل في base-search.net (يتضمن تسجيل IP الخادم) ثم ضع BASE_API_USER وBASE_API_PASS.'
+    );
+    error.code = 'SOURCE_HTTP';
+    throw error;
+  }
+
+  const query = [q, subject].filter(Boolean).join(' ').trim();
+  const params = new URLSearchParams({
+    func: 'PerformSearch',
+    query,
+    format: 'json',
+    hits: String(Math.min(Math.max(Number(limit) || 20, 1), 25))
+  });
+
+  const response = await fetch(`https://api.base-search.net/cgi-bin/BaseHttpSearchInterface.fcgi?${params.toString()}`, {
+    redirect: 'follow',
+    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+    headers: {
+      'user-agent': USER_AGENT,
+      accept: 'application/json',
+      authorization: `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`
+    }
+  });
+  if (!response.ok) {
+    const error = new Error(`BASE ردّ بحالة ${response.status}.`);
+    error.code = 'SOURCE_HTTP';
+    throw error;
+  }
+
+  const data = JSON.parse(Buffer.from(await response.arrayBuffer()).toString('utf8'));
+  if (data?.error) {
+    const error = new Error(`BASE: ${String(data.error)}`);
+    error.code = 'SOURCE_HTTP';
+    throw error;
+  }
+
+  return (Array.isArray(data?.response?.docs) ? data.response.docs : []).map((doc) => {
+    const identifiers = [].concat(doc.dcidentifier || []).filter(Boolean);
+    const doi = identifiers.map((value) => extractDoi(value)).find(Boolean) || '';
+    const link = String(doc.dclink || '');
+    const isOpenAccess = String(doc.dcoa || '') === '1';
+    const rawYear = [].concat(doc.dcyear || [])[0] || '';
+    return {
+      key: doi || link,
+      title: stripHtml([].concat(doc.dctitle || [])[0] || '(بدون عنوان)'),
+      authors: [].concat(doc.dccreator || []).filter(Boolean).slice(0, 6).join('، '),
+      year: Number(String(rawYear).match(/\d{4}/)?.[0]) || null,
+      source: 'BASE',
+      abstract: stripHtml([].concat(doc.dcdescription || [])[0] || '').slice(0, 5000),
+      subjects: '',
+      url: link || (doi ? `https://doi.org/${doi}` : ''),
+      pdfUrl: isOpenAccess ? link : '',
+      doi,
+      venue: '',
+      publisher: stripHtml([].concat(doc.dcpublisher || [])[0] || ''),
+      type: 'article',
+      volume: '',
+      issue: '',
+      pages: '',
+      citations: 0,
+      isOpenAccess,
+      downloadable: Boolean(isOpenAccess && link),
+      locator: (isOpenAccess && link) || doi || link
     };
   });
 }
@@ -1042,7 +1278,12 @@ const SEARCHERS = {
   // كتب وأرشيفات: Internet Archive · مكتبة الكونجرس (SRU) · CORE (نصوص مفتوحة)
   internetarchive: (args) => searchInternetArchive(args),
   loc: (args) => searchLibraryOfCongress(args),
-  core: (args) => searchCore(args)
+  core: (args) => searchCore(args),
+  // طب (NCBI) · أرشيف مفتوح أوروبي (HAL) · مستودعات العالم (BASE) · SSRN عبر بادئة DOI
+  pmc: (args) => searchPmc(args),
+  hal: (args) => searchHal(args),
+  base: (args) => searchBase(args),
+  ssrn: (args) => searchCrossref({ ...args, prefix: PUBLISHER_PREFIX_SETS.ssrn })
 };
 
 /** المصادر التي بحثها Crossref بـ DOI (تعطي بيانات استشهاد كاملة + رابط ناشر). */
@@ -1424,7 +1665,7 @@ export async function downloadExternalFile({ source, locator } = {}) {
     }
 
     // المصادر البحثية الحديثة: locator إمّا رابط PDF مباشر أو DOI (نبحث عن نسخة مفتوحة).
-    if (CROSSREF_BASED.has(id) || ['openalex', 'semantic', 'arxiv', 'europepmc'].includes(id)) {
+    if (CROSSREF_BASED.has(id) || ['openalex', 'semantic', 'arxiv', 'europepmc', 'pmc', 'hal', 'base'].includes(id)) {
       if (/^https?:\/\//i.test(loc)) return await downloadDirectPdf(loc);
 
       const oa = await openAccessPdfUrl(loc);
