@@ -45,13 +45,8 @@ function serviceOpen(account, key) {
   return services.some((item) => (typeof item === 'string' ? item === key : item?.key === key && item?.enabled !== false));
 }
 
-/** تسمية الخطوة من مفاتيحها (مصفوفة مرتّبة لعرضها في الجداول). */
-function stepLabel(stepTitles, key) {
-  return key ? stepTitles[key] || key : '—';
-}
-
 /** صف مرجع في «مراجعي»: التوثيق + حالة القراءة + ملاحظات مرتبطة. */
-function renderReferenceRow(reference, stepTitles) {
+function renderReferenceRow(reference) {
   const statusOptions = READING_STATUSES.map(
     (item) =>
       `<option value="${escapeHtml(item.value)}"${item.value === reference.status ? ' selected' : ''}>${escapeHtml(
@@ -68,7 +63,6 @@ function renderReferenceRow(reference, stepTitles) {
   <td>${reference.year ? escapeHtml(String(reference.year)) : '—'}<br /><span class="muted">${escapeHtml(
     reference.source || '—'
   )}</span></td>
-  <td>${escapeHtml(stepLabel(stepTitles, reference.stepKey))}</td>
   <td>
     <form method="post" action="/references/${escapeHtml(reference.id)}/status" class="inline-form ref-status">
       <select name="status" aria-label="حالة قراءة المرجع">${statusOptions}</select>
@@ -640,8 +634,8 @@ export function renderFilesPage({ account, unread = 0, files = [], summary = { t
   // قسم المراجع: ما أضافه الباحث من المكتبة (الخارجية أو مكتبة المنصة) — بلا إضافة يدوية.
   const refsHtml = references.length
     ? `<table class="ref-table">
-  <thead><tr><th>المرجع</th><th>السنة والمصدر</th><th>الخطوة</th><th>الحالة</th><th>إجراءات</th></tr></thead>
-  <tbody>${references.map((item) => renderReferenceRow(item, stepTitles)).join('')}</tbody>
+  <thead><tr><th>المرجع</th><th>السنة والمصدر</th><th>الحالة</th><th>إجراءات</th></tr></thead>
+  <tbody>${references.map((item) => renderReferenceRow(item)).join('')}</tbody>
 </table>`
     : '<div class="empty">لا مراجع بعد — أضفها من نتائج <a href="/library">المكتبة</a> بزر «أضف إلى مراجعي».</div>';
 
