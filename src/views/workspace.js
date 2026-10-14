@@ -183,7 +183,7 @@ function renderWebReference(item, stepKey) {
  * لوحة «ابحث في قواعد البيانات العلمية» — تحلّ أكبر مشكلة عند الباحثين:
  * نموذج بحث عام + نموذج «لديّ DOI أو رابط» للحلّ المباشر.
  */
-function renderWebSearchPanel({ web, webQuery, webSource, webSources = [], stepKey, resolved = null, resolveError = '', resolveQuery = '' }) {
+function renderWebSearchPanel({ web, webQuery, webSource, webYearFrom = 0, webYearTo = 0, webSources = [], stepKey, resolved = null, resolveError = '', resolveQuery = '' }) {
   const options = [
     `<option value=""${!webSource ? ' selected' : ''}>كل المصادر (الأسرع والأغنى)</option>`,
     ...webSources
@@ -193,6 +193,14 @@ function renderWebSearchPanel({ web, webQuery, webSource, webSources = [], stepK
 
   const results = web?.items || [];
   const errors = (web?.errors || []).filter((entry) => entry.error);
+
+  // فلتر فترة الإصدار الفعّال — يُعرض مع النتائج وحالة «لا نتائج» ليعرف الباحث ما يُرشَّح.
+  const periodNote =
+    webYearFrom || webYearTo ? `فترة الإصدار: ${webYearFrom || '…'}–${webYearTo || '…'}` : '';
+  const triedLine = web?.tried?.length
+    ? `بحثنا في: ${web.tried.map((entry) => `${escapeHtml(entry.source)} (${entry.count})`).join(' · ')}`
+    : '';
+  const metaLine = [triedLine, periodNote].filter(Boolean).join(' · ');
 
   const resolvedCard = resolved
     ? `<div class="notice mt-16">استخرجنا بيانات هذا المرجع كاملة — راجعها قبل الاستشهاد.</div>
@@ -209,13 +217,19 @@ function renderWebSearchPanel({ web, webQuery, webSource, webSources = [], stepK
   <p class="muted">
     ابحث بالكلمات المفتاحية (عنوان · مفهوم · كلمات مفتاحية إنجليزية) في Crossref وIEEE Xplore وACM
     Digital Library وOpenAlex وSemantic Scholar وarXiv وEurope PMC — فتحصل على المؤلفين والمجلة
-    والسنة وDOI ورابط المصدر ونسخة PDF مفتوحة إن وُجدت.
+    والسنة وDOI ورابط المصدر ونسخة PDF مفتوحة إن وُجدت. ونقّص النتائج بفلتر
+    <b>فترة الإصدار (من – إلى)</b> إن تبحث عن مراجع زمن محدّد.
   </p>
   <form class="toolbar" method="get" action="/library">
     ${stepKey ? `<input type="hidden" name="step" value="${escapeHtml(stepKey)}" />` : ''}
     <input type="hidden" name="q" value="" />
     <input type="search" name="wq" value="${escapeHtml(webQuery || '')}" placeholder="مثال: machine learning in higher education" />
     <select name="wsrc" aria-label="المصدر">${options}</select>
+    <span class="year-range" role="group" aria-label="فلتر فترة الإصدار">
+      <input type="number" name="wfrom" min="1500" max="2100" inputmode="numeric" placeholder="من سنة" aria-label="من سنة الإصدار" value="${webYearFrom || ''}" />
+      <span class="year-sep" aria-hidden="true">–</span>
+      <input type="number" name="wto" min="1500" max="2100" inputmode="numeric" placeholder="إلى سنة" aria-label="إلى سنة الإصدار" value="${webYearTo || ''}" />
+    </span>
     <button class="btn btn-primary" type="submit">${icon('searchCheck', 'icon-sm')} ابحث</button>
   </form>
 
@@ -231,9 +245,9 @@ function renderWebSearchPanel({ web, webQuery, webSource, webSources = [], stepK
   ${
     results.length
       ? `<div class="lib-list mt-16">${results.map((item) => renderWebReference(item, stepKey)).join('')}</div>
-         ${web?.tried?.length ? `<p class="muted mt-8">بحثنا في: ${web.tried.map((entry) => `${escapeHtml(entry.source)} (${entry.count})`).join(' · ')}</p>` : ''}`
+         ${metaLine ? `<p class="muted mt-8">${metaLine}</p>` : ''}`
       : webQuery
-        ? `<div class="empty mt-16">لا نتائج${errors.length ? ` — ${escapeHtml(errors[0].error)}` : ''}. جرّب كلمات إنجليزية أدق أو مصدراً آخر.</div>`
+        ? `<div class="empty mt-16">لا نتائج${errors.length ? ` — ${escapeHtml(errors[0].error)}` : ''}${periodNote ? ` (${escapeHtml(periodNote)})` : ''}. جرّب كلمات إنجليزية أدق أو مصدراً آخر${periodNote ? ' أو وسّع فترة الإصدار' : ''}.</div>`
         : '<div class="empty mt-16">اكتب كلمة بحث وستظهر لك المراجع مع روابطها وبياناتها كاملة.</div>'
   }
 </section>`;
@@ -253,6 +267,8 @@ export function renderLibraryPage({
   web = null,
   webQuery = '',
   webSource = '',
+  webYearFrom = 0,
+  webYearTo = 0,
   webSources = [],
   resolved = null,
   resolveError = '',
@@ -299,7 +315,7 @@ ${
     : ''
 }
 
-${renderWebSearchPanel({ web, webQuery, webSource, webSources, stepKey, resolved, resolveError, resolveQuery })}
+${renderWebSearchPanel({ web, webQuery, webSource, webYearFrom, webYearTo, webSources, stepKey, resolved, resolveError, resolveQuery })}
 
 <section class="card">
   <div class="card-head">

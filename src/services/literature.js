@@ -29,7 +29,7 @@
  *   2) عند غموض الطلب نستخدم **ملف الباحث** (عنوان البحث + التخصص) لا لفظ «مراجع».
  *   3) ترشيح بالملاءمة: نُسقط أي نتيجة لا تتقاطع كلماتها مع الموضوع.
  */
-import { fetchCitationMetadata, googleScholarUrl, resolveDoiRecord, searchExternalLibrary } from './library-sources.js';
+import { fetchCitationMetadata, googleScholarUrl, normalizeYearRange, resolveDoiRecord, searchExternalLibrary } from './library-sources.js';
 import { registeredTopic } from './journey.js';
 import { normalizeArabic, searchLibraryItems } from './workspace.js';
 
@@ -312,13 +312,16 @@ function isDuplicate(a, b) {
  * بحث مراجع في عدة مصادر بالتوازي مع دمج النتائج وإزالة التكرار:
  * يعيد { query, sources, items, tried, errors } ولا يرمي أبداً.
  */
-export async function searchLiterature({ query, sources = DEFAULT_SEARCH_SOURCES, limit = 8, subject = '', topic = '', minRelevance = 25 } = {}) {
+export async function searchLiterature({ query, sources = DEFAULT_SEARCH_SOURCES, limit = 8, subject = '', topic = '', minRelevance = 25, yearFrom = 0, yearTo = 0 } = {}) {
   const q = cleanQuery(query);
   const ids = (Array.isArray(sources) ? sources : [sources]).map((id) => String(id || '').trim()).filter(Boolean);
   const list = (ids.length ? ids : DEFAULT_SEARCH_SOURCES).slice(0, 6);
   const size = Math.min(Math.max(Number(limit) || 8, 1), 15);
   // موضوع الترشيح: إن لم يُمرَّر نستخدم الاستعلام نفسه (سلوك البحث اليدوي).
   const filterTopic = cleanQuery(topic || q, 160);
+  // فلتر سنة الإصدار: موحّد عبر normalizeYearRange (المعكوس يُقلب والشاذ يُلغى).
+  const years = normalizeYearRange(yearFrom, yearTo);
+  const hasYearFilter = Boolean(years.from || years.to);
 
   if (!q && !subject) {
     return { query: '', sources: list, items: [], tried: [], errors: [{ source: '—', error: 'اكتب كلمة بحث أولاً.' }] };
@@ -331,7 +334,7 @@ export async function searchLiterature({ query, sources = DEFAULT_SEARCH_SOURCES
       const started = Date.now();
       // مهلة لكل مصدر + مهلة شاملة: نردّ ما وصل فعلاً ولا نُبقي الباحث منتظراً.
       const response = await withBudget(
-        searchExternalLibrary({ source: id, q, subject, limit: size }),
+        searchExternalLibrary({ source: id, q, subject, limit: size, yearFrom: years.from, yearTo: years.to }),
         SOURCE_BUDGET_MS,
         { source: id, results: [], error: 'تجاوز المصدر المهلة.' }
       );
@@ -368,8 +371,19 @@ export async function searchLiterature({ query, sources = DEFAULT_SEARCH_SOURCES
     }
   }
 
+  // فلتر فترة الإصدار (إن وُجد): النتيجة بلا سنة مؤكَّدة أو خارج المدى تُستبعد —
+  // إخراج خارج الفترة المطلوبة أسوأ من غيابه، وترشيح هنا يغطي المصادر بلا فلتر خادمي.
+  const ranged = hasYearFilter
+    ? merged.filter(
+        (item) =>
+          item.year &&
+          (!years.from || item.year >= years.from) &&
+          (!years.to || item.year <= years.to)
+      )
+    : merged;
+
   // ترتيب بالأولوية: ملاءمة الموضوع أولاً، ثم مفتوح الوصول، ثم الأحدث، ثم الاستشهادات.
-  merged.sort(
+  ranged.sort(
     (a, b) =>
       (b.relevance || 0) - (a.relevance || 0) ||
       Number(Boolean(b.pdfUrl)) - Number(Boolean(a.pdfUrl)) ||
@@ -380,7 +394,7 @@ export async function searchLiterature({ query, sources = DEFAULT_SEARCH_SOURCES
   // ترشيح: عند وجود موضوع محدّد نستبعد النتائج التي لا تحتوي أي كلمة منه.
   // مهم: لا «نعود» للنتائج غير المطابقة أبداً — إرسال مراجع لا علاقة بالموضوع أسوأ
   // من سؤال الباحث عن موضوعه، فيعود فارغاً إن لم يجد مطابقة حقيقية.
-  const scored = filterTopic ? merged.filter((item) => (item.relevance || 0) >= minRelevance) : merged;
+  const scored = filterTopic ? ranged.filter((item) => (item.relevance || 0) >= minRelevance) : ranged;
   const finalItems = scored.slice(0, size);
 
   return {
@@ -390,6 +404,7 @@ export async function searchLiterature({ query, sources = DEFAULT_SEARCH_SOURCES
     items: finalItems,
     tried,
     errors,
+    years,
     filteredOut: merged.length - scored.length
   };
 }

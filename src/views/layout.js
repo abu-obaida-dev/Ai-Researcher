@@ -228,12 +228,12 @@ tbody tr:hover { background: var(--paper); }
 
 /* ==== عناصر التحكم ==== */
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
-input[type=search], input[type=text] {
+input[type=search], input[type=text], input[type=number] {
   padding: 8px 12px; border: var(--line); border-radius: var(--radius-sm);
   background: #fff; color: var(--ink); font-family: inherit; font-size: 12.5px; outline: none;
 }
 input::placeholder { color: var(--slate); opacity: .7; }
-input[type=search]:focus, input[type=text]:focus { border-color: var(--fresh); box-shadow: 0 0 0 3px var(--fresh-12); }
+input[type=search]:focus, input[type=text]:focus, input[type=number]:focus { border-color: var(--fresh); box-shadow: 0 0 0 3px var(--fresh-12); }
 /* القوائم المنسدلة: مظهر موحّد (سهم مرسوم + حدود + تركيز واضح) بدل الشكل الافتراضي للعنصر */
 select {
   appearance: none; -webkit-appearance: none;
@@ -1338,6 +1338,10 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .lib-section-head .lib-section-note { font-size: 11.5px; color: var(--slate); }
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
 .toolbar input[type="search"], .toolbar select { flex: 1 1 200px; max-width: 100%; }
+/* فلتر فترة الإصدار في البحث الخارجي: حقلان ضيّقان «من سنة – إلى سنة» */
+.toolbar input[type="number"] { flex: 0 1 96px; min-width: 88px; }
+.year-range { display: inline-flex; align-items: center; gap: 6px; }
+.year-sep { color: var(--slate); font-size: 13px; font-weight: 700; }
 .chip {
   display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 999px;
   background: var(--mist-soft); border: 1px solid var(--mist); color: var(--slate);

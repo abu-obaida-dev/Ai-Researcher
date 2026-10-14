@@ -34,7 +34,7 @@ import { renderNotice } from '../views/layout.js';
 import { renderFileViewerPage, renderFilesPage, renderLibraryPage, renderNotesPage, renderReferencesPage } from '../views/workspace.js';
 import { readSpreadsheet, spreadsheetErrorMessage } from '../services/spreadsheet.js';
 import { readLibraryItem } from '../services/library.js';
-import { LIBRARY_SOURCES } from '../services/library-sources.js';
+import { LIBRARY_SOURCES, normalizeYearRange } from '../services/library-sources.js';
 import { searchLiterature, resolveReference, buildSearchQuery } from '../services/literature.js';
 
 /**
@@ -130,6 +130,8 @@ router.get('/library', requireService('library'), async (req, res) => {
     const stepKey = String(req.query.step || '').trim().slice(0, 100);
     const webQuery = String(req.query.wq || '').trim().slice(0, 160);
     const webSource = String(req.query.wsrc || '').trim().slice(0, 30);
+    // فلتر سنة الإصدار في البحث الخارجي: من (wfrom) — إلى (wto)، بتوحيد واحد.
+    const years = normalizeYearRange(req.query.wfrom, req.query.wto);
     const resolveQuery = String(req.query.resolve || '').trim().slice(0, 300);
 
     // أداة «لديّ DOI أو رابط» — تُحلَّل بالتوازي مع البحث العام (وحدها إن وُجدت).
@@ -145,7 +147,9 @@ router.get('/library', requireService('library'), async (req, res) => {
             query: buildSearchQuery({ topic: webQuery }),
             sources: webSource ? [webSource] : undefined,
             limit: 8,
-            topic: webQuery
+            topic: webQuery,
+            yearFrom: years.from,
+            yearTo: years.to
           })
         : Promise.resolve(null)
     ]);
@@ -160,6 +164,8 @@ router.get('/library', requireService('library'), async (req, res) => {
         web,
         webQuery,
         webSource,
+        webYearFrom: years.from,
+        webYearTo: years.to,
         webSources: LIBRARY_SOURCES,
         resolved: resolveResult?.record || null,
         resolveError: resolveResult?.error || '',

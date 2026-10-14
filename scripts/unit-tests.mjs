@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { chargeUsage, estimateReservation, estimateTokens, normalizeUsage } from '../src/services/tokens.js';
 import { normalizeCurrency } from '../src/services/payments.js';
 import { buildSearchQuery, extractTopic, isTopicSpecific, normalizeArabic, relevanceScore } from '../src/services/literature.js';
+import { normalizeYearRange } from '../src/services/library-sources.js';
 import { saveSupportWhatsapp } from '../src/services/settings.js';
 import { assertContentMatchesExtension, contentMatchesExtension } from '../src/services/upload-guard.js';
 import { safeEqual } from '../src/middleware/security.js';
@@ -109,6 +110,20 @@ test('buildSearchQuery: يضيف المقابل الإنجليزي للمصطل�
 
   // «الطبيعيه» ليست «الطب» ⇒ لا نضيف medicine خطأً
   assert.ok(!buildSearchQuery({ topic: 'اللغة الطبيعية' }).includes('medicine'));
+});
+
+test('normalizeYearRange: فلتر سنة الإصدار — قلب المعكوس ورفض الشاذ واستقلال الطرفين', () => {
+  // من > إلى يُقلَبان بدل رفض البحث
+  assert.deepEqual(normalizeYearRange('2020', '2015'), { from: 2015, to: 2020 });
+  // بلا قيم أو بقيم شاذة ⇒ بلا ترشيح (0)
+  assert.deepEqual(normalizeYearRange('', ''), { from: 0, to: 0 });
+  assert.deepEqual(normalizeYearRange('منذ', 4000), { from: 0, to: 0 });
+  assert.deepEqual(normalizeYearRange('abc', '20x4'), { from: 0, to: 0 });
+  // طرف واحد يكفي (من-بدون-إلى / إلى-بدون-من)
+  assert.deepEqual(normalizeYearRange(2019, ''), { from: 2019, to: 0 });
+  assert.deepEqual(normalizeYearRange('', '2024'), { from: 0, to: 2024 });
+  // المدى السليم يبقى كما هو
+  assert.deepEqual(normalizeYearRange('2010', '2024'), { from: 2010, to: 2024 });
 });
 
 test('relevanceScore: العنوان المطابق يتقدّم على غير المطابق', () => {

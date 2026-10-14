@@ -403,7 +403,7 @@ function isSupplementaryDoi(doi) {
  * نفس المحرك يخدم «IEEE Xplore» و«ACM DL» عبر فلتر بادئة DOI، فيعود الرابط
  * الرسمي للناشر مع كل بيانات الاستشهاد (مجلة · دار نشر · مجلد · عدد · صفحات).
  */
-async function searchCrossref({ q, subject, limit, prefix = '' }) {
+async function searchCrossref({ q, subject, limit, prefix = '', years = {} }) {
   const query = [q, subject].filter(Boolean).join(' ').trim();
   const params = new URLSearchParams({
     'query.bibliographic': query,
@@ -413,7 +413,12 @@ async function searchCrossref({ q, subject, limit, prefix = '' }) {
     select:
       'DOI,title,author,issued,container-title,publisher,volume,issue,page,type,URL,subject,is-referenced-by-count,link,abstract,score'
   });
-  if (prefix) params.set('filter', `prefix:${prefix}`);
+  // فلتر واحد يجمع بادئة الناشر وفترة الإصدار (Crossref: from-pub-date / until-pub-date)
+  const filters = [];
+  if (prefix) filters.push(`prefix:${prefix}`);
+  if (years.from) filters.push(`from-pub-date:${years.from}-01-01`);
+  if (years.to) filters.push(`until-pub-date:${years.to}-12-31`);
+  if (filters.length) params.set('filter', filters.join(','));
 
   const data = await fetchJsonRetry(`https://api.crossref.org/works?${params.toString()}`);
   const items = (Array.isArray(data?.message?.items) ? data.message.items : [])
@@ -468,10 +473,16 @@ function openAlexAbstract(inverted) {
 }
 
 /** بحث في OpenAlex — فهرس مفتوح يغطي IEEE وACM وSpringer وElsevier + رابط PDF مفتوح. */
-async function searchOpenAlex({ q, subject, limit }) {
+async function searchOpenAlex({ q, subject, limit, years = {} }) {
   const query = [q, subject].filter(Boolean).join(' ').trim();
+  // فترة الإصدار تُرشَّح عند المصدر نفسه حتى لا تملأ النتائج خارج الفترة المطلوبة
+  const range = [];
+  if (years.from) range.push(`from_publication_date:${years.from}-01-01`);
+  if (years.to) range.push(`to_publication_date:${years.to}-12-31`);
   const data = await fetchJson(
-    `https://api.openalex.org/works?search=${encodeURIComponent(query)}&per-page=${limit}&select=id,doi,title,authorships,publication_year,primary_location,best_oa_location,open_access,cited_by_count,abstract_inverted_index,type`
+    `https://api.openalex.org/works?search=${encodeURIComponent(query)}&per-page=${limit}&select=id,doi,title,authorships,publication_year,primary_location,best_oa_location,open_access,cited_by_count,abstract_inverted_index,type${
+      range.length ? `&filter=${range.join(',')}` : ''
+    }`
   );
 
   return (Array.isArray(data.results) ? data.results : []).map((work) => {
@@ -512,21 +523,23 @@ async function searchOpenAlex({ q, subject, limit }) {
 const SEMANTIC_TIMEOUT_MS = 9000;
 
 /** بحث في Semantic Scholar — دلالي مع معرّفات DOI/arXiv ورابط PDF مفتوح. */
-async function searchSemanticScholar({ q, subject, limit, retry = true }) {
+async function searchSemanticScholar({ q, subject, limit, retry = true, years = {} }) {
   const query = [q, subject].filter(Boolean).join(' ').trim();
   const fields = 'title,abstract,year,venue,publicationVenue,authors,externalIds,openAccessPdf,citationCount,fieldsOfStudy,publicationTypes,url';
   const headers = { 'user-agent': USER_AGENT, accept: 'application/json' };
   const apiKey = String(process.env.SEMANTIC_SCHOLAR_API_KEY || '').trim();
   if (apiKey) headers['x-api-key'] = apiKey;
 
+  // فترة الإصدار: Semantic Scholar يقبل سنة أو مدى (YYYY-YYYY) — نُغلق المدى دائماً
+  const yearRange = years.from || years.to ? `&year=${years.from || 1500}-${years.to || 2100}` : '';
   const response = await fetch(
-    `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&fields=${fields}`,
+    `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&fields=${fields}${yearRange}`,
     { redirect: 'follow', signal: AbortSignal.timeout(SEMANTIC_TIMEOUT_MS), headers }
   );
   // Semantic Scholar يحدّ المعدل بشدّة بلا مفتاح ⇒ ننتظر ونعيد مرة واحدة فقط.
   if (response.status === 429 && retry) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
-    return searchSemanticScholar({ q, subject, limit: Math.max(1, Math.floor(limit / 2)), retry: false });
+    return searchSemanticScholar({ q, subject, limit: Math.max(1, Math.floor(limit / 2)), retry: false, years });
   }
   if (!response.ok) {
     const error = new Error(`Semantic Scholar ردّ بحالة ${response.status}.`);
@@ -581,9 +594,16 @@ function xmlTags(xml, tag) {
 }
 
 /** بحث في arXiv — مسودات مفتوحة برابط PDF مباشر (علوم حاسوب · ذكاء اصطناعي · فيزياء). */
-async function searchArxiv({ q, subject, limit }) {
+async function searchArxiv({ q, subject, limit, years = {} }) {
   const query = [q, subject].filter(Boolean).join(' AND ').trim();
-  const url = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(query)}&start=0&max_results=${limit}`;
+  // فترة الإصدار عبر submittedDate تُدمج مع عبارة البحث بـAND (صيغة arXiv المعتمدة)
+  const yearSpan =
+    years.from || years.to
+      ? ` AND submittedDate:[${years.from || 1500}01010000 TO ${years.to || 2100}12312359]`
+      : '';
+  const url = `https://export.arxiv.org/api/query?search_query=${encodeURIComponent(
+    `all:${query}${yearSpan}`
+  )}&start=0&max_results=${limit}`;
   assertPublicUrl(url);
 
   const response = await fetch(url, {
@@ -636,11 +656,16 @@ async function searchArxiv({ q, subject, limit }) {
 }
 
 /** بحث في Europe PMC — طب وعلوم حيوية مع رابط النص الكامل المفتوح. */
-async function searchEuropePmc({ q, subject, limit }) {
+async function searchEuropePmc({ q, subject, limit, years = {} }) {
   const query = [q, subject].filter(Boolean).join(' ').trim();
+  // فترة الإصدار: صيغة Europe PMC المعتمدة FIRST_PDATE:[من-01-01 TO إلى-12-31]
+  const range =
+    years.from || years.to
+      ? ` AND (FIRST_PDATE:[${years.from || 1500}-01-01 TO ${years.to || 2100}-12-31])`
+      : '';
   const data = await fetchJson(
     `https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=${encodeURIComponent(
-      query
+      query + range
     )}&format=json&pageSize=${limit}&resultType=core`
   );
 
@@ -696,6 +721,24 @@ export async function openAccessPdfUrl(doi) {
     console.warn(`تعذّر جلب نسخة مفتوحة عبر Unpaywall: ${error?.code || error?.message}`);
     return '';
   }
+}
+
+/**
+ * يوحّد فلتر سنة الإصدار القادم من الاستعلام أو الواجهة:
+ *   - أرقام صحيحة بين 1500 و2100 فقط (وما عداها يُلغى = 0 = بلا ترشيح).
+ *   - الطرفان قابلان للاستقلال: من-بدون-إلى أو إلى-بدون-من.
+ *   - إن كان «من» أكبر من «إلى» يُقلَبان بدل رفض البحث.
+ * مصدر واحد للحقيقة يستخدمه كل مصادر البحث ومسار /library معاً.
+ */
+export function normalizeYearRange(yearFrom, yearTo) {
+  const pick = (value) => {
+    const parsed = Number.parseInt(String(value ?? '').trim(), 10);
+    return Number.isInteger(parsed) && parsed >= 1500 && parsed <= 2100 ? parsed : 0;
+  };
+  let from = pick(yearFrom);
+  let to = pick(yearTo);
+  if (from && to && from > to) [from, to] = [to, from];
+  return { from, to };
 }
 
 /** جدول البحثات حسب معرّف المصدر — بعد تعريف كل دالة. */
@@ -872,11 +915,14 @@ function decodeEntities(value) {
  * الشكل الموحّد: { key, title, authors, year, source, abstract, subjects, url, downloadable, locator }
  * ومعه حقول الاستشهاد: doi, venue, publisher, volume, issue, pages, citations, pdfUrl.
  */
-export async function searchExternalLibrary({ source, q = '', subject = '', limit = 20 } = {}) {
+export async function searchExternalLibrary({ source, q = '', subject = '', limit = 20, yearFrom = 0, yearTo = 0 } = {}) {
   const id = String(source || '');
   const query = String(q || '').trim().slice(0, 120);
   const subj = String(subject || '').trim().slice(0, 80);
   const size = Math.min(Math.max(Number(limit) || 20, 1), 25);
+  // فلتر سنة الإصدار: يُوحَّد هنا ثم يمرّ للمصدر — من يدعمه يرشّح عند المصدر،
+  // ومن لا يدعمه (OpenLibrary · DOAJ · Zenodo) يبقى للفلتر النهائي في searchLiterature.
+  const years = normalizeYearRange(yearFrom, yearTo);
 
   if (!LIBRARY_SOURCES.some((item) => item.id === id)) {
     return { source: id, results: [], error: 'مصدر غير معروف.' };
@@ -887,7 +933,7 @@ export async function searchExternalLibrary({ source, q = '', subject = '', limi
 
   try {
     const search = SEARCHERS[id];
-    const results = await search({ q: query, subject: subj, limit: size });
+    const results = await search({ q: query, subject: subj, limit: size, years });
     return {
       source: id,
       q: query,
