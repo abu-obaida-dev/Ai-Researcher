@@ -162,8 +162,59 @@ export const LIBRARY_SOURCES = [
     id: 'unpaywall',
     label: 'Unpaywall — نصوص PDF مفتوحة قانونياً',
     hint: 'بحث واسع ثم تحقّق من نسخة PDF مفتوحة لكل DOI عبر Unpaywall — رابط النص الكامل عند توفره.'
+  },
+  {
+    id: 'internetarchive',
+    label: 'Internet Archive — أرشيف الإنترنت',
+    hint: 'ملايين الكتب والوثائق المرقمنة عالمياً وعربياً — تحميل الكتاب كاملاً عند توفره.'
+  },
+  {
+    id: 'loc',
+    label: 'مكتبة الكونجرس (LOC) — كتب ومخطوطات',
+    hint: 'سجلات مكتبة الكونجرس الرسمية عبر SRU: كتب ومخطوطات ووثائق تاريخية (منها WDL).'
+  },
+  {
+    id: 'core',
+    label: 'CORE — أبحاث مفتوحة الوصول',
+    hint: 'أضخم تجميع عالمي للأبحاث مفتوحة الوصول مع نصوص كاملة — يحتاج مفتاحاً مجانياً (CORE_API_KEY).'
   }
 ];
+
+/**
+ * مجموعات المصادر في واجهة البحث — تقسيم القائمة المنسدلة لسهولة الاختيار
+ * (عالمية · تخصصية · ناشرون · كتب ومراجع عربية وعالمية).
+ */
+export const SOURCE_GROUPS = [
+  { id: 'global', label: 'أبحاث ودوريات عالمية' },
+  { id: 'specialized', label: 'أبحاث تخصصية (هندسة · حاسوب · طب)' },
+  { id: 'publishers', label: 'دوريات الناشرين العالميين' },
+  { id: 'books', label: 'كتب ومراجع عربية وعالمية' }
+];
+
+/** مجموعة مصدر في الواجهة (يُرجع '' للمصدر غير المعروف فلا يظهر في القائمة). */
+export function sourceGroup(id) {
+  const groups = {
+    crossref: 'global',
+    openalex: 'global',
+    semantic: 'global',
+    doaj: 'global',
+    zenodo: 'global',
+    unpaywall: 'global',
+    core: 'global',
+    ieee: 'specialized',
+    acm: 'specialized',
+    arxiv: 'specialized',
+    europepmc: 'specialized',
+    springer: 'publishers',
+    wiley: 'publishers',
+    tandf: 'publishers',
+    sage: 'publishers',
+    openlibrary: 'books',
+    internetarchive: 'books',
+    loc: 'books'
+  };
+  return groups[String(id || '')] || '';
+}
 
 /** اسم مصدر للعرض. */
 export function sourceLabel(id) {
@@ -404,6 +455,168 @@ async function searchZenodo({ q, subject, limit }) {
       url: record.links?.html || `https://zenodo.org/records/${record.id || ''}`,
       downloadable: fileFlag,
       locator: String(record.id || '')
+    };
+  });
+}
+
+/**
+ * بحث في Internet Archive — ملايين الكتب والوثائق المرقمنة (منها ضخامة
+ * المحتوى العربي: كتب ومخطوطات وصحف) بلا مفتاح. النتيجة «كتاب» بعنوان
+ * ومؤلف وسنة، والتنزيل لاحقاً عبر downloadFromArchiveOrg بنفس مؤشر ia:.
+ */
+async function searchInternetArchive({ q, subject, limit }) {
+  const query = [q, subject].filter(Boolean).join(' ').trim();
+  const params = new URLSearchParams({
+    q: `${query} AND mediatype:texts`,
+    rows: String(Math.min(Number(limit) || 20, 25)),
+    page: '1',
+    output: 'json'
+  });
+  params.append('fl[]', 'identifier');
+  params.append('fl[]', 'title');
+  params.append('fl[]', 'creator');
+  params.append('fl[]', 'date');
+  params.append('fl[]', 'year');
+  params.append('fl[]', 'publisher');
+
+  const data = await fetchJson(`https://archive.org/advancedsearch.php?${params.toString()}`);
+  return (Array.isArray(data?.response?.docs) ? data.response.docs : []).map((doc) => {
+    const id = String(doc.identifier || '');
+    const rawYear = String(doc.year || doc.date || '');
+    return {
+      key: id,
+      title: stripHtml([].concat(doc.title || [])[0] || '(بدون عنوان)'),
+      authors: [].concat(doc.creator || []).filter(Boolean).slice(0, 4).join('، '),
+      year: Number(rawYear.slice(0, 4)) || null,
+      source: 'Internet Archive',
+      abstract: '',
+      subjects: '',
+      url: `https://archive.org/details/${id}`,
+      downloadable: Boolean(id),
+      locator: `ia:${id}`
+    };
+  });
+}
+
+/**
+ * مكتبة الكونجرس (LOC) عبر بوابتها الرسمية SRU (CQL → XML/DC) — بلا مفتاح.
+ * واجهة loc.gov JSON محجوبة بـ Cloudflare عن بعض شبكات الخوادم، أما SRU
+ * (lx2.loc.gov:210) فيستقبل النداءات كما هي — كتب ومخطوطات ووثائق تاريخية
+ * (منها مجموعة المكتبة الرقمية العالمية WDL المدمجة في LOC). حدّ SRU أقصاه 10 سجلات.
+ */
+async function searchLibraryOfCongress({ q, subject, limit }) {
+  const query = [q, subject].filter(Boolean).join(' ').trim();
+  const url = `http://lx2.loc.gov:210/lcdb?version=1.1&operation=searchRetrieve&query=${encodeURIComponent(
+    query
+  )}&maximumRecords=${Math.min(Math.max(Number(limit) || 10, 1), 10)}&recordSchema=dc`;
+  assertPublicUrl(url);
+
+  const response = await fetch(url, {
+    redirect: 'follow',
+    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+    headers: { 'user-agent': USER_AGENT, accept: 'application/xml, text/xml' }
+  });
+  if (!response.ok) {
+    const error = new Error(`مكتبة الكونجرس ردّت بحالة ${response.status}.`);
+    error.code = 'SOURCE_HTTP';
+    throw error;
+  }
+
+  const xml = Buffer.from(await response.arrayBuffer()).toString('utf8');
+  return xml
+    .split('<srw_dc:dc')
+    .slice(1)
+    .map((chunk) => {
+      const grabAll = (tag) =>
+        [...chunk.matchAll(new RegExp(`<(?:dc:)?${tag}[^>]*>([\\s\\S]*?)</(?:dc:)?${tag}>`, 'g'))]
+          .map((match) => stripHtml(match[1]).trim())
+          .filter(Boolean);
+      const title = (grabAll('title')[0] || '(بدون عنوان)').replace(/\s*\/\s*$/, '');
+      const date = grabAll('date')[0] || '';
+      const ids = grabAll('identifier');
+      const httpId = ids.find((value) => /^https?:\/\//.test(value)) || '';
+      const lccn = ids.find((value) => /^[\d-]{4,}$/.test(value)) || '';
+      const permalink = httpId || (lccn ? `https://lccn.loc.gov/${lccn}` : '');
+      return {
+        key: permalink || title,
+        title,
+        authors: grabAll('creator').slice(0, 4).join('، '),
+        year: Number((date.match(/\d{4}/) || [])[0]) || null,
+        source: 'Library of Congress',
+        abstract: grabAll('description')[0] || '',
+        subjects: grabAll('subject').slice(0, 6).join(' · '),
+        url: permalink || `https://www.loc.gov/search/?q=${encodeURIComponent(title)}`,
+        downloadable: false,
+        locator: permalink
+      };
+    });
+}
+
+/**
+ * بحث في CORE — أكبر تجميع عالمي للأبحاث مفتوحة الوصول (نصوص كاملة).
+ * مجاني بمفتاح بسيط (تسجيل مجاني في core.ac.uk/kb) — بلا مفتاح يعود
+ * رسالة عربية واضحة بدل صمت، ونتائجه كلها مفتوحة الوصول أصلاً.
+ */
+async function searchCore({ q, subject, limit, years = {} }) {
+  const apiKey = String(process.env.CORE_API_KEY || '').trim();
+  if (!apiKey) {
+    const error = new Error(
+      'مصدر CORE يحتاج مفتاحاً مجانياً — سجّل في core.ac.uk/kb ثم ضع CORE_API_KEY في إعدادات الخادم.'
+    );
+    error.code = 'SOURCE_HTTP';
+    throw error;
+  }
+
+  const query = [q, subject].filter(Boolean).join(' ').trim();
+  const params = new URLSearchParams({
+    q: query,
+    limit: String(Math.min(Math.max(Number(limit) || 20, 1), 25))
+  });
+  if (years.from) params.set('yearFrom', String(years.from));
+  if (years.to) params.set('yearTo', String(years.to));
+
+  const response = await fetch(`https://api.core.ac.uk/v3/search/works?${params.toString()}`, {
+    redirect: 'follow',
+    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+    headers: { 'user-agent': USER_AGENT, accept: 'application/json', authorization: `Bearer ${apiKey}` }
+  });
+  if (!response.ok) {
+    const error = new Error(`CORE ردّ بحالة ${response.status}.`);
+    error.code = 'SOURCE_HTTP';
+    throw error;
+  }
+
+  const data = JSON.parse(Buffer.from(await response.arrayBuffer()).toString('utf8'));
+  return (Array.isArray(data?.result) ? data.result : []).map((paper) => {
+    const doi = String(paper.doi || '').replace(/^https?:\/\/(dx\.)?doi\.org\//i, '');
+    const pdfUrl = String(paper.downloadUrl || '');
+    const link = pdfUrl || (doi ? `https://doi.org/${doi}` : '');
+    return {
+      key: doi || String(paper.id || ''),
+      title: stripHtml(paper.title || '(بدون عنوان)'),
+      authors: []
+        .concat(paper.authors || [])
+        .map((author) => (typeof author === 'string' ? author : author?.name))
+        .filter(Boolean)
+        .slice(0, 6)
+        .join('، '),
+      year: Number(paper.yearPublished) || null,
+      source: 'CORE',
+      abstract: stripHtml(paper.abstract || '').slice(0, 5000),
+      subjects: '',
+      url: link || `https://core.ac.uk/search/?q=${encodeURIComponent(query)}`,
+      pdfUrl,
+      doi,
+      venue: '',
+      publisher: '',
+      type: 'article',
+      volume: '',
+      issue: '',
+      pages: '',
+      citations: Number(paper.citationCount || 0),
+      isOpenAccess: true,
+      downloadable: Boolean(pdfUrl),
+      locator: pdfUrl || doi
     };
   });
 }
@@ -825,7 +1038,11 @@ const SEARCHERS = {
   europepmc: (args) => searchEuropePmc(args),
   openlibrary: (args) => searchOpenLibrary(args),
   doaj: (args) => searchDoaj(args),
-  zenodo: (args) => searchZenodo(args)
+  zenodo: (args) => searchZenodo(args),
+  // كتب وأرشيفات: Internet Archive · مكتبة الكونجرس (SRU) · CORE (نصوص مفتوحة)
+  internetarchive: (args) => searchInternetArchive(args),
+  loc: (args) => searchLibraryOfCongress(args),
+  core: (args) => searchCore(args)
 };
 
 /** المصادر التي بحثها Crossref بـ DOI (تعطي بيانات استشهاد كاملة + رابط ناشر). */
@@ -1192,6 +1409,19 @@ export async function downloadExternalFile({ source, locator } = {}) {
       return await downloadDirectPdf(loc);
     }
     if (id === 'zenodo') return await downloadFromZenodo(loc);
+    if (id === 'internetarchive') {
+      if (!loc.startsWith('ia:')) {
+        return { buffer: null, note: 'العنصر بلا ملف مباشر — البيانات والرابط فقط.' };
+      }
+      return await downloadFromArchiveOrg(loc.slice(3));
+    }
+    if (id === 'loc') {
+      return { buffer: null, note: 'سجل ببليوغرافي من مكتبة الكونجرس — البيانات والرابط الدائم فقط.' };
+    }
+    if (id === 'core') {
+      if (/^https?:\/\//i.test(loc)) return await downloadDirectPdf(loc);
+      return { buffer: null, note: 'لا يوجد PDF مفتوح لهذه النتيجة — البيانات والرابط فقط.' };
+    }
 
     // المصادر البحثية الحديثة: locator إمّا رابط PDF مباشر أو DOI (نبحث عن نسخة مفتوحة).
     if (CROSSREF_BASED.has(id) || ['openalex', 'semantic', 'arxiv', 'europepmc'].includes(id)) {

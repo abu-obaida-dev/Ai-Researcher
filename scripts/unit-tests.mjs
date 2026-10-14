@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { chargeUsage, estimateReservation, estimateTokens, normalizeUsage } from '../src/services/tokens.js';
 import { normalizeCurrency } from '../src/services/payments.js';
 import { buildSearchQuery, extractTopic, isTopicSpecific, normalizeArabic, relevanceScore } from '../src/services/literature.js';
-import { LIBRARY_SOURCES, normalizeYearRange } from '../src/services/library-sources.js';
+import { LIBRARY_SOURCES, SOURCE_GROUPS, normalizeYearRange, sourceGroup } from '../src/services/library-sources.js';
 import { saveSupportWhatsapp } from '../src/services/settings.js';
 import { assertContentMatchesExtension, contentMatchesExtension } from '../src/services/upload-guard.js';
 import { safeEqual } from '../src/middleware/security.js';
@@ -126,11 +126,16 @@ test('normalizeYearRange: فلتر سنة الإصدار — قلب المعكو
   assert.deepEqual(normalizeYearRange('2010', '2024'), { from: 2010, to: 2024 });
 });
 
-test('LIBRARY_SOURCES: الناشرون الجدد مسجّلون ببيانات مكتملة', () => {
-  for (const id of ['springer', 'wiley', 'tandf', 'sage', 'unpaywall']) {
+test('LIBRARY_SOURCES: كل المصدر مسجّل ببيانات مكتملة ومجموعة معروفة', () => {
+  for (const id of ['springer', 'wiley', 'tandf', 'sage', 'unpaywall', 'internetarchive', 'loc', 'core']) {
     const entry = LIBRARY_SOURCES.find((item) => item.id === id);
     assert.ok(entry, `المصدر مفقود: ${id}`);
     assert.ok(entry.label && entry.hint, `بيانات ناقصة: ${id}`);
+  }
+  // كل المصدر (بما فيه القديمة) له مجموعة في SOURCE_GROUPS — وإلا اختفى من القائمة المنسدلة
+  for (const item of LIBRARY_SOURCES) {
+    const group = sourceGroup(item.id);
+    assert.ok(SOURCE_GROUPS.some((entry) => entry.id === group), `مجموعة ناقصة: ${item.id}`);
   }
 });
 
