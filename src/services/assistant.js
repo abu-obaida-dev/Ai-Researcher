@@ -27,9 +27,10 @@ import {
   ASSISTANT_TASK_LABELS,
   FILE_TEXT_LIMIT,
   buildAssistantPrompt,
-  detectAssistantTask
+  detectAssistantTask,
+  isExplicitSearchRequest
 } from './assistant-prompt.js';
-import { mergeItems, searchLiterature, searchPlatformLibrary } from './literature.js';
+import { extractTopic, mergeItems, searchLiterature, searchPlatformLibrary } from './literature.js';
 
 const HISTORY_LIMIT = 20;
 const PROMPT_LIMIT = 8000;
@@ -59,6 +60,84 @@ export const ASSISTANT_SOURCE_ORDER = [
 /** دفعات المصادر (كل دفعة ≤ ٦ حتى تمرّ من searchLiterature كما هي). */
 export function assistantSourceBatches() {
   return [ASSISTANT_SOURCE_ORDER.slice(0, 5), ASSISTANT_SOURCE_ORDER.slice(5)];
+}
+
+/** عبارات عربية تعريفية تسبق العبارة الإنجليزية المقترحة — تُحذف عند الاشتقاق. */
+const QUERY_INTRO_PHRASES = /(?:استخدم|استخدام|باستخدام|جرب|جربي|لنبحث|لنبدأ|مثل|مثلاً|مثلا|العبارة|عبارة|كالتالي|التالي|التالية|التالى|وهي|وهو)\s*:?\s*$/i;
+
+/**
+ * يستخرج العبارة الإنجليزية الأخيرة التي اقترحها المعلم في سجل المحادثة:
+ * سطور مرقمة أو مقتبسة إنجليزية (≥ كلمتين) — الأحدث أولاً.
+ * مثال: «1. **AI in Computer Science Education** (الذكاء…)» ⇒ العبارة الإنجليزية.
+ */
+export function extractLastSuggestedQuery(history = []) {
+  const candidates = [];
+  for (const message of [...(history || [])].reverse()) {
+    if (message?.role !== 'assistant') continue;
+    const text = String(message?.content || '');
+    if (!/بحث|عبارة|عباره|كلمات مفتاحية|مقترحة|مقترح|keywords?/i.test(text)) continue;
+    for (const line of text.split('\n')) {
+      // سطر مرقم: "1. **AI in CS Education** (…)" أو "1- …" أو "• …"
+      const numbered = line.match(/^\s*(?:\d+[.)\-:]|[-•*])\s*\*{0,2}\s*([A-Za-z][A-Za-z0-9\s\-&:'",/()]{3,80})/);
+      if (numbered) {
+        const cleaned = numbered[1].replace(QUERY_INTRO_PHRASES, '').replace(/\s*\(.*$/, '').trim();
+        if (cleaned.split(/\s+/).length >= 2) candidates.push(cleaned.slice(0, 80));
+        continue;
+      }
+      // سطر مقتبس: **"Intelligent Tutoring Systems"** أو "…"
+      const quoted = line.match(/["*“”']([A-Za-z][A-Za-z0-9\s\-&:'",/()]{5,90})["*“”']/);
+      if (quoted && quoted[1].split(/\s+/).length >= 2) candidates.push(quoted[1].trim().slice(0, 80));
+    }
+    if (candidates.length) break;
+  }
+  return candidates[0] || '';
+}
+
+/**
+ * يشتق عبارة البحث من سجل المحادثة عند المتابعة («نعم»، «الأولى»، «2»…):
+ * (1) اختيار مرقم ⇒ العبارة المقترحة بذلك الرقم ⇒ (2) آخر عبارة مقترحة
+ * ⇒ (3) آخر موضوع عربي سأل عنه الباحث.
+ */
+export function extractQueryFromHistory(history = []) {
+  const list = [...(history || [])];
+  const lastUser = [...list].reverse().find((message) => message?.role === 'user');
+  const userText = String(lastUser?.content || '').trim();
+
+  // (1) اختيار مرقم صريح: «الأولى/الثانية/الثالثة» أو «1/2/3»
+  const pickMatch = userText.match(
+    /^\s*(?:ال)?(?:أولى|اولى|اول|أول|1|١)(?:ة|ه)?\b|^\s*(?:ال)?(?:ثانية|ثانيه|ثاني|2|٢)\b|^\s*(?:ال)?(?:ثالثة|ثالثه|ثالث|3|٣)\b/
+  );
+  if (pickMatch) {
+    const index = /ثان|2|٢/.test(pickMatch[0]) ? 1 : /ثال|3|٣/.test(pickMatch[0]) ? 2 : 0;
+    const ordered = [];
+    for (const message of [...list].reverse()) {
+      if (message?.role !== 'assistant') continue;
+      const text = String(message?.content || '');
+      if (!/بحث|عبارة|عباره|كلمات مفتاحية|مقترحة|مقترح/i.test(text)) continue;
+      for (const line of text.split('\n')) {
+        const numbered = line.match(/^\s*(?:\d+[.)\-:]|[-•*])\s*\*{0,2}\s*([A-Za-z][A-Za-z0-9\s\-&:'",/()]{3,80})/);
+        if (numbered) {
+          const cleaned = numbered[1].replace(QUERY_INTRO_PHRASES, '').replace(/\s*\(.*$/, '').trim();
+          if (cleaned.split(/\s+/).length >= 2) ordered.push(cleaned.slice(0, 80));
+        }
+      }
+      if (ordered.length) break;
+    }
+    if (ordered[index]) return ordered[index];
+  }
+
+  // (2) آخر عبارة اقترحها المعلم
+  const suggested = extractLastSuggestedQuery(list);
+  if (suggested) return suggested;
+
+  // (3) آخر موضوع عربي من أسئلة الباحث السابقة
+  for (const message of [...list].reverse()) {
+    if (message?.role !== 'user') continue;
+    const topic = extractTopic(String(message?.content || ''));
+    if (topic && topic.length >= 3 && !isExplicitSearchRequest(message?.content || '')) return topic.slice(0, 80);
+    if (topic && topic.length >= 3) return topic.slice(0, 80);
+  }
+  return '';
 }
 
 /** تنظيف بسيط لنص الباحث (المعلم بلا نظام ضربات). */
@@ -262,6 +341,7 @@ function referencesBlock(refs) {
 
 /* ------------------------------ البحث ------------------------------ */
 
+
 /**
  * طبقة البحث: **كل** المصادر بالترتيب (لا مصدر واحد) + مكتبة المنصة أولاً
  * (عناصرها تُقرأ وتُحمَّل داخل المنصة فوراً). لا ترمي أبداً — ترجع ما وصل.
@@ -359,16 +439,76 @@ export async function askAssistant({ userId, prompt, conversationId = null, file
   // ١) الملفات المرفقة + مراجع الباحث المحدّدة + كشف المهمة
   const files = await loadFileTexts(userId, fileIds);
   const refs = await loadReferenceTexts(userId, refIds);
-  const task = detectAssistantTask({ question, hasFiles: files.length > 0 || refs.length > 0 });
+  const historyForTask = (conversation?.messages || [])
+    .slice(-HISTORY_LIMIT)
+    .map((message) => ({ role: message.role === 'assistant' ? 'assistant' : 'user', content: message.content }));
+  const task = detectAssistantTask({ question, hasFiles: files.length > 0 || refs.length > 0, history: historyForTask });
 
   // ٢) في التلخيص: طبقة البحث بالكود تجلب النتائج من كل المصادر بالترتيب
   let sources = null;
+  let searchQuery = '';
+  let queryOrigin = '';
   if (task === ASSISTANT_TASKS.summarize) {
-    sources = await assistantSearch(question, {
+    // (1) طلب صريح جديد ⇒ موضوع الرسالة ⇒ (2) متابعة ⇒ آخر عبارة مقترحة/آخر استعلام
+    // ⇒ (3) عنوان/تخصص الملف ⇒ (4) سياق السجل.
+    const explicit = isExplicitSearchRequest(question) ? extractTopic(question) : '';
+    if (explicit && explicit.length >= 3) {
+      searchQuery = explicit.slice(0, 80);
+      queryOrigin = 'message';
+    } else {
+      const savedQuery = String(conversation?.last_query || '').trim();
+      const fromHistory = extractQueryFromHistory([...historyForTask, { role: 'user', content: question }]);
+      if (savedQuery) {
+        searchQuery = savedQuery.slice(0, 80);
+        queryOrigin = 'last_query';
+      } else if (fromHistory) {
+        searchQuery = fromHistory;
+        queryOrigin = 'history';
+      } else {
+        const cleanTitle = String(profile?.research_title || '').trim();
+        const cleanField = String(profile?.research_field || '').trim();
+        searchQuery = (cleanTitle || cleanField || extractTopic(historyForTask.map((m) => m.content).join('\n'))).slice(0, 80);
+        queryOrigin = cleanTitle || cleanField ? 'profile' : 'history';
+      }
+    }
+    sources = await assistantSearch(searchQuery, {
       field: String(profile?.research_field || '').slice(0, 80),
       userId,
       limit: 6
     });
+  }
+
+  // ٢-مكرر) حفظ سياق البحث للمتابعة التالية + كبح هلوسة «سأبحث الآن»
+  let noResultsGuard = '';
+  if (task === ASSISTANT_TASKS.summarize && sources && !sources.items.length && !sources.libraryItems.length) {
+    const cleanField = String(profile?.research_field || '').trim();
+    noResultsGuard = [
+      '',
+      '== تنبيه بحث: لا نتائج حقيقية ==',
+      `بحثنا فعلاً في مكتبة المنصة وفي ${sources.sourcesTried.length} قواعد خارجية عن «${searchQuery}» ولم نجد شيئاً مطابقاً — قلها بصراحة حرفياً: «بحثنا فعلاً ولم نجد نتائج مطابقة»، ثم اقترح 3 عبارات إنجليزية بديلة قصيرة (كل واحدة ≤ 6 كلمات) مرتبطة بتخصص الباحث (${cleanField || 'تخصصه'}).`,
+      queryOrigin === 'message'
+        ? 'لا تكتب «سأبحث» ولا «انتظر النتائج»: اطلب منه اختيار عبارة وسنبحث في الرسالة التالية.'
+        : 'هذه نتيجة بحث فعلي أُجري الآن على متابعته — لا تقل «سأبحث»، بل اعرض النتيجة (أو غيابها) مباشرة.'
+    ].join('\n');
+    try {
+      await pool.query('UPDATE assistant_conversations SET last_query = $2, last_task = $3 WHERE id = $1', [
+        conversation.id,
+        searchQuery.slice(0, 255),
+        task
+      ]);
+    } catch {
+      // قاعدة قديمة بلا العمودين ⇒ المتابعة تعمل عبر السجل وحده.
+    }
+  } else if (task === ASSISTANT_TASKS.summarize && sources) {
+    try {
+      await pool.query('UPDATE assistant_conversations SET last_query = $2, last_task = $3 WHERE id = $1', [
+        conversation.id,
+        searchQuery.slice(0, 255),
+        task
+      ]);
+    } catch {
+      // قاعدة قديمة بلا العمودين ⇒ المتابعة تعمل عبر السجل وحده.
+    }
   }
 
   // ٣) بناء الموجّه والرسائل
@@ -384,7 +524,7 @@ export async function askAssistant({ userId, prompt, conversationId = null, file
     .slice(-HISTORY_LIMIT)
     .map((message) => ({ role: message.role === 'assistant' ? 'assistant' : 'user', content: message.content }));
 
-  const userContent = `${question}${filesBlock(files)}${referencesBlock(refs)}${sources ? sourcesBlock(sources) : ''}`;
+  const userContent = `${question}${filesBlock(files)}${referencesBlock(refs)}${sources ? sourcesBlock(sources) : ''}${noResultsGuard}`;
   const messages = [...history, { role: 'user', content: userContent }];
 
   const replyCap = ASSISTANT_REPLY_CAPS[task] || ASSISTANT_REPLY_CAPS.teach;

@@ -46,17 +46,64 @@ export const FILE_TEXT_LIMIT = 10000;
  * - ترجمة: كلمة ترجم/ترجمة/translate.
  * - تلخيص/بحث: لخّص/ابحث/مراجع/مصادر/بحث علمي…
  * - غير ذلك: تعليم (المهمة الافتراضية).
+ *
+ * history = آخر رسائل المحادثة (لالتقاط المتابعة): ردّ قصير بلا كلمات بحث
+ * (نعم، الأولى، رقم 1/2/3، اخترت كذا…) بعد مهمة تلخيص ⇒ متابعة تلخيص لا تعليم.
  */
-export function detectAssistantTask({ question = '', hasFiles = false } = {}) {
-  const raw = String(question || '');
+/** نمط البحث الصريح — يُستخدم أيضاً في assistant.js لتمييز المتابعة عن الطلب الجديد. */
+export const SUMMARIZE_PATTERN =
+  /(لخّص|لخص|تلخيص|ملخّص|ابحث|(?<!\p{L})بحث(?![\p{L}ي])|مراجع|مصادر|أوراق بحثية|اوراق بحثية|مقالات|دراسات|summar|search|papers?|references?|sources?)/iu;
+
+/** هل تحمل الرسالة طلب بحث صريحاً (لا متابعة)؟ */
+export function isExplicitSearchRequest(text = '') {
+  return SUMMARIZE_PATTERN.test(String(text || ''));
+}
+
+/** بداية موافقة: «نعم…»، «تمام…»، «ok…» — تُقبل مع بقية بعدها. */
+const AGREE_START = /^(نعم|ايوه|ايوا|أيوه|أيوا|أجل|تمام|موافق|اوك|أوك|ok|yes|okay)\b/i;
+
+/** طلب إعادة البحث: «أعد البحث»، «كرر البحث»، «ابحث باستخدام…». */
+const REPEAT_SEARCH = /(أعد|اعد|أعيد|اعيد|كرر|ابحث|أبحث)\s*(البحث|بحث|عنه|عنها|باستخدام|بـ|مرة|مره)/i;
+
+/** كلمة اختيار (أولى/ثانية/1/2…) في أي موضع — بحدود حروف صحيحة. */
+const PICK_WORD =
+  /(?<!\p{L})(?:ال)?(?:أولى|اولى|اول|أول)(?:ة|ه)?(?!\p{L})|(?<!\p{L})(?:ال)?(?:ثانية|ثانيه|ثاني|2|٢)(?!\p{L})|(?<!\p{L})(?:ال)?(?:ثالثة|ثالثه|ثالث|3|٣)(?!\p{L})|(?<!\p{L})[123١٢٣](?!\p{L})/iu;
+
+/** مؤشر رقم الاختيار: 0/1/2 — أو -1 إن لم توجد كلمة اختيار. */
+export function pickIndex(text = '') {
+  const raw = String(text || '');
+  if (/(?<!\p{L})(?:ال)?(?:ثالثة|ثالثه|ثالث|3|٣)(?!\p{L})/iu.test(raw)) return 2;
+  if (/(?<!\p{L})(?:ال)?(?:ثانية|ثانيه|ثاني|2|٢)(?!\p{L})/iu.test(raw)) return 1;
+  if (PICK_WORD.test(raw)) return 0;
+  return -1;
+}
+
+/** سؤال جديد صريح (أداة استفهام أو علامة ؟) — ليس متابعة بحث أبداً. */
+const QUESTION_GUARD = /؟|\?|^(ما|ماذا|ماهي|كيف|لماذا|لم|هل|اشرح|اشرحي|علمني|وضح|وضحي|عرف|عرّف|متى|أين|اين|كم|ليه|ازاي|إزاي)\b/i;
+
+/** سياق بحث: آخر رد للمعلم يعرض نتائج أو يقترح عبارات/مصادر. */
+const SEARCH_CONTEXT = /(نتائج|مصادر|مراجع|عبارة|عباره|كلمات مفتاحية|مقترح)/i;
+
+export function detectAssistantTask({ question = '', hasFiles = false, history = [] } = {}) {
+  const raw = String(question || '').trim();
 
   if (/(ترجم|ترجمة|ترجمه|translate|translation)/i.test(raw)) return ASSISTANT_TASKS.translate;
-  if (
-    /(لخّص|لخص|تلخيص|ملخّص|ابحث|بحث لي|مراجع|مصادر|أوراق بحثية|اوراق بحثية|مقالات|دراسات|summar|search|papers?|references?|sources?)/i.test(
-      raw
-    )
-  ) {
-    return ASSISTANT_TASKS.summarize;
+  if (SUMMARIZE_PATTERN.test(raw)) return ASSISTANT_TASKS.summarize;
+
+  // سؤال تعليمي جديد يسأل عن شيء (أداة استفهام/؟) ⇒ تعليم دائماً — لا متابعة.
+  if (QUESTION_GUARD.test(raw)) return ASSISTANT_TASKS.teach;
+
+  // متابعة بحث: (موافقة في البداية أو طلب إعادة بحث أو كلمة اختيار)
+  // + آخر رد للمعلم كان في سياق بحث/نتائج/عبارات.
+  if (raw && raw.split(/\s+/).filter(Boolean).length <= 12 && Array.isArray(history) && history.length) {
+    const lastAssistant = [...history].reverse().find((message) => message?.role === 'assistant');
+    const lastText = String(lastAssistant?.content || '');
+    if (
+      SEARCH_CONTEXT.test(lastText) &&
+      (AGREE_START.test(raw) || REPEAT_SEARCH.test(raw) || pickIndex(raw) >= 0)
+    ) {
+      return ASSISTANT_TASKS.summarize;
+    }
   }
 
   return ASSISTANT_TASKS.teach;

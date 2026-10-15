@@ -21,9 +21,16 @@ import { buildSystemPrompt } from '../src/services/supervisor-prompt.js';
 import { evaluateStepCompletion, specForStep } from '../src/services/step-review.js';
 import {
   ASSISTANT_SOURCE_ORDER,
-  assistantSourceBatches
+  assistantSourceBatches,
+  extractLastSuggestedQuery,
+  extractQueryFromHistory
 } from '../src/services/assistant.js';
-import { ASSISTANT_REPLY_CAPS, buildAssistantPrompt, detectAssistantTask } from '../src/services/assistant-prompt.js';
+import {
+  ASSISTANT_REPLY_CAPS,
+  buildAssistantPrompt,
+  detectAssistantTask,
+  isExplicitSearchRequest
+} from '../src/services/assistant-prompt.js';
 import { isUuid } from '../src/constants.js';
 
 /* ------------------------------- النقاط ------------------------------- */
@@ -573,6 +580,39 @@ test('detectAssistantTask: كشف حتمي للمهمة (تعليم/ترجمة/�
   assert.equal(detectAssistantTask({ question: 'ابحث لي في المكتبة عن مصادر' }), 'summarize');
   // الترجمة تتقدّم على التلخيص لو جاءتا معاً (الملف هو المقصد)
   assert.equal(detectAssistantTask({ question: 'ترجم ولخص هذا الملف' }), 'translate');
+});
+
+test('متابعة البحث عند المعلم: «نعم/الأولى» بعد اقتراح عبارات ⇒ تلخيص لا تعليم', () => {
+  const history = [
+    { role: 'user', content: 'ابحث في المكتبة ولخص لي أهم ما يتعلق بتخصصي' },
+    {
+      role: 'assistant',
+      content: 'لم نجد نتائج مطابقة. كلمات مفتاحية مقترحة للبحث:\n1. **AI in Computer Science Education** (الذكاء في تعليم الحاسب)\n2. **Machine Learning for CS Students** (تعلم الآلة للطلاب)\n3. **Intelligent Tutoring Systems in CS** (أنظمة التدريس الذكية)'
+    }
+  ];
+  assert.equal(detectAssistantTask({ question: 'نعم اعد البحث باستخدام اول كلمه', history }), 'summarize');
+  assert.equal(detectAssistantTask({ question: 'الأولى', history }), 'summarize');
+  assert.equal(detectAssistantTask({ question: '2', history }), 'summarize');
+  // موضوع جديد صريح ⇒ تلخيص عبر الرسالة نفسها لا عبر السجل
+  assert.ok(isExplicitSearchRequest('ابحث عن التعلم العميق'), 'طلب صريح يُكتشف');
+  assert.ok(!isExplicitSearchRequest('نعم اعد البحث'), 'المتابعة ليست طلباً صريحاً');
+
+  // اشتقاق العبارة: الأولى ⇒ العبارة 1، «نعم» ⇒ آخر عبارة، رقم 2 ⇒ العبارة 2
+  assert.equal(
+    extractQueryFromHistory([...history, { role: 'user', content: 'نعم اعد البحث باستخدام اول كلمه' }]),
+    'AI in Computer Science Education'
+  );
+  assert.equal(
+    extractQueryFromHistory([...history, { role: 'user', content: '2' }]),
+    'Machine Learning for CS Students'
+  );
+  assert.equal(
+    extractLastSuggestedQuery(history),
+    'AI in Computer Science Education',
+    'آخر عبارة مقترحة هي الأولى ترتيباً (الأحدث في السرد)'
+  );
+  // سؤال تعليمي حقيقي بعد البحث ⇒ تعليم لا تلخيص
+  assert.equal(detectAssistantTask({ question: 'ما هو الإطار النظري؟', history }), 'teach');
 });
 
 test('buildAssistantPrompt: قواعد المعلم حسب المهمة (تفصيل للمبتدئين · أمثلة من المجال · بلا اختلاق)', () => {

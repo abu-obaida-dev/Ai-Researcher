@@ -316,6 +316,9 @@ const ASSISTANT_MESSAGES_TABLE = `
 const ASSISTANT_INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_assistant_conversations_user ON assistant_conversations(user_id);
   CREATE INDEX IF NOT EXISTS idx_assistant_messages_conversation ON assistant_messages(conversation_id);
+  -- سياق آخر بحث للمتابعة: «نعم أعد البحث بالأولى» ⇒ نفس الموضوع وآخر عبارة مقترحة.
+  ALTER TABLE assistant_conversations ADD COLUMN IF NOT EXISTS last_query VARCHAR(255);
+  ALTER TABLE assistant_conversations ADD COLUMN IF NOT EXISTS last_task VARCHAR(50);
 `;
 
 /** مراقبة مزودي الذكاء الاصطناعي (زمن الاستجابة والحالة والأخطاء). */
