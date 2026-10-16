@@ -4,7 +4,8 @@ import { escapeHtml, renderLayout } from './layout.js';
 
 /**
  * صفحة «الاشتراك والدفع» للباحث: الدفع يدوي خارج المنصة.
- * يختار باقة + طريقة دفع (مع تفاصيل التحويل) ثم يكتب رقم العملية، والإدارة تؤكّد.
+ * يختار باقة وطريقة دفع (تحويل بنكي أو كاش فقط)، ويؤكد رقمه على واتساب،
+ * والنظام يولّد كود تفعيل من 6 أرقام يرسله عبر واتساب لخدمة العملاء.
  */
 
 /** شارة حالة الطلب. */
@@ -43,7 +44,7 @@ function renderRequests(requests) {
       <p class="muted">${escapeHtml(item.methodLabel)} · ${escapeHtml(formatMoney(item.amount, item.currency))}</p>
       ${item.adminNote ? `<p class="muted">رد الإدارة: ${escapeHtml(item.adminNote)}</p>` : ''}
     </td>
-    <td>${escapeHtml(item.referenceNo || '—')}</td>
+    <td>${escapeHtml(item.referenceCode || item.referenceNo || '—')}</td>
     <td>${statusBadge(item.status)}</td>
     <td>${escapeHtml(formatDateTime(item.createdAt))}</td>
   </tr>`
@@ -51,7 +52,7 @@ function renderRequests(requests) {
     .join('');
 
   return `<table class="ref-table">
-    <thead><tr><th>الطلب</th><th>رقم العملية</th><th>الحالة</th><th>التاريخ</th></tr></thead>
+    <thead><tr><th>الطلب</th><th>رقم التفعيل</th><th>الحالة</th><th>التاريخ</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
@@ -63,6 +64,7 @@ export function renderPaymentsPage({
   methods = [],
   requests = [],
   currency = 'LYD',
+  whatsapp = '',
   selectedPlan = '',
   flash = null
 }) {
@@ -90,16 +92,13 @@ export function renderPaymentsPage({
         <div class="source-picker">${methods.map((method, index) => renderMethod(method, currency, index)).join('')}</div>
       </div>
       <div class="field">
-        <label for="pay-ref">رقم عملية التحويل / رقم الإيصال *</label>
-        <input type="text" id="pay-ref" name="reference_no" required maxlength="120" placeholder="مثال: TRX-2024-8891" />
-      </div>
-      <div class="field">
-        <label for="pay-note">ملاحظة (اختياري)</label>
-        <textarea id="pay-note" name="note" rows="2" maxlength="1000" placeholder="اكتب أي تفاصيل تساعد الإدارة في التأكيد."></textarea>
+        <label for="pay-whatsapp">رقم الواتساب للتواصل *</label>
+        <input type="tel" id="pay-whatsapp" name="whatsapp_number" required value="${escapeHtml(whatsapp)}" maxlength="20" placeholder="مثال: 0912345678" />
+        <span class="field-hint">سيظهر لك كود تفعيل من 6 أرقام بعد الإرسال — أرسله عبر واتساب لخدمة العملاء.</span>
       </div>
       <div class="form-actions">
         <button class="btn btn-primary" type="submit">${icon('coins', 'icon-sm')} أرسل طلب الدفع</button>
-        <span class="muted">الدفع يتم خارج المنصة، والإدارة تؤكّد الطلب بعد مراجعة التحويل.</span>
+        <span class="muted">الدفع يتم خارج المنصة (تحويل بنكي أو كاش)، والإدارة تؤكّد الطلب وتفعّل باقتك يدوياً.</span>
       </div>
     </form>`
     : '<div class="empty">لا توجد طرق دفع مفعّلة حالياً — راجع الإدارة.</div>';
@@ -114,10 +113,10 @@ export function renderPaymentsPage({
     <section class="card">
       <div class="lib-section-head"><h2>كيف يتم الدفع؟</h2></div>
       <ol class="muted">
-        <li>اختر الباقة وطريقة الدفع، واقرأ تفاصيل التحويل (رقم الحساب أو المحفظة).</li>
-        <li>حوّل المبلغ ${escapeHtml(formatMoney(0, currency).split(' ')[1] || currency)} خارج المنصة.</li>
-        <li>اكتب رقم العملية وأرسل الطلب.</li>
-        <li>الإدارة تؤكّد الطلب، فتُفعَّل باقتك وتضاف نقاطها فوراً.</li>
+        <li>اختر الباقة وطريقة الدفع (تحويل بنكي أو كاش)، وتحقق من رقم الواتساب الظاهر أعلاه.</li>
+        <li>سدد المبلغ خارج المنصة وفقًا لطريقة الدفع المختارة.</li>
+        <li>أرسل الطلب — سيعطيك النظام كود تفعيل من 6 أرقام.</li>
+        <li>أرسل الكود عبر واتساب لخدمة العملاء لتفعيل باقتك وإضافة نقاطها.</li>
       </ol>
     </section>
   </div>

@@ -62,6 +62,7 @@ const PROFILES_TABLE = `
     citation_style VARCHAR(50) DEFAULT 'apa7',
     supervisor_name VARCHAR(255),
     supervisor_notes TEXT,
+    whatsapp_number VARCHAR(20),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
   );
@@ -469,6 +470,8 @@ const PAYMENT_REQUESTS_TABLE = `
     amount DECIMAL(10,2) NOT NULL DEFAULT 0,
     currency VARCHAR(10) NOT NULL DEFAULT 'LYD',
     reference_no VARCHAR(120),
+    reference_code VARCHAR(6),
+    whatsapp_number VARCHAR(20),
     note TEXT,
     status VARCHAR(20) NOT NULL DEFAULT 'pending',
     admin_note TEXT,
@@ -483,6 +486,7 @@ const PAYMENT_REQUESTS_TABLE = `
 const PAYMENT_INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_payment_requests_user ON payment_requests (user_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_payment_requests_status ON payment_requests (status, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_payment_requests_reference_code ON payment_requests (reference_code);
 `;
 
 /**
@@ -639,6 +643,14 @@ const PLANS_EXTRA_COLUMNS = `
   ALTER TABLE plans ADD COLUMN IF NOT EXISTS storage_mb INTEGER NOT NULL DEFAULT 500;
 `;
 
+/** ترحيل آمن لجدول طلبات الدفع: كود التفعيل الستة أرقام ورقم الواتساب وقت الطلب. */
+const PAYMENT_REQUESTS_EXTRA_COLUMNS = `
+  ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS reference_code VARCHAR(6);
+  ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(20);
+  -- الطريقتان ثابّتتان فقط (تحويل بنكي / كاش) — لا يدير المدير طرق الدفع بعد الآن
+  UPDATE payment_methods SET is_active = false WHERE code NOT IN ('bank_transfer', 'cash_office');
+`;
+
 /** ترقية جدول الملف البحثي: بقية حقول نموذج التسجيل (onboarding). */
 const PROFILES_EXTRA_COLUMNS = `
   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS full_name VARCHAR(255);
@@ -652,6 +664,7 @@ const PROFILES_EXTRA_COLUMNS = `
   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS supervisor_name VARCHAR(255);
   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS supervisor_notes TEXT;
   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS gender VARCHAR(20);
+  ALTER TABLE profiles ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(20);
 `;
 
 /** ربط plan_code بجدول الباقات — يُضاف مرة واحدة فقط (idempotent). */
@@ -828,6 +841,7 @@ async function initializeDatabase() {
     await pool.query(USERS_EXTRA_COLUMNS);
     await pool.query(USERS_NOTIFICATIONS_COLUMN);
     await pool.query(PROFILES_EXTRA_COLUMNS);
+    await pool.query(PAYMENT_REQUESTS_EXTRA_COLUMNS);
     await pool.query(PLANS_EXTRA_COLUMNS);
     await pool.query(LIBRARY_EXTRA_COLUMNS);
     await pool.query(USERS_GOOGLE_SUB_UNIQUE);

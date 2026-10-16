@@ -4,7 +4,9 @@ import { DEFAULT_CURRENCY, DEFAULT_PAYMENT_METHODS, SITE_CURRENCIES, isUuid } fr
 /**
  * الدفع اليدوي خارج المنصة + إدارة الطلبات:
  *
- *   - الباحث يختار طريقة ويقدّم طلباً (باقة + مبلغ + رقم عملية + ملاحظة).
+ *   - الباحث يختار باقة وطريقة دفع (تحويل بنكي أو كاش فقط)، ويؤكد رقمه على واتساب.
+ *   - النظام يولّد كود تفعيل من 6 أرقام يظهر للباحث ويُرسل عبر واتساب لخدمة
+ *     العملاء لتفعيل باقته. لا رقم عملية من الباحث، ولا ملاحظات.
  *   - المدير (أو مشرف يحمل صلاحية admin:payments) يؤكّد الطلب فيُمنح الباحث
  *     باقة الطلب ونقاطها، أو يرفضه بملاحظة.
  *   - الأسعار تُقرأ من جدول plans وقت الطلب (لا يُرسل السعر من المتصفح).
@@ -12,6 +14,27 @@ import { DEFAULT_CURRENCY, DEFAULT_PAYMENT_METHODS, SITE_CURRENCIES, isUuid } fr
 
 const STATUSES = ['pending', 'confirmed', 'rejected'];
 const MAX_PENDING_PER_USER = 5;
+
+/** رقم واتساب ليبي بعد التنظيف (يُstripped الأحرف غير الأرقام و +). */
+function normalizeWhatsapp(value) {
+  return String(value || '').replace(/[^\d+]/g, '').slice(0, 20);
+}
+
+const WHATSAPP_REGEX = /^(\+?218|0)?9[124]\d{7}$/;
+
+function isValidWhatsapp(value) {
+  return WHATSAPP_REGEX.test(value);
+}
+
+/** كود تفعيل من 6 أرقام، فريد بين طلبات الدفع. */
+async function generateReferenceCode() {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const code = String(100000 + Math.floor(Math.random() * 900000));
+    const { rows } = await pool.query('SELECT 1 FROM payment_requests WHERE reference_code = $1 LIMIT 1', [code]);
+    if (!rows.length) return code;
+  }
+  throw badInput('تعذّر إنشاء كود التفعيل — أعد المحاولة.');
+}
 
 function badInput(message, code = 'BAD_INPUT') {
   const error = new Error(message);
@@ -124,12 +147,12 @@ export async function removePaymentMethod(code) {
 /**
  * تقديم طلب دفع. السعر يؤخذ من جدول plans (لا يُرسل من المتصفح)،
  * والحد الأقصى للطلبات المعلّقة يمنع التزاحم على صندوق المراجعة.
+ * يُولّد النظام كود تفعيل من 6 أرقام ويُخزّن رقم الواتساب وقت الطلب.
  */
 export async function createPaymentRequest(userId, input = {}) {
   const planCode = String(input.plan_code || '').trim().slice(0, 100);
   const methodCode = String(input.method_code || '').trim().toLowerCase().slice(0, 50);
-  const referenceNo = String(input.reference_no || '').trim().slice(0, 120);
-  const note = String(input.note || '').trim().slice(0, 1000);
+  const whatsappNumber = normalizeWhatsapp(input.whatsapp_number);
 
   const [{ rows: planRows }, methods] = await Promise.all([
     pool.query('SELECT code, title, price, tokens FROM plans WHERE code = $1 AND is_active = true', [planCode]),
@@ -141,7 +164,9 @@ export async function createPaymentRequest(userId, input = {}) {
   const method = methods.find((item) => item.code === methodCode);
   if (!method) throw badInput('طريقة الدفع غير متاحة — حدّث الصفحة.', 'BAD_METHOD');
   if (Number(plan.price) <= 0) throw badInput('هذه الباقة مجانية — لا تحتاج طلب دفع.', 'BAD_PLAN');
-  if (!referenceNo) throw badInput('اكتب رقم عملية التحويل أو رقم الإيصال.', 'BAD_REFERENCE');
+  if (!whatsappNumber || !isValidWhatsapp(whatsappNumber)) {
+    throw badInput('رقم الواتساب مطلوب (مثال: 0912345678).', 'BAD_WHATSAPP');
+  }
 
   const { rows: pending } = await pool.query(
     "SELECT count(*)::int AS c FROM payment_requests WHERE user_id = $1 AND status = 'pending'",
@@ -151,11 +176,13 @@ export async function createPaymentRequest(userId, input = {}) {
     throw badInput(`لديك ${pending[0].c} طلبات قيد المراجعة — انتظر رد الإدارة قبل إرسال طلب جديد.`, 'TOO_MANY');
   }
 
+  const referenceCode = await generateReferenceCode();
+
   const { rows } = await pool.query(
-    `INSERT INTO payment_requests (user_id, plan_code, method_code, amount, currency, reference_no, note)
+    `INSERT INTO payment_requests (user_id, plan_code, method_code, amount, currency, reference_code, whatsapp_number)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING *`,
-    [userId, plan.code, method.code, plan.price, method.currency, referenceNo, note || null]
+    [userId, plan.code, method.code, plan.price, method.currency, referenceCode, whatsappNumber]
   );
 
   return rows[0];
@@ -174,7 +201,9 @@ function normalizeRequest(row) {
     methodLabel: row.method_label || row.method_code || '—',
     amount: Number(row.amount || 0),
     currency: normalizeCurrency(row.currency),
+    referenceCode: row.reference_code || '',
     referenceNo: row.reference_no || '',
+    whatsappNumber: row.whatsapp_number || '',
     note: row.note || '',
     status: STATUSES.includes(row.status) ? row.status : 'pending',
     statusLabel: { pending: 'قيد المراجعة', confirmed: 'مؤكّد', rejected: 'مرفوض' }[row.status] || 'قيد المراجعة',
@@ -209,7 +238,7 @@ export async function listPaymentRequests({ status = 'pending', q = '', page = 1
   const current = Math.max(1, Number(page) || 1);
   const like = `%${term.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`;
   const where = `WHERE ($1 = 'all' OR pr.status = $1)
-      AND ($2 = '' OR u.email ILIKE $3 OR pr.reference_no ILIKE $3 OR p.title ILIKE $3)`;
+      AND ($2 = '' OR u.email ILIKE $3 OR pr.reference_no ILIKE $3 OR pr.reference_code ILIKE $3 OR p.title ILIKE $3)`;
 
   const [count, rows] = await Promise.all([
     pool.query(

@@ -518,6 +518,7 @@ export function renderAdminUsers({
       <p>${escapeHtml(user.university || '—')}</p>
       <p class="muted">${escapeHtml(user.research_field || '—')}</p>
       ${user.degree_level ? `<p class="muted">${escapeHtml(user.degree_level)}</p>` : ''}
+      ${user.whatsapp_number ? `<p class="muted">${escapeHtml(user.whatsapp_number)}</p>` : ''}
     </td>
     <td><span class="badge badge-plan">${escapeHtml(user.plan_code || 'بدون باقة')}</span></td>
     <td>
@@ -868,7 +869,6 @@ export function renderAdminSettings({
   voiceMale = '',
   voiceFemale = '',
   currency = 'LYD',
-  methods = [],
   saved = false,
   error = '',
   adminToken = '',
@@ -907,37 +907,19 @@ export function renderAdminSettings({
         .join('')
     : '<tr><td colspan="4" class="muted">لا مشرفين بعد — أضف بريد مشرف من النموذج بالأسفل.</td></tr>';
 
-  // طرق الدفع + عملة الموقع: يحددها المدير، وتظهر للباحث في صفحة الاشتراك.
+  // عملة الموقع: تحددها الإدارة، وتظهر في كل الأسعار.
   const currencyOptions = SITE_CURRENCIES.map(
     (item) =>
       `<option value="${escapeHtml(item.code)}"${item.code === currency ? ' selected' : ''}>${escapeHtml(item.label)} (${escapeHtml(item.symbol)})</option>`
   ).join('');
 
-  const methodRows = methods.length
-    ? methods
-        .map(
-          (method) => `<tr>
-      <td><p class="strong">${escapeHtml(method.label)}</p><p class="muted">${escapeHtml(method.code)}</p></td>
-      <td>${escapeHtml(formatMoney(0, method.currency).split(' ')[1] || method.currency)}</td>
-      <td>${escapeHtml(method.note || '—')}${method.details ? `<p class="muted">${escapeHtml(method.details)}</p>` : ''}</td>
-      <td>${method.isActive ? '<span class="badge badge-active">مفعّلة</span>' : '<span class="badge badge-off">معطّلة</span>'}</td>
-      <td class="row-actions">
-        <form method="post" action="/admin/settings/payment-methods/delete${token}">
-          <input type="hidden" name="code" value="${escapeHtml(method.code)}" />
-          <button class="btn btn-sm btn-danger" type="submit" data-confirm="حذف طريقة «${escapeHtml(
-            method.label
-          )}»؟ إن لها طلبات سابقة فستُعطَّل بدل حذفها.">حذف</button>
-        </form>
-      </td>
-    </tr>`
-        )
-        .join('')
-    : '<tr><td colspan="5" class="muted">لا طرق دفع بعد — أضف الأولى من النموذج بالأسفل.</td></tr>';
+
 
   const paymentsSection = `<div class="card mt-16">
     <div class="card-head"><h2>الدفع وطرق التحويل</h2></div>
     <p class="muted">
-      الدفع <b>يدوي خارج المنصة</b>: يحوّل الباحث المبلغ ثم يرسل رقم العملية، والإدارة تؤكّد الطلب من صفحة
+      الدفع <b>يدوي خارج المنصة</b>: يسدد الباحث المبلغ (تحويل بنكي أو كاش) ويؤكد رقمه على واتساب، ويُنشأ النظام
+      رمز تفعيل من 6 أرقام يرسله الباحث عبر واتساب لخدمة العملاء؛ تؤكّد الإدارة الطلب من صفحة
       <a href="/admin/payments">طلبات الدفع</a> فتُفعَّل باقته وتُضاف نقاطه.
     </p>
 
@@ -949,46 +931,7 @@ export function renderAdminSettings({
       <button class="btn btn-primary" type="submit">حفظ العملة</button>
     </form>
 
-    <table class="ref-table mt-16">
-      <thead><tr><th>الطريقة</th><th>العملة</th><th>التفاصيل</th><th>الحالة</th><th>إجراء</th></tr></thead>
-      <tbody>${methodRows}</tbody>
-    </table>
 
-    <form method="post" action="/admin/settings/payment-methods${token}" class="form-card mt-16">
-      <div class="field-row">
-        <div class="field">
-          <label for="pm-code">الكود (إنجليزي صغير)</label>
-          <input type="text" id="pm-code" name="code" maxlength="50" required placeholder="bank_transfer" />
-        </div>
-        <div class="field">
-          <label for="pm-label">اسم الطريقة</label>
-          <input type="text" id="pm-label" name="label" maxlength="120" required placeholder="تحويل بنكي" />
-        </div>
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label for="pm-currency">العملة</label>
-          <select id="pm-currency" name="currency">${currencyOptions}</select>
-        </div>
-        <div class="field">
-          <label for="pm-order">الترتيب</label>
-          <input type="number" id="pm-order" name="display_order" min="0" max="999" value="0" />
-        </div>
-      </div>
-      <div class="field">
-        <label for="pm-note">وصف مختصر</label>
-        <input type="text" id="pm-note" name="note" maxlength="255" placeholder="حوّل المبلغ ثم أرسل رقم العملية." />
-      </div>
-      <div class="field">
-        <label for="pm-details">تفاصيل التحويل (تظهر للباحث)</label>
-        <textarea id="pm-details" name="details" rows="3" maxlength="2000" placeholder="مثال: مصرف الجمهورية — الحساب 1234567 — IBAN: LY00 ..."></textarea>
-      </div>
-      <label class="check"><input type="checkbox" name="is_active" value="1" checked /> مفعّلة (تظهر للباحثين)</label>
-      <div class="form-actions">
-        <button class="btn btn-primary" type="submit">حفظ طريقة الدفع</button>
-        <span class="muted">نفس الكود يحدّث الطريقة بدل إنشاء نسختين.</span>
-      </div>
-    </form>
   </div>`;
 
   
@@ -1232,6 +1175,7 @@ export function renderAdminUserDetail({
       <li><b>${escapeHtml(profile.degree_level || '—')}</b><span>الدرجة العلمية</span></li>
       <li><b>${escapeHtml(profile.research_title || '—')}</b><span>عنوان البحث</span></li>
       <li><b>${escapeHtml(profile.supervisor_name || '—')}</b><span>اسم المشرف</span></li>
+      <li><b>${escapeHtml(profile.whatsapp_number || '—')}</b><span>رقم الواتساب</span></li>
     </ul>`
         : '<p class="muted">لم يُكمل الباحث ملفه البحثي بعد.</p>'
     }

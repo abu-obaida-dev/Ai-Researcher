@@ -245,6 +245,15 @@ export function renderOnboardingPage({ account, values, errors = [], profile = n
         ${choiceGrid('progress_stage', PROGRESS_LEVELS, values.progress_stage)}
       </section>
 
+      <section class="form-section">
+        <h2>رقم الواتساب</h2>
+        <p class="form-hint">رقم إلزامي للتواصل معك وللعرض في لوحة الإدارة.</p>
+        <div class="field">
+          <label for="whatsapp_number">رقم واتساب</label>
+          <input type="tel" id="whatsapp_number" name="whatsapp_number" value="${escapeHtml(values.whatsapp_number)}" placeholder="مثال: 0912345678" required />
+        </div>
+      </section>
+
       <div class="form-actions">
         <button class="btn btn-primary" type="submit">${profile ? 'حفظ التعديلات' : 'ابدأ مع المشرف الذكي'}</button>
         <span class="muted">يُحفظ الملف في خوادم المنصة ويمكنك تعديله في أي وقت.</span>

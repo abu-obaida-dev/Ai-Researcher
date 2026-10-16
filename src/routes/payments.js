@@ -2,6 +2,7 @@ import express from 'express';
 import { requireAccount } from '../middleware/auth.js';
 import { listPublicPlans } from '../services/plans.js';
 import { createPaymentRequest, listPaymentMethods, listUserPaymentRequests, siteCurrency } from '../services/payments.js';
+import { getProfile } from '../services/users.js';
 import { unreadCount } from '../services/notifications.js';
 import { rateLimit } from '../middleware/security.js';
 import { renderNotice } from '../views/layout.js';
@@ -15,28 +16,36 @@ import { renderPaymentsPage } from '../views/payments.js';
 const router = express.Router();
 
 const FLASH = {
-  sent: { type: 'ok', message: 'أُرسل طلب الدفع — الإدارة ستتأكد من التحويل وتفعّل باقتك.' },
-  empty: { type: 'error', message: 'أكمل بيانات الطلب (الباقة + طريقة الدفع + رقم العملية).' },
+  sent: { type: 'ok', message: 'أُرسل طلب الدفع — سيعرض لك النظام كود التفعيل؛ أرسله عبر واتساب لخدمة العملاء لتفعيل باقتك.' },
+  empty: { type: 'error', message: 'أكمل بيانات الطلب (الباقة + طريقة الدفع + رقم الواتساب).' },
   bad_plan: { type: 'error', message: 'الباقة المطلوبة غير متاحة.' },
   bad_method: { type: 'error', message: 'طريقة الدفع غير متاحة — حدّث الصفحة.' },
-  bad_reference: { type: 'error', message: 'اكتب رقم عملية التحويل أو رقم الإيصال.' },
+  bad_whatsapp: { type: 'error', message: 'رقم الواتساب مطلوب (مثال: 0912345678).' },
   too_many: { type: 'error', message: 'لديك طلبات كثيرة قيد المراجعة — انتظر رد الإدارة.' }
 };
 
 function flashFromQuery(query) {
   const base = FLASH[String(query.ok || query.err || '')];
   const custom = String(query.msg || '').trim();
-  return base ? (custom ? { ...base, message: `${base.message} (${custom.slice(0, 200)})` } : base) : null;
+  if (!base) return null;
+  if (query.ok === 'sent' && query.ref) {
+    return {
+      type: base.type,
+      message: `أُرسل طلب الدفع — كود التفعيل الخاص بك: ${String(query.ref).slice(0, 6)}. أرسله عبر واتساب لخدمة العملاء لتفعيل باقتك.${custom ? ` (${custom.slice(0, 200)})` : ''}`
+    };
+  }
+  return custom ? { ...base, message: `${base.message} (${custom.slice(0, 200)})` } : base;
 }
 
 router.get('/payments', requireAccount, async (req, res) => {
   try {
-    const [plans, methods, requests, currency, unread] = await Promise.all([
+    const [plans, methods, requests, currency, unread, profile] = await Promise.all([
       listPublicPlans(),
       listPaymentMethods(),
       listUserPaymentRequests(req.account.id),
       siteCurrency(),
-      unreadCount(req.account.id)
+      unreadCount(req.account.id),
+      getProfile(req.account.id)
     ]);
 
     res.type('html').send(
@@ -47,6 +56,7 @@ router.get('/payments', requireAccount, async (req, res) => {
         methods,
         requests,
         currency,
+        whatsapp: String(profile?.whatsapp_number || ''),
         selectedPlan: String(req.query.plan || '').slice(0, 100),
         flash: flashFromQuery(req.query)
       })
@@ -68,16 +78,15 @@ router.post('/payments', requireAccount, rateLimit('payments', { limit: 5, windo
   const body = req.body || {};
 
   try {
-    await createPaymentRequest(req.account.id, {
+    const request = await createPaymentRequest(req.account.id, {
       plan_code: body.plan_code,
       method_code: body.method_code,
-      reference_no: body.reference_no,
-      note: body.note
+      whatsapp_number: body.whatsapp_number
     });
-    res.redirect(303, '/payments?ok=sent');
+    res.redirect(303, `/payments?ok=sent&ref=${encodeURIComponent(String(request.reference_code || '').slice(0, 6))}`);
   } catch (error) {
     console.warn(`فشل طلب الدفع: ${error?.code || error?.message}`);
-    const key = ['BAD_PLAN', 'BAD_METHOD', 'BAD_REFERENCE', 'TOO_MANY'].includes(error?.code) ? error.code : 'empty';
+    const key = ['BAD_PLAN', 'BAD_METHOD', 'BAD_WHATSAPP', 'TOO_MANY'].includes(error?.code) ? error.code : 'empty';
     res.redirect(303, `/payments?err=${key}&msg=${encodeURIComponent(error?.message || '')}`);
   }
 });

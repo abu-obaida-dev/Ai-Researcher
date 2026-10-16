@@ -41,10 +41,7 @@ import {
 import {
   confirmPaymentRequest,
   listPaymentRequests,
-  listPaymentMethods,
-  removePaymentMethod,
   rejectPaymentRequest,
-  savePaymentMethod,
   setSiteCurrency,
   siteCurrency
 } from '../services/payments.js';
@@ -784,28 +781,6 @@ router.post('/settings/currency', requireAdminPermission('admin:settings'), asyn
   }
 });
 
-/** إضافة/تعديل طريقة دفع (الاسم، العملة، التفاصيل، الترتيب، التفعيل). */
-router.post('/settings/payment-methods', requireAdminPermission('admin:settings'), async (req, res) => {
-  const back = tokenBack(req);
-  try {
-    await savePaymentMethod(req.body || {});
-    res.redirect(302, back('/admin/settings', { saved: '1', note: 'method_saved' }));
-  } catch (error) {
-    console.warn(`فشل حفظ طريقة الدفع: ${error?.code || error?.message}`);
-    res.redirect(302, back('/admin/settings', { error: error.message || hintForDatabaseError(error) }));
-  }
-});
-
-/** حذف/تعطيل طريقة دفع (من لها طلبات تُعطَّل بدل حذفها). */
-router.post('/settings/payment-methods/delete', requireAdminPermission('admin:settings'), async (req, res) => {
-  const back = tokenBack(req);
-  try {
-    const result = await removePaymentMethod(req.body?.code);
-    res.redirect(302, back('/admin/settings', { saved: '1', note: result }));
-  } catch (error) {
-    res.redirect(302, back('/admin/settings', { error: hintForDatabaseError(error) }));
-  }
-});
 
 /* ===================== طلبات الدفع (صلاحية admin:payments) ===================== */
 
@@ -972,7 +947,7 @@ router.get('/settings', requireAdminPermission('admin:settings'), (req, res) =>
   renderPage(
     res,
     async () => {
-      const [limits, usage, supervisors, currency, methods] = await Promise.all([
+      const [limits, usage, supervisors, currency] = await Promise.all([
         storageLimits(),
         pool.query(
           `SELECT count(*)::int AS files, COALESCE(sum(size_bytes), 0)::bigint AS bytes,
@@ -981,7 +956,6 @@ router.get('/settings', requireAdminPermission('admin:settings'), (req, res) =>
         ),
         listSupervisors(),
         siteCurrency(),
-        listPaymentMethods({ includeInactive: true })
       ]);
 
       return {
@@ -993,7 +967,6 @@ router.get('/settings', requireAdminPermission('admin:settings'), (req, res) =>
         voiceMale: currentVoiceWhatsappMale(),
         voiceFemale: currentVoiceWhatsappFemale(),
         currency,
-        methods,
         saved: req.query.saved === '1',
         error: String(req.query.error || '').slice(0, 300),
         adminToken: String(req.query.token || '').slice(0, 200)

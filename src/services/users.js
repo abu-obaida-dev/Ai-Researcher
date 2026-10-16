@@ -25,7 +25,8 @@ export const DEFAULT_PROFILE = {
   methodology: '',
   citation_style: 'apa7',
   supervisor_name: '',
-  supervisor_notes: ''
+  supervisor_notes: '',
+  whatsapp_number: ''
 };
 
 /** إيميلات مديري المنصة من .env — خطة نجاة ثابتة لا يمكن حذفها من اللوحة. */
@@ -214,18 +215,20 @@ export async function saveOnboarding(userId, data) {
     data.about || '',
     data.research_stage || 'topic',
     data.methodology || '',
-    data.citation_style || 'apa7'
+    data.citation_style || 'apa7',
+    data.whatsapp_number || ''
   ];
 
   const { rows } = await pool.query(
     `INSERT INTO profiles (user_id, full_name, research_field, research_title, degree_level,
                            academic_year, university, faculty, research_interests,
-                           preferred_language, about, research_stage, methodology, citation_style, gender,
+                           preferred_language, about, research_stage, methodology, citation_style, whatsapp_number,
                            created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW())
      ON CONFLICT (user_id) DO UPDATE SET
        full_name = EXCLUDED.full_name,
        gender = EXCLUDED.gender,
+        whatsapp_number = EXCLUDED.whatsapp_number,
        research_field = EXCLUDED.research_field,
        research_title = EXCLUDED.research_title,
        degree_level = EXCLUDED.degree_level,

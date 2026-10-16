@@ -197,7 +197,8 @@ function onboardingValues(profile) {
     academic_year: profile?.academic_year || '',
     preferred_language: profile?.preferred_language || 'ar',
     citation_style: profile?.citation_style || 'apa7',
-    research_title: profile?.research_title || ''
+    research_title: profile?.research_title || '',
+    whatsapp_number: profile?.whatsapp_number || ''
   };
 }
 
@@ -217,7 +218,8 @@ function readValues(body) {
     academic_year: pick(body.academic_year, ACADEMIC_YEARS, ''),
     preferred_language: pick(body.preferred_language, PREFERRED_LANGUAGES.map((item) => item.value), 'ar'),
     citation_style: pick(body.citation_style, CITATION_STYLES.map((item) => item.value), 'apa7'),
-    research_title: text(body.research_title, 250)
+    research_title: text(body.research_title, 250),
+    whatsapp_number: text(body.whatsapp_number, 20)
   };
 }
 
@@ -229,6 +231,13 @@ function validateValues(values) {
   if (!values.research_field) errors.push('اختر تخصصك الأكاديمي.');
   if (values.research_field === 'أخرى' && !values.custom_field) errors.push('اكتب تخصصك الأكاديمي في الحقل المخصص.');
   if (!values.research_stage) errors.push('اختر ما الذي تريد إنجازه الآن.');
+
+  const wa = String(values.whatsapp_number || '').replace(/[^\d+]/g, '');
+  if (!values.whatsapp_number || !wa) {
+    errors.push('رقم الواتساب مطلوب.');
+  } else if (!/^(\+?218|0)?9[124]\d{7}$/.test(wa)) {
+    errors.push('أدخل رقم واتساب ليبي صالح (مثال: 0912345678 أو +218912345678).');
+  }
 
   return errors;
 }
@@ -271,7 +280,8 @@ router.post('/onboarding', requireAccount, async (req, res) => {
     preferred_language: values.preferred_language,
     citation_style: values.citation_style,
     research_stage: values.progress_stage || values.research_stage,
-    about: `الهدف الحالي: ${goalLabel} | حالة المشروع: ${progressLabel}`.trim()
+    about: `الهدف الحالي: ${goalLabel} | حالة المشروع: ${progressLabel}`.trim(),
+    whatsapp_number: values.whatsapp_number
   });
 
   res.redirect(302, backTarget || '/dashboard');

@@ -44,10 +44,12 @@ function requestRow(request, token) {
   </div>
   <p class="lib-meta">
     <span>${escapeHtml(request.userName || '—')}</span><span>·</span>
-    <span>${escapeHtml(request.userEmail)}</span><span>·</span>
+    <span>${escapeHtml(request.userEmail)}</span>
+    ${request.whatsappNumber ? `<span>·</span><span>واتساب: ${escapeHtml(request.whatsappNumber)}</span>` : ''}
+    <span>·</span>
     <span>${escapeHtml(formatDateTime(request.createdAt))}</span>
   </p>
-  <p class="lib-citation">رقم العملية: <b>${escapeHtml(request.referenceNo || '—')}</b> · النقاط الممنوحة: ${formatNumber(
+  <p class="lib-citation">رقم التفعيل: <b>${escapeHtml(request.referenceCode || '—')}</b>${request.referenceNo ? ` · رقم العملية: ${escapeHtml(request.referenceNo)}` : ''} · النقاط الممنوحة: ${formatNumber(
     request.planTokens
   )}</p>
   ${request.note ? `<p class="lib-abs">ملاحظة الباحث: ${escapeHtml(request.note)}</p>` : ''}
@@ -118,7 +120,7 @@ export function renderAdminPayments({
       <input type="hidden" name="status" value="${escapeHtml(status)}" />
       <div class="field">
         <label for="pay-q">بحث</label>
-        <input type="search" id="pay-q" name="q" value="${escapeHtml(q)}" placeholder="بريد الباحث، رقم العملية، أو اسم الباقة" />
+        <input type="search" id="pay-q" name="q" value="${escapeHtml(q)}" placeholder="بريد الباحث، رمز التفعيل (6 أرقام)، رقم العملية، أو اسم الباقة" />
       </div>
       <button class="btn btn-primary" type="submit">${icon('searchCheck', 'icon-sm')} بحث</button>
     </form>
