@@ -93,8 +93,8 @@ export function renderPaymentsPage({
       </div>
       <div class="field">
         <label for="pay-whatsapp">رقم الواتساب للتواصل *</label>
-        <input type="tel" id="pay-whatsapp" name="whatsapp_number" required value="${escapeHtml(whatsapp)}" maxlength="20" placeholder="مثال: 0912345678" />
-        <span class="field-hint">سيظهر لك كود تفعيل من 6 أرقام بعد الإرسال — أرسله عبر واتساب لخدمة العملاء.</span>
+        <input type="tel" id="pay-whatsapp" name="whatsapp_number" required value="${escapeHtml(whatsapp)}" maxlength="25" placeholder="0912345678 أو +218912345678 أو 00218912345678" pattern="[0-9+]+" />
+        <span class="field-hint">تنسيقات مقبولة: 0912345678 أو +218912345678 أو 00218912345678. سيظهر لك كود تفعيل من 6 أرقام بعد الإرسال — أرسله عبر واتساب لخدمة العملاء.</span>
       </div>
       <div class="form-actions">
         <button class="btn btn-primary" type="submit">${icon('coins', 'icon-sm')} أرسل طلب الدفع</button>

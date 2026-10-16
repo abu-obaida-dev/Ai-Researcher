@@ -235,8 +235,8 @@ function validateValues(values) {
   const wa = String(values.whatsapp_number || '').replace(/[^\d+]/g, '');
   if (!values.whatsapp_number || !wa) {
     errors.push('رقم الواتساب مطلوب.');
-  } else if (!/^(\+?218|0)?9[124]\d{7}$/.test(wa)) {
-    errors.push('أدخل رقم واتساب ليبي صالح (مثال: 0912345678 أو +218912345678).');
+  } else if (!/^(00218|\+?218|0)?9[124]\d{7}$/.test(wa)) {
+    errors.push('أدخل رقم واتساب ليبي صالح (مثال: 0912345678 أو +218912345678 أو 00218912345678).');
   }
 
   return errors;

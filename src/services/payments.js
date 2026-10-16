@@ -20,7 +20,7 @@ function normalizeWhatsapp(value) {
   return String(value || '').replace(/[^\d+]/g, '').slice(0, 20);
 }
 
-const WHATSAPP_REGEX = /^(\+?218|0)?9[124]\d{7}$/;
+const WHATSAPP_REGEX = /^(00218|\+?218|0)?9[124]\d{7}$/;
 
 function isValidWhatsapp(value) {
   return WHATSAPP_REGEX.test(value);

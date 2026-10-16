@@ -484,7 +484,7 @@ export const DEFAULT_CURRENCY = 'LYD';
 export const DEFAULT_PAYMENT_METHODS = [
   {
     code: 'bank_transfer',
-    label: 'تحويل بنكي',
+    label: 'حواله مصرفيه',
     note: 'حوّل المبلغ إلى الحساب البنكي الموّحد، ثم أرسل كود التفعيل عبر واتساب لخدمة العملاء.',
     details: '',
     currency: 'LYD',
