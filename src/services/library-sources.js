@@ -253,8 +253,11 @@ export function sourceLabel(id) {
   return LIBRARY_SOURCES.find((item) => item.id === id)?.label || String(id || '');
 }
 
-/** حارس بسيط لمنع الروابط الداخلية/الخاصة (SSRF) قبل أي نداء خارجي. */
-function assertPublicUrl(raw) {
+/** حارس روابط عامة ضد SSRF: يرفض الشبكات الداخلية والخاصة والسحابية.
+ * يُستدعى قبل أي نداء خارجي، ومع كل قفزة توجيه (H2) لأن التوجيه قد
+ * يقود من مضيف عام إلى عنوان داخلي (169.254.169.254 لبيانات السحابة مثلاً).
+ * مُصدَّر للاختبارات فقط — الإنتاج يستخدمه عبر fetchPublic. */
+export function assertPublicUrl(raw) {
   let parsed;
   try {
     parsed = new URL(String(raw));
@@ -264,7 +267,10 @@ function assertPublicUrl(raw) {
     throw error;
   }
 
-  const host = parsed.hostname.toLowerCase();
+  const host = parsed.hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.$/, '');
   const blocked =
     parsed.protocol !== 'https:' && parsed.protocol !== 'http:'
       ? true
@@ -272,13 +278,29 @@ function assertPublicUrl(raw) {
         host === '0.0.0.0' ||
         host === '::1' ||
         host.endsWith('.local') ||
+        host.endsWith('.localhost') ||
         host.endsWith('.internal') ||
         host.endsWith('.lan') ||
+        host.endsWith('.invalid') ||
+        // IPv6 خاصة/محلية/مُعاد توجيهها
+        host.startsWith('fc') ||
+        host.startsWith('fd') ||
+        host.startsWith('fe80:') ||
+        host.startsWith('fec0:') ||
+        host === '::' ||
+        host === '::ffff:127.0.0.1' ||
+        // IPv4 عشرية/نقطية خاصة + الصيغة العشرية الكاملة (http://2130706433/ = 127.0.0.1)
         /^127\./.test(host) ||
         /^10\./.test(host) ||
         /^192\.168\./.test(host) ||
         /^169\.254\./.test(host) ||
-        /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+        /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+        /^100\.(6[4-9]|[7-9]\d|1[0-1]\d|12[0-7])\./.test(host) || // CGNAT 100.64/10
+        /^(0|224|240)\./.test(host) || // البث والمحجوزة
+        /^0x[0-9a-f]+\.0x[0-9a-f]+\.0x[0-9a-f]+\.0x[0-9a-f]+$/.test(host) || // سداسي منقّط
+        /^[0-9]+$/.test(host) || // عشرية كاملة (2130706433)
+        /^0[0-7]+\.[0-7.]+$/.test(host) || // ثمانية منقّطة
+        /^0x[0-9a-f]+$/.test(host); // سداسية كاملة
 
   if (blocked) {
     const error = new Error('الرابط يشير إلى شبكة داخلية — مرفوض.');
@@ -288,13 +310,45 @@ function assertPublicUrl(raw) {
   return parsed;
 }
 
-/** جلب JSON بمهلة وحدّ حجم. */
+/**
+ * جلب خارجي آمن: يتتبع التوجيهات يدوياً (بحد أقصى 5) ويفحص **كل قفزة**
+ * ضد الشبكات الداخلية قبل متابعتها (H2).
+ * الاستخدام: الروابط القادمة من خارج سيطرة الكود فقط (مدخلات المستخدم،
+ * وسوم citation_pdf_url في صفحات الناشرين، روابط rss/fulltext في الخلاصات).
+ */
+async function fetchPublic(url, { timeoutMs = SEARCH_TIMEOUT_MS, headers = {} } = {}) {
+  let current = String(url);
+  for (let hop = 0; hop <= 5; hop += 1) {
+    assertPublicUrl(current);
+    const response = await fetch(current, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { 'user-agent': USER_AGENT, ...headers }
+    });
+    const location = response.headers.get('location');
+    if (response.status >= 300 && response.status < 400 && location) {
+      // نحلّ النسبية مقابل الحالية، ونرفض المطلقة الداخلية في التكرار التالي.
+      try {
+        current = new URL(location, current).toString();
+      } catch {
+        const error = new Error('توجيه غير صالح من المصدر.');
+        error.code = 'BAD_URL';
+        throw error;
+      }
+      continue;
+    }
+    return response;
+  }
+  const error = new Error('المصدر وجّه مرات كثيرة — مرفوض.');
+  error.code = 'TOO_MANY_REDIRECTS';
+  throw error;
+}
+
+/** جلب JSON بمهلة وحدّ حجم — عبر الجلب الآمن (يفحص كل قفزة توجيه). */
 async function fetchJson(url, { timeoutMs = SEARCH_TIMEOUT_MS, maxBytes = 5 * 1024 * 1024 } = {}) {
-  assertPublicUrl(url);
-  const response = await fetch(url, {
-    redirect: 'follow',
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: { 'user-agent': USER_AGENT, accept: 'application/json' }
+  const response = await fetchPublic(url, {
+    timeoutMs,
+    headers: { accept: 'application/json' }
   });
   if (!response.ok) {
     const error = new Error(`المصدر ردّ بحالة ${response.status}.`);
@@ -310,14 +364,9 @@ async function fetchJson(url, { timeoutMs = SEARCH_TIMEOUT_MS, maxBytes = 5 * 10
   return JSON.parse(buffer.toString('utf8'));
 }
 
-/** جلب ملف بايتات: يتحقق من الحالة والسقف قبل وبعد القراءة. */
+/** جلب ملف بايتات: يتحقق من الحالة والسقف قبل وبعد القراءة — عبر الجلب الآمن. */
 async function fetchBytes(url, { maxBytes = LIBRARY_MAX_FILE_BYTES } = {}) {
-  assertPublicUrl(url);
-  const response = await fetch(url, {
-    redirect: 'follow',
-    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-    headers: { 'user-agent': USER_AGENT }
-  });
+  const response = await fetchPublic(url, { timeoutMs: DOWNLOAD_TIMEOUT_MS });
   if (!response.ok) {
     const error = new Error(`تعذّر تنزيل الملف (حالة ${response.status}).`);
     error.code = 'SOURCE_HTTP';
@@ -543,10 +592,8 @@ async function searchLibraryOfCongress({ q, subject, limit }) {
   )}&maximumRecords=${Math.min(Math.max(Number(limit) || 10, 1), 10)}&recordSchema=dc`;
   assertPublicUrl(url);
 
-  const response = await fetch(url, {
-    redirect: 'follow',
-    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
-    headers: { 'user-agent': USER_AGENT, accept: 'application/xml, text/xml' }
+  const response = await fetchPublic(url, {
+    headers: { accept: 'application/xml, text/xml' }
   });
   if (!response.ok) {
     const error = new Error(`مكتبة الكونجرس ردّت بحالة ${response.status}.`);
@@ -607,10 +654,8 @@ async function searchCore({ q, subject, limit, years = {} }) {
   if (years.from) params.set('yearFrom', String(years.from));
   if (years.to) params.set('yearTo', String(years.to));
 
-  const response = await fetch(`https://api.core.ac.uk/v3/search/works?${params.toString()}`, {
-    redirect: 'follow',
-    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
-    headers: { 'user-agent': USER_AGENT, accept: 'application/json', authorization: `Bearer ${apiKey}` }
+  const response = await fetchPublic(`https://api.core.ac.uk/v3/search/works?${params.toString()}`, {
+    headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` }
   });
   if (!response.ok) {
     const error = new Error(`CORE ردّ بحالة ${response.status}.`);
@@ -811,11 +856,8 @@ async function searchBase({ q, subject, limit }) {
     hits: String(Math.min(Math.max(Number(limit) || 20, 1), 25))
   });
 
-  const response = await fetch(`https://api.base-search.net/cgi-bin/BaseHttpSearchInterface.fcgi?${params.toString()}`, {
-    redirect: 'follow',
-    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+  const response = await fetchPublic(`https://api.base-search.net/cgi-bin/BaseHttpSearchInterface.fcgi?${params.toString()}`, {
     headers: {
-      'user-agent': USER_AGENT,
       accept: 'application/json',
       authorization: `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`
     }
@@ -1031,9 +1073,9 @@ async function searchSemanticScholar({ q, subject, limit, retry = true, years = 
 
   // فترة الإصدار: Semantic Scholar يقبل سنة أو مدى (YYYY-YYYY) — نُغلق المدى دائماً
   const yearRange = years.from || years.to ? `&year=${years.from || 1500}-${years.to || 2100}` : '';
-  const response = await fetch(
+  const response = await fetchPublic(
     `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&fields=${fields}${yearRange}`,
-    { redirect: 'follow', signal: AbortSignal.timeout(SEMANTIC_TIMEOUT_MS), headers }
+    { timeoutMs: SEMANTIC_TIMEOUT_MS, headers }
   );
   // Semantic Scholar يحدّ المعدل بشدّة بلا مفتاح ⇒ ننتظر ونعيد مرة واحدة فقط.
   if (response.status === 429 && retry) {
@@ -1105,10 +1147,8 @@ async function searchArxiv({ q, subject, limit, years = {} }) {
   )}&start=0&max_results=${limit}`;
   assertPublicUrl(url);
 
-  const response = await fetch(url, {
-    redirect: 'follow',
-    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
-    headers: { 'user-agent': USER_AGENT, accept: 'application/atom+xml' }
+  const response = await fetchPublic(url, {
+    headers: { accept: 'application/atom+xml' }
   });
   if (!response.ok) {
     const error = new Error(`arXiv ردّ بحالة ${response.status}.`);
@@ -1359,12 +1399,9 @@ const CROSSREF_BASED = new Set(['crossref', 'ieee', 'acm', 'springer', 'wiley', 
  * نقرأها ونحوّلها إلى سجل مرجعي كامل — تماماً كما طلبت: «يجيب النتائج من الروابط التي هناك».
  */
 export async function fetchCitationMetadata(url, { timeoutMs = 12000 } = {}) {
-  const parsed = assertPublicUrl(url);
-
-  const response = await fetch(parsed.toString(), {
-    redirect: 'follow',
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: { 'user-agent': USER_AGENT, accept: 'text/html,application/xhtml+xml' }
+  const response = await fetchPublic(url, {
+    timeoutMs,
+    headers: { accept: 'text/html,application/xhtml+xml' }
   });
   if (!response.ok) return null;
 
@@ -1533,10 +1570,8 @@ function isPdf(buffer) {
  * يعلن الملف الحقيقي في وسم citation_pdf_url (أو citation_pdf / eprints.document_url).
  */
 async function findPdfLinkOnPage(url) {
-  const response = await fetch(url, {
-    redirect: 'follow',
-    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
-    headers: { 'user-agent': USER_AGENT, accept: 'text/html,application/xhtml+xml' }
+  const response = await fetchPublic(url, {
+    headers: { accept: 'text/html,application/xhtml+xml' }
   });
   if (!response.ok) return '';
 

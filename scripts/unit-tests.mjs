@@ -7,24 +7,40 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+
+test('النظافة الأمنية (H4): لا تبعيات ميتة ولا تجاوز لفحص uuid', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  for (const dead of ['express-session', 'cookie-parser', 'jsonwebtoken', 'google-auth-library']) {
+    assert.ok(!(pkg.dependencies || {})[dead], `التبعية الميتة حُذفت: ${dead}`);
+  }
+  assert.ok(pkg.overrides?.uuid, 'تجاوز uuid المرقّع موجود (^11.1.1)');
+});
 
 import { chargeUsage, estimateReservation, estimateTokens, normalizeUsage } from '../src/services/tokens.js';
 import { normalizeCurrency } from '../src/services/payments.js';
-import { buildSearchQuery, extractTopic, isTopicSpecific, normalizeArabic, relevanceScore } from '../src/services/literature.js';
-import { LIBRARY_SOURCES, SOURCE_GROUPS, normalizeYearRange, sourceGroup } from '../src/services/library-sources.js';
+import {
+  askedForReferenceTitle,
+  buildSearchQuery,
+  extractTopic,
+  isTopicSpecific,
+  literatureToolFor,
+  normalizeArabic,
+  relevanceScore
+} from '../src/services/literature.js';
+import { LIBRARY_SOURCES, SOURCE_GROUPS, assertPublicUrl, normalizeYearRange, sourceGroup } from '../src/services/library-sources.js';
 import { saveSupportWhatsapp } from '../src/services/settings.js';
 import { assertContentMatchesExtension, contentMatchesExtension } from '../src/services/upload-guard.js';
 import { safeEqual } from '../src/middleware/security.js';
 import { needsOnboarding, requireCoreOnboarding } from '../src/middleware/auth.js';
 import { renderOnboardingPage } from '../src/views/auth.js';
 import { buildSystemPrompt } from '../src/services/supervisor-prompt.js';
+import { defenseProgress, extractDefenseFinalTag } from '../src/services/defense.js';
 import { evaluateStepCompletion, specForStep } from '../src/services/step-review.js';
-import {
-  ASSISTANT_SOURCE_ORDER,
-  assistantSourceBatches,
-  extractLastSuggestedQuery,
-  extractQueryFromHistory
-} from '../src/services/assistant.js';
+// ملاحظة (إصلاح C1): وظائف «ترتيب المصادر» و«دفائف البحث» و«اشتقاق العبارة من السجل»
+// أُزيلت عمداً من assistant.js في commit 54d0d51 — المعلم لم يعد يبحث في المكتبة
+// نيابةً عن الباحث (الباحث يبحث بنفسه)، فحُذفت اختباراتها هنا لتطابق التصميم الجديد.
+import { extractLastSuggestedQuery } from '../src/services/assistant.js';
 import {
   ASSISTANT_REPLY_CAPS,
   buildAssistantPrompt,
@@ -597,15 +613,8 @@ test('متابعة البحث عند المعلم: «نعم/الأولى» بع�
   assert.ok(isExplicitSearchRequest('ابحث عن التعلم العميق'), 'طلب صريح يُكتشف');
   assert.ok(!isExplicitSearchRequest('نعم اعد البحث'), 'المتابعة ليست طلباً صريحاً');
 
-  // اشتقاق العبارة: الأولى ⇒ العبارة 1، «نعم» ⇒ آخر عبارة، رقم 2 ⇒ العبارة 2
-  assert.equal(
-    extractQueryFromHistory([...history, { role: 'user', content: 'نعم اعد البحث باستخدام اول كلمه' }]),
-    'AI in Computer Science Education'
-  );
-  assert.equal(
-    extractQueryFromHistory([...history, { role: 'user', content: '2' }]),
-    'Machine Learning for CS Students'
-  );
+  // (حُذف اشتقاق العبارة من السجل extractQueryFromHistory — لم يعد المعلم يبحث
+  //  بنفسه بعد الالتزام بالتصميم الجديد؛ الاختبار يغطي دالة الاشتقاق الباقية.)
   assert.equal(
     extractLastSuggestedQuery(history),
     'AI in Computer Science Education',
@@ -637,18 +646,51 @@ test('buildAssistantPrompt: قواعد المعلم حسب المهمة (تفص�
   assert.ok(translate.includes('الترجمة'), 'مهمة الترجمة معروفة');
 
   const summarize = buildAssistantPrompt({ task: 'summarize' });
-  assert.ok(summarize.includes('نتائج بحث حقيقية'), 'التلخيص يقيَّد بنتائج محقونة');
+  // حدّ التلخيص الجديد (commit 54d0d51): تلخيص مرفق الباحث فقط — لا بحث نيابةً عنه.
+  assert.ok(summarize.includes('تلخّص ما وُفّر من الباحث فقط'), 'التلخيص يقيَّد بما وُفّر من الباحث');
+  assert.ok(summarize.includes('لا تبحث بنفسك'), 'المعلم لا يبحث في المكتبة نيابةً عن الباحث');
 });
 
-test('assistantSourceBatches: كل المصادر مغطاة وكل دفعة ≤ ٦ (حدّ searchLiterature)', () => {
-  const [first, second] = assistantSourceBatches();
-  const all = [...first, ...second];
-  assert.equal(all.length, ASSISTANT_SOURCE_ORDER.length, 'لا مصدر ساقط');
-  assert.equal(new Set(all).size, all.length, 'لا مصدر مكرر بين الدفعتين');
-  assert.ok(first.length <= 6 && second.length <= 6, 'كل دفعة تمرّ من searchLiterature كما هي');
-  assert.equal(ASSISTANT_SOURCE_ORDER[0], 'crossref', 'بيانات الاستشهاد أولاً');
-  assert.equal(ASSISTANT_SOURCE_ORDER.length, 9, 'كل المصادر التسعة بالترتيب');
+test('ASSISTANT_REPLY_CAPS: سقف الترجمة أطول من التعليم والتلخيص (حدّ واحد لكل مهمة)', () => {
+  // (استُبدل هذا الاختبار باختبار assistantSourceBatches المحذوف — المعلم لم يعد
+  //  يبحث في المكتبة خارجياً بعد قرار التصميم الجديد، فأُلغيت دفائف المصادر.)
   assert.equal(ASSISTANT_REPLY_CAPS.translate > ASSISTANT_REPLY_CAPS.teach, true, 'سقف الترجمة أطول');
+  assert.equal(ASSISTANT_REPLY_CAPS.translate > ASSISTANT_REPLY_CAPS.summarize, true, 'الترجمة أطول من التلخيص');
+  assert.ok(
+    Object.values(ASSISTANT_REPLY_CAPS).every((cap) => Number.isInteger(cap) && cap > 0),
+    'كل السقوف موجبة صحيحة'
+  );
+});
+
+test('حارس SSRF الموسّع (H2): يرفض الداخلية والخاصة والصيغ الرقمية ويقبل العامة', () => {
+  // عامة مقبولة
+  assert.doesNotThrow(() => assertPublicUrl('https://api.openalex.org/works?search=test'));
+  assert.doesNotThrow(() => assertPublicUrl('http://lx2.loc.gov:210/lcdb?version=1.1'));
+  // داخلية كلاسيكية
+  for (const bad of [
+    'http://localhost:3000/x',
+    'http://127.0.0.1/',
+    'http://0.0.0.0/',
+    'http://10.0.0.5/',
+    'http://192.168.1.1/',
+    'http://172.16.0.1/',
+    'http://169.254.169.254/latest/meta-data/',
+    'http://[::1]/',
+    'http://example.local/x',
+    'ftp://example.com/x'
+  ]) {
+    assert.throws(() => assertPublicUrl(bad), /شبكة داخلية|غير صالح/, `مرفوض: ${bad}`);
+  }
+  // (H2) صيغ بديلة وتوجيه-مموّهة: عشرية كاملة وسداسية وCGNAT وIPv6 خاصة
+  for (const bad of [
+    'http://2130706433/', // 127.0.0.1 عشرية
+    'http://0x7f000001/', // 127.0.0.1 سداسية
+    'http://100.64.0.1/', // CGNAT
+    'http://[fc00::1]/',
+    'http://[fe80::1]/'
+  ]) {
+    assert.throws(() => assertPublicUrl(bad), /شبكة داخلية|غير صالح/, `مرفوض: ${bad}`);
+  }
 });
 
 test('مرجع الهياكل الأكاديمية: الأنواع السبعة كاملة وأسلوب «التفصيل داخل التفصيل»', () => {
@@ -685,3 +727,144 @@ test('مرجع الهياكل الأكاديمية: الأنواع السبعة 
   // حدود: شرح بنية فقط — لا كتابة محتوى
   assert.ok(prompt.includes('ولا تكتبي محتوى أي قسم من بحثه'), 'الهيكلية لا تعني كتابة المحتوى');
 });
+
+/* ------------- جلسة المناقشة: لا «فخ» المراجع (تشخيص رسالة ١٥ أكتوبر) ------------- */
+
+test('askedForReferenceTitle: سؤال المناقشة «بعنوان… ومراجعات…؟» لا يُعدّ سؤال مراجع', () => {
+  // الرسالة الواقعية التي أطلقت البوابة زوراً في جلسة defense:
+  const exam = [
+    {
+      role: 'assistant',
+      content:
+        'ورقتك البحثية المثبتة بعنوان: "EGLS" ومراجعات العدالة (Fairness Audits) تفشل في منع الانجراف.\n' +
+        'السؤال: كيف يُثبت المعيار من الناحية المنهجية أن الفصل الهيكلي كافٍ؟'
+    },
+    { role: 'user', content: 'المفروض عندك فى البحث الاجابه' }
+  ];
+  assert.equal(askedForReferenceTitle(exam), false, 'سؤال أكاديمي فيه «مراجعات» لا يُفعّل البوابة');
+
+  // أسئلة المراجع الحقيقية ما تزال تعمل:
+  assert.equal(
+    askedForReferenceTitle([{ role: 'assistant', content: 'في أي عنوان بالتحديد تريد المراجع؟' }]),
+    true,
+    'السؤال الصريح يُعدّ'
+  );
+  assert.equal(
+    askedForReferenceTitle([{ role: 'assistant', content: 'هل تحتاج مراجع حول مشكلتك البحثية؟' }]),
+    true,
+    'طلب مباشر للمراجع يُعدّ'
+  );
+  assert.equal(
+    askedForReferenceTitle([{ role: 'user', content: 'أي شيء' }]),
+    false,
+    'رسائل الباحث لا تُعدّ سؤالاً من المشرفة'
+  );
+});
+
+test('أداة المراجع: رسالة بلا طلب مراجع لا تُشغّلها أصلاً (ترجع null بلا شبكة)', async () => {
+  const result = await literatureToolFor('المفروض عندك فى البحث الاجابه', {});
+  assert.equal(result, null, 'wantsLiterature = false وaskedBefore = false ⇒ null');
+});
+
+test('جلسة المناقشة: الموجّه بلا قواعد مراجع وبلا قسم نتائج الأداة', () => {
+  const base = {
+    userName: 'gik knk',
+    degree: 'باحث ماجستير',
+    field: 'علوم الحاسب',
+    title: 'الذكاء الاصطناعي في التعليم',
+    university: '—',
+    citationStyle: 'APA 7',
+    language: 'العربية',
+    currentStage: 'المقدمة ومشكلة البحث',
+    researchGoal: 'إنهاء البحث',
+    progressLevel: 'لدي موضوع محدد',
+    stepsStatus: 'تحديد المشكلة والفرضيات: جاري',
+    journeyCompleted: false,
+    memorySummary: '',
+    openTask: '',
+    daysSinceLast: 0,
+    isFirstMessageEver: false,
+    strikes: 0,
+    mode: 'defense',
+    files: '',
+    fileNames: [],
+    replyCap: 900,
+    currentStepKey: ''
+  };
+
+  const def = buildSystemPrompt(base, { references: 5 });
+  assert.ok(def.includes('# المناقشة الأكاديمية المستقلة'), 'قسم المناقشة موجود');
+  assert.ok(!def.includes('# أداة المراجع (نتائج حقيقية من قواعد البيانات)'), 'لا يُحقن قسم نتائج الأداة في defense');
+  assert.ok(!def.includes('العنوان الذي يريد مراجع عنه'), 'قاعدة «عنوان المراجع» غائبة في defense');
+  assert.ok(def.includes('# هوية المناقِش: مستقل عن المشرفين'), 'هوية المناقِش المستقل موجودة');
+  assert.ok(def.includes('[[defense-final]]'), 'وسم ختام الجلسة في قواعد المناقِش');
+  assert.ok(!def.includes('المشرفة البحثية الذكية'), 'لا هوية المشرفة Zena في موجّه المناقِش');
+  assert.ok(!def.includes('الملخص المحفوظ للمحادثات السابقة'), 'لا ذاكرة مشرفة في سياق المناقِش');
+  assert.ok(!def.includes('المهمة المتفق عليها سابقاً'), 'لا مهمة مشرفة في سياق المناقِش');
+  assert.ok(!def.includes('# الترحيب'), 'لا ترحيب مشرفة في جلسة المناقشة');
+  assert.ok(def.includes('المراجع خارج هذه الجلسة تماماً'), 'تنبيه defenseSection للمراجع موجود');
+
+  // خارج المناقشة: كل ما سبق يبقى كما هو
+  const normal = buildSystemPrompt({ ...base, mode: 'normal', currentStepKey: 'literature' }, { references: 3 });
+  assert.ok(normal.includes('# أداة المراجع (نتائج حقيقية من قواعد البيانات)'), 'قسم الأداة يبقى في الوضع العادي');
+  assert.ok(normal.includes('العنوان الذي يريد مراجع عنه'), 'قاعدة «عنوان المراجع» تبقى في الوضع العادي');
+  assert.ok(normal.includes('أجيبيه بأداة المراجع'), 'قاعدة الطبقة الثانية للوضع العادي تبقى');
+  assert.ok(normal.includes('المشرفة البحثية الذكية'), 'الوضع العادي يبقي هوية المشرفة Zena');
+});
+
+test('extractDefenseFinalTag: وسم التقييم النهائي يُحذف ويغلق الجلسة', () => {
+  const ended = extractDefenseFinalTag('التقييم النهائي: قوة وضعف وتوصيات.\n[[defense-final]]');
+  assert.equal(ended.ended, true, 'الوسم يعني انتهاء المناقشة');
+  assert.equal(ended.text, 'التقييم النهائي: قوة وضعف وتوصيات.', 'الوسم يُحذف من النص ولا يظهر للمستخدم');
+  assert.ok(!ended.text.includes('[['), 'لا وسوم داخلية في النص المحفوظ');
+
+  const normal = extractDefenseFinalTag('سؤال عادي: ما منهجك؟');
+  assert.equal(normal.ended, false, 'رسالة بلا وسم لا تُغلق الجلسة');
+  assert.equal(normal.text, 'سؤال عادي: ما منهجك؟', 'النص يبقى كما هو');
+});
+
+test('defenseProgress: مراحل الجلسة تتبع التثبيت والإنهاء (لا coveredParts)', () => {
+  assert.equal(defenseProgress({}).stageLabel, 'بانتظار رفع البحث', 'قبل تثبيت الملف');
+  assert.equal(defenseProgress({ thesisFileId: 'x' }).stageLabel, 'المناقشة جارية', 'ملف مثبّت = المناقشة جارية');
+  assert.equal(defenseProgress({ thesisFileId: 'x', done: true }).stageLabel, 'انتهت المناقشة', 'التقييم يُنهي الجلسة');
+  assert.equal(defenseProgress({ thesisFileId: 'x', done: true }).stageKey, 'final', 'مرحلة النهاية');
+});
+
+test('المعلم: ذاكرته الخاصة تُحقن في موجّهه ومعزولة عن ذاكرة المشرف', () => {
+  const withMemory = buildAssistantPrompt({
+    task: 'teach',
+    field: 'علوم الحاسب',
+    memory: 'فهم الباحث هيكل البحث · شُرحت له المقدمة',
+    openTask: 'شرح منهجية البحث في مقطعه القادم'
+  });
+  assert.ok(withMemory.includes('# ذاكرتك الخاصة'), 'قسم الذاكرة الخاصة موجود');
+  assert.ok(withMemory.includes('فهم الباحث هيكل البحث'), 'محتوى الذاكرة محقون');
+  assert.ok(withMemory.includes('شرح منهجية البحث'), 'المهمة التالية محقونة');
+  assert.ok(withMemory.includes('لا تخلطها بذاكرة المشرف'), 'عزل الذاكرة منصوص في الموجّه');
+  assert.ok(withMemory.includes('شخصيتك منفصلة'), 'عزل الشخصية منصوص في الموجّه');
+
+  const bare = buildAssistantPrompt({ task: 'teach' });
+  assert.ok(!bare.includes('# ذاكرتك الخاصة'), 'بلا ذاكرة لا يظهر القسم');
+  assert.ok(bare.includes('أنت «المعلم»'), 'الهوية ثابتة');
+});
+
+test('الفصل البرمجي: ملف المعلم لا يستورد ذاكرة المشرف وملف المشرف لا يستورد ذاكرة المعلم', () => {
+  const stripComments = (src) => String(src).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/gm, '$1');
+  const teacherSrc = stripComments(readFileSync(new URL('../src/services/assistant.js', import.meta.url), 'utf8'));
+  const assistantMemSrc = stripComments(readFileSync(new URL('../src/services/assistant-memory.js', import.meta.url), 'utf8'));
+  const supervisorSrc = stripComments(readFileSync(new URL('../src/services/chat.js', import.meta.url), 'utf8'));
+  assert.ok(!teacherSrc.includes('supervisor_memory'), 'المعلم لا يستعلم جدول المشرف');
+  assert.ok(!teacherSrc.includes('supervisor-memory'), 'المعلم لا يستورد خدمة ذاكرة المشرف');
+  assert.ok(!assistantMemSrc.includes('supervisor_memory'), 'خدمة ذاكرة المعلم لا تستعلم جدول المشرف');
+  assert.ok(!supervisorSrc.includes('assistant_memory'), 'المشرف لا يستعلم جدول المعلم');
+  assert.ok(!supervisorSrc.includes('assistant-memory'), 'المشرف لا يستورد خدمة ذاكرة المعلم');
+  assert.ok(teacherSrc.includes('summarizeAssistantConversation(userId'), 'تلخيص المعلم مُستدعى (لا مجرد مستورد)');
+});
+
+test('الفصل السلوكي: استعلامات المشرف تستثني محادثات المناقشة', () => {
+  const ctxSrc = readFileSync(new URL('../src/services/supervisor-context.js', import.meta.url), 'utf8');
+  const chatSrc = readFileSync(new URL('../src/services/chat.js', import.meta.url), 'utf8');
+  assert.ok(ctxSrc.includes("mode <> 'defense'"), 'سياق المشرف يستثني جلسات المناقشة');
+  assert.ok(chatSrc.includes("c.mode <> 'defense'"), 'تلخيص المشرف يستثني جلسات المناقشة');
+});
+

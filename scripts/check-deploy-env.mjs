@@ -6,6 +6,7 @@
  * لأن كل خطأ منها يُظهر كـ «Build Error» غامض داخل لوحة Vercel.
  */
 import { existsSync, readdirSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -69,10 +70,21 @@ else warn('vercel.json غير موجود — النشر على Vercel قد يح�
 if (existsSync(path.join(ROOT, 'public', 'js', 'app-shell.js'))) pass('public/ موجود (الجرس والقوائم)');
 else fail('public/ ناقص — الواجهة ستُقدَّم بلا خطوط أو أيقونات.');
 
-/* ٥) تحذير: أسرارFirebas e على القرص لن تُرفع إلى Git */
-const serviceAccount = readdirSync(ROOT).find((name) => /firebase-adminsdk.*\.json$/.test(name));
-if (serviceAccount) {
-  warn(`ملف حساب خدمة Firebase (${serviceAccount}) مستثنى من Git — لن يُرفع مع النشر. إشعارات الهاتف (FCM) معطّلة على Vercel، وهذا مقبول: الإشعارات داخل الموقع تعمل.`);
+/* ٥) تحذير: أسرار Firebase على القرص لن تُرفع إلى Git (أمان C2) */
+const configuredSa = String(process.env.FIREBASE_SERVICE_ACCOUNT_FILE || '').trim();
+if (configuredSa) {
+  const saPath = configuredSa.startsWith('~/')
+    ? path.join(os.homedir(), configuredSa.slice(2))
+    : path.resolve(configuredSa);
+  if (existsSync(saPath)) pass(`مسار حساب خدمة Firebase خارج المشروع: FIREBASE_SERVICE_ACCOUNT_FILE`);
+  else warn(`FIREBASE_SERVICE_ACCOUNT_FILE مضبوط لكن الملف غير موجود في: ${saPath}`);
+} else {
+  const serviceAccount = readdirSync(ROOT).find((name) => /firebase-adminsdk.*\.json$/.test(name));
+  if (serviceAccount) {
+    warn(
+      `ملف حساب خدمة Firebase (${serviceAccount}) داخل جذر المشروع — أنقله خارج المجلد ووضّع FIREBASE_SERVICE_ACCOUNT_FILE في .env (أمان C2).`
+    );
+  }
 }
 
 /* ٦) تحذير: حد 4.5MB في Vercel */

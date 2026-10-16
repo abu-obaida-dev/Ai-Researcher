@@ -321,6 +321,21 @@ const ASSISTANT_INDEXES = `
   ALTER TABLE assistant_conversations ADD COLUMN IF NOT EXISTS last_task VARCHAR(50);
 `;
 
+/**
+ * ذاكرة «المعلم» الخاصة — منفصلة تماماً عن ذاكرة المشرف (supervisor_memory).
+ * قرار صاحب المنتج: لكل شخصية ذاكرته — المشرف يقرأ supervisor_memory، والمعلم
+ * يقرأ هذه، والمناقش لا يقرأ أي ذاكرة خارج جلسته. لا تُسجَّل هنا جلسات المشرف
+ * أو المناقشة إطلاقاً (العزل على مستوى الجداول لا البرومبت فقط).
+ */
+const ASSISTANT_MEMORY_TABLE = `
+  CREATE TABLE IF NOT EXISTS assistant_memory (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    memory TEXT NOT NULL DEFAULT '',
+    open_task VARCHAR(300) NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`;
+
 /** مراقبة مزودي الذكاء الاصطناعي (زمن الاستجابة والحالة والأخطاء). */
 const AI_REQUESTS_TABLE = `
   CREATE TABLE IF NOT EXISTS ai_requests (
@@ -636,6 +651,7 @@ const PROFILES_EXTRA_COLUMNS = `
   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS citation_style VARCHAR(50) DEFAULT 'apa7';
   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS supervisor_name VARCHAR(255);
   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS supervisor_notes TEXT;
+  ALTER TABLE profiles ADD COLUMN IF NOT EXISTS gender VARCHAR(20);
 `;
 
 /** ربط plan_code بجدول الباقات — يُضاف مرة واحدة فقط (idempotent). */
@@ -797,6 +813,7 @@ async function initializeDatabase() {
     await pool.query(MESSAGES_TABLE);
     await pool.query(ASSISTANT_CONVERSATIONS_TABLE);
     await pool.query(ASSISTANT_MESSAGES_TABLE);
+    await pool.query(ASSISTANT_MEMORY_TABLE);
     await pool.query(AI_REQUESTS_TABLE);
     await pool.query(USAGE_LOGS_TABLE);
     await pool.query(SETTINGS_TABLE);

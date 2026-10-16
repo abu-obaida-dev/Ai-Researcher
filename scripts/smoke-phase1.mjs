@@ -534,13 +534,13 @@ async function testChat(userId, cookie) {
   ].every(Boolean));
 
   // الأقسام الشرطية: لا تظهر إلا عند الحاجة
-  check('1G البرومبت: لا قسم مناقشة في الوضع العادي', !firstPrompt.includes('لجنة مناقشة تدريبية'));
+  check('1G البرومبت: لا قسم مناقشة في الوضع العادي', !firstPrompt.includes('المناقشة الأكاديمية المستقلة'));
   check('1G البرومبت: لا قواعد استهثار بلا عدّاد', !firstPrompt.includes('[[strike]]'));
   const latePrompt = buildSystemPrompt({ ...ctxBase, isFirstMessageEver: false, strikes: 2, mode: 'defense', openTask: 'كتابة المشكلة البحثية', memorySummary: 'قرّر استخدام مقاييس مرجعية', daysSinceLast: 9 });
   check('1G البرومبت: لا ترحيب بعد أول رسالة', latePrompt.includes('لا ترحيب إطلاقاً'));
   check('1G البرومبت: الذاكرة والمهمة過去 تُحقن', latePrompt.includes('الملخص المحفوظ للمحادثات السابقة') && latePrompt.includes('المهمة المتفق عليها سابقاً: كتابة المشكلة البحثية'));
   check('1G البرومبت: تدرّج الاستهتار + وسم [[strike]] عند العدّاد', latePrompt.includes('2 فأكثر') && latePrompt.includes('[[strike]]'));
-  check('1G البرومبت: قسم المناقشة في وضع defense', latePrompt.includes('لجنة مناقشة تدريبية') && latePrompt.includes('لا تعطي الإجابة النموذجية إلا بعد محاولته'));
+  check('1G البرومبت: قسم المناقشة في وضع defense', latePrompt.includes('المناقشة الأكاديمية المستقلة') && latePrompt.includes('ولا تعطه الإجابة النموذجية قبل أن يحاول هو أولاً'));
 
   // مرحلة «المشكلة والفرضيات»: تستخرج من الباحث ولا تؤلف نيابة عنه
   const topicPrompt = buildSystemPrompt({ ...ctxBase, isFirstMessageEver: false, currentStage: 'تحديد المشكلة والفرضيات', currentStepKey: 'topic', title: '—' });

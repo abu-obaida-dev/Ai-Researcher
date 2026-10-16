@@ -4,8 +4,8 @@
  * - بلا جافاسكربت: النموذج يُرسل كـ POST عادي والخادم يعيد 303 — كما كان تماماً.
  * - مع الجافاسكربت: fetch مع Accept: application/json، والخادم يعيد قطع HTML
  *   مُعرَّضة بنفس دوال عرض الصفحة (مصدر واحد للشكل)، ونستبدلها في أماكنها:
- *   الرسائل + شريط الوضع + لوحة المراجع + قائمة المحادثات. لا تحديث للصفحة
- *   كاملة ولا قفزة تمرير، ويبقى وضع المناقشة وعدد أسئلته كما هما.
+ *   الرسائل + لوحة المراجع + قائمة المحادثات. لا تحديث للصفحة
+ *   كاملة ولا قفزة تمرير.
  * - عند أي فشل (شبكة/خادم/استجابة غير متوقعة): تنبيه + إعادة نص الباحث —
  *   ولا نُعيد الإرسال تلقائياً كي لا تُخصم نقاط مرتين.
  */
@@ -42,9 +42,7 @@
     // فقاعة معلّقة لرسالة الباحث + مؤشر «يكتب…» — تُبدَلان بردّ الخادم الحقيقي
     var typing = document.createElement('div');
     typing.className = 'bubble bubble-ai is-thinking';
-    typing.textContent = document.querySelector('.chat-modebar.is-defense')
-      ? 'المشرف يكتب…'
-      : 'المشرف الذكي يكتب…';
+    typing.textContent = 'المشرف الذكي يكتب…';
     if (messagesBox) {
       messagesBox.appendChild(pendingBubble(text));
       messagesBox.appendChild(typing);
@@ -53,9 +51,14 @@
     input.value = '';
 
     // جسم الطلب كما يفهمه المسار التقليدي (express.json يعالجه عالمياً)
+    // حماية أمنية: لا يُسلم طلب بدون محادثة مختارة — يُرجع خطأ واضح قبل أي
+    // قراءة أو تسعير، فالمحادثة يجب أن تختار من السايدبار أو دفتر الشات.
     var payload = {
       message: text,
-      conversation_id: field('conversation_id'),
+      conversation_id: (function () {
+        var raw = field('conversation_id');
+        return (raw && raw.trim()) ? raw.trim() : null;
+      })(),
       step: field('step')
     };
     var files = form.querySelectorAll('input[name="file_ids"]:checked');
@@ -63,13 +66,6 @@
       payload.file_ids = [];
       for (var i = 0; i < files.length; i++) payload.file_ids.push(files[i].value);
     }
-    // مراجع «مراجعي» المحدّدة (صفحة المعلم) — تُقرأ نصوصها من الخادم
-    var refs = form.querySelectorAll('input[name="ref_ids"]:checked');
-    if (refs.length) {
-      payload.ref_ids = [];
-      for (var r = 0; r < refs.length; r++) payload.ref_ids.push(refs[r].value);
-    }
-
     fetch(form.action, {
       method: 'POST',
       credentials: 'same-origin',
@@ -146,8 +142,7 @@
   }
   /**
    * استبدال قطع الصفحة بالقطع الجديدة القادمة من الخادم — نفس مواضع التخطيط:
-   * شريط الوضع قبل #messages، لوحة المراجع بين الرسائل والنموذج،
-   * وقائمة المحادثات في السايدبار.
+   * لوحة المراجع بين الرسائل والنموذج، وقائمة المحادثات في السايدبار.
    */
   function applyFragments(data) {
     var fragments = data.fragments || {};
@@ -157,17 +152,11 @@
       messagesBox.innerHTML = fragments.messagesHtml;
     }
 
-    // شريط الوضع (يحمل عدّاد أسئلة المناقشة إن كان في وضع المناقشة)
-    var bar = document.querySelector('.chat-modebar');
-    if (fragments.modeBarHtml) {
-      if (bar) bar.outerHTML = fragments.modeBarHtml;
-      else if (messagesBox) messagesBox.insertAdjacentHTML('beforebegin', fragments.modeBarHtml);
-    }
-
     // لوحة المراجع: تُحذف القديمة وتُدرج الجديدة قبل النموذج إن وُجدت
     var oldRefs = document.getElementById('chat-refs');
     if (oldRefs) oldRefs.remove();
     if (fragments.refsHtml) form.insertAdjacentHTML('beforebegin', fragments.refsHtml);
+
 
     // معرّف المحادثة: يتحدّث بعد أول رسالة (محادثة جديدة)
     if (data.conversationId) {

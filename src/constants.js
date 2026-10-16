@@ -75,6 +75,11 @@ export function priceMultiplier() {
   return Number.isFinite(raw) && raw > 0 && raw <= 10 ? raw : 1;
 }
 
+export const GENDER_OPTIONS = [
+  { value: 'male', label: 'شاب' },
+  { value: 'female', label: 'بنت' }
+];
+
 export const DEGREE_LEVELS = [
   { value: 'bachelor', label: 'طالب جامعي (بكالوريوس)' },
   { value: 'master', label: 'باحث ماجستير' },
@@ -284,6 +289,17 @@ export const PLATFORM_SERVICES = [
     always: true,
     planFeature: 'محادثة كاملة مع المشرف الذكي (أفكار · منهجية · صياغة · مراجعة)',
     note: 'متاحة لكل الباقات — المشرف الذكي يجيب عن أسئلتك ويقترح المصادر.'
+  },
+  {
+    key: 'voice',
+    label: 'مناقشة صوتية عبر واتساب',
+    short: 'الصوت',
+    icon: 'phone',
+    href: '/voice',
+    permission: 'voice:use',
+    always: true,
+    planFeature: 'مناقشة صوتية مع المعلم عبر واتساب',
+    note: 'مرتبطة برقم واتساب يُحدّده المدير حسب نوع الباحث (شاب/بنت).'
   },
   {
     key: 'journey',

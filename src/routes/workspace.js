@@ -45,6 +45,14 @@ import { searchLiterature, buildSearchQuery } from '../services/literature.js';
  */
 const router = express.Router();
 
+/**
+ * حدّ قراءة واسع على صفحات GET الثقيلة (M5): كل صفحة تنفّذ 4-5 استعلامات
+ * (محادثات + ملف + غير مقروء + ملفات قابلة للإرفاق)، فسكربت يُحدّث الصفحة
+ * آلياً يستنزف قاعدة البيانات. الحد 120 طلباً/5 دقائق لكل حساب لا يمسّ
+ * الاستخدام البشري الطبيعي إطلاقاً — يُطبَّق كوسيط على كل مسار GET أدناه.
+ */
+const pageReadLimit = rateLimitUser('page_read', { limit: 120, windowMs: 5 * 60 * 1000 });
+
 /** رسائل النتيجة بعد التحويل. */
 const FLASH = {
   ref_added: { type: 'ok', message: 'أُضيف المرجع إلى قائمتك.' },
@@ -89,7 +97,7 @@ router.get('/references', (req, res) => {
  * صفحة المكتبة — رابط مستقل: بحث في القواعد العلمية أولاً ثم مكتبة المنصة.
  * زر «أضف إلى المراجع» يعود بPOST إلى /references فيظهر بمراجعي (صفحة الملفات).
  */
-router.get('/library', requireService('library'), async (req, res) => {
+router.get('/library', pageReadLimit, requireService('library'), async (req, res) => {
   try {
     const userId = req.account.id;
     const query = String(req.query.q || '').trim().slice(0, 120);
@@ -139,7 +147,9 @@ router.get('/library', requireService('library'), async (req, res) => {
     const { html } = renderNotice({
       title: 'تعذّر تحميل المكتبة',
       message: 'حدث خطأ أثناء فتح المكتبة — أعد المحاولة.',
-      details: error?.message || ''
+      details: error?.message || '',
+      area: 'app',
+      activeKey: 'library'
     });
     res.status(500).type('html').send(html);
   }
@@ -274,7 +284,7 @@ router.post('/references/:id/delete', requireService('library'), async (req, res
 });
 
 /** صفحة المفكرة. */
-router.get('/notes', requireService('notes'), async (req, res) => {
+router.get('/notes', pageReadLimit, requireService('notes'), async (req, res) => {
   try {
     const userId = req.account.id;
     const query = String(req.query.q || '').trim().slice(0, 120);
@@ -307,7 +317,9 @@ router.get('/notes', requireService('notes'), async (req, res) => {
     const { html } = renderNotice({
       title: 'تعذّر تحميل المفكرة',
       message: 'حدث خطأ أثناء قراءة ملاحظاتك — أعد المحاولة.',
-      details: error?.message || ''
+      details: error?.message || '',
+      area: 'app',
+      activeKey: 'notes'
     });
     res.status(500).type('html').send(html);
   }
@@ -373,7 +385,7 @@ router.post('/notes/:id/delete', requireService('notes'), async (req, res) => {
 });
 
 /** صفحة الملفات والمراجع (صفحة واحدة): الرفع + المراجع المُضافة من المكتبة. */
-router.get('/files', requireService('files'), async (req, res) => {
+router.get('/files', pageReadLimit, requireService('files'), async (req, res) => {
   try {
     const userId = req.account.id;
     const stepKey = String(req.query.step || '').trim().slice(0, 100);
@@ -410,7 +422,9 @@ router.get('/files', requireService('files'), async (req, res) => {
     const { html } = renderNotice({
       title: 'تعذّر تحميل الملفات',
       message: 'حدث خطأ أثناء قراءة ملفاتك — أعد المحاولة.',
-      details: error?.message || ''
+      details: error?.message || '',
+      area: 'app',
+      activeKey: 'files'
     });
     res.status(500).type('html').send(html);
   }
@@ -526,7 +540,9 @@ router.get('/files/:id/view', requireService('files'), async (req, res) => {
     const { html } = renderNotice({
       title: 'الملف غير موجود',
       message: 'هذا الملف غير موجود في حسابك — ربما حُذف.',
-      extraHtml: '<div class="links"><a class="btn btn-primary" href="/files">ملفاتي</a></div>'
+      extraHtml: '<div class="links"><a class="btn btn-primary" href="/files">ملفاتي</a></div>',
+      area: 'app',
+      activeKey: 'files'
     });
     res.status(404).type('html').send(html);
     return;

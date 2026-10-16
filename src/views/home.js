@@ -38,13 +38,15 @@ export function renderStatusPage({ account = null } = {}) {
   });
 }
 
-/** صفحة 404 عربية مع روابط الصفحات المتاحة بدل رسالة JSON غامضة. */
-export function renderNotFoundPage(pathname, account = null) {
+/** صفحة 404 عربية مع روابط الصفحات المتاحة بدل رسالة JSON غامضة.
+ * المسار لا يُعرض خاماً (M4): تُعرض رسالة ثابتة فقط حتى لا ينعكس أي مدخل
+ * من عنوان URL في الصفحة. */
+export function renderNotFoundPage(_pathname, account = null) {
   const body = `
   <div class="notice">
     <h2>الصفحة غير موجودة</h2>
     <p>
-      المسار <code>${escapeHtml(pathname)}</code> غير معرّف في هذا الموقع — تحقّق من الرابط أو استخدم
+      هذا الرابط غير معرّف في هذا الموقع — تحقّق من الرابط أو استخدم
       الروابط التالية.
     </p>
     <div class="links">

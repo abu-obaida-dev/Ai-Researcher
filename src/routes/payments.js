@@ -55,7 +55,9 @@ router.get('/payments', requireAccount, async (req, res) => {
     const { html } = renderNotice({
       title: 'تعذّر تحميل صفحة الدفع',
       message: 'حدث خطأ أثناء قراءة الباقات وطرق الدفع — أعد المحاولة.',
-      details: error?.message || ''
+      details: error?.message || '',
+      area: 'app',
+      activeKey: 'payments'
     });
     res.status(500).type('html').send(html);
   }

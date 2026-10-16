@@ -6,10 +6,12 @@
  *
  * مفتاحان اثنان لا ثالث لهما:
  *   1) **مفاتيح الواجهة** (غير سرّية) في ملف البيئة `FIREBASE_*` مع بقية الإعدادات.
- *   2) **المفتاح الخاص للإرسال** في ملف حساب الخدمة `*firebase-adminsdk*.json` بجذر المشروع،
- *      نقرأه من مساره مباشرةً فلا يُنسخ أبداً إلى .env ولا إلى أي واجهة.
+ *   2) **المفتاح الخاص للإرسال** في ملف حساب خدمة `*firebase-adminsdk*.json` —
+ *      مساره المطلق في `FIREBASE_SERVICE_ACCOUNT_FILE` (خارج مجلد المشروع،
+ *      مثلاً ~/.config/zena/) ولا يُنسخ أبداً إلى .env ولا إلى أي واجهة.
  */
 import { readFileSync, readdirSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,17 +26,37 @@ const OPTIONAL_WEB_KEYS = [
   'FIREBASE_APP_ID'
 ];
 
-/** يجد ملف حساب الخدمة في جذر المشروع تلقائياً إن لم يُحدَّد مساره في البيئة. */
+/**
+ * يجد ملف حساب الخدمة (أمان C2):
+ * 1) المسار المطلق من `FIREBASE_SERVICE_ACCOUNT_FILE` — الطريقة الموصى بها
+ *    (الملف خارج مجلد المشروع، مثلاً ~/.config/zena/).
+ * 2) خط نجاة فقط: البحث في جذر المشروع — يطبع تحذيراً صريحاً كل مرة يُستخدم فيها
+ *    لأن بقاء السرّ داخل مجلد المشروع مخاطرة (نسخ احتياطي/مزامنة قد ترفعه).
+ */
 function findServiceAccountFile() {
   const configured = String(process.env.FIREBASE_SERVICE_ACCOUNT_FILE || '').trim();
-  if (configured) return path.resolve(ROOT_DIR, configured);
+  if (configured) {
+    // توسعة ~ لأن التوثيق يقترح FIREBASE_SERVICE_ACCOUNT_FILE=~/.config/zena/...
+    const expanded = configured.startsWith('~/') ? path.join(os.homedir(), configured.slice(2)) : configured;
+    return path.resolve(expanded);
+  }
 
   try {
     const match = readdirSync(ROOT_DIR).find((name) => /^[^/]*firebase-adminsdk[^/]*\.json$/.test(name));
-    return match ? path.join(ROOT_DIR, match) : '';
+    if (match) {
+      console.warn(
+        [
+          '⚠️  ملف حساب خدمة Firebase داخل جذر المشروع — أنقله خارج المجلد فوراً:',
+          `    mkdir -p ~/.config/zena && mv "${match}" ~/.config/zena/ && chmod 600 ~/.config/zena/*.json`,
+          '    ثم أضف في .env:  FIREBASE_SERVICE_ACCOUNT_FILE=~/.config/zena/' + match
+        ].join('\n')
+      );
+      return path.join(ROOT_DIR, match);
+    }
   } catch {
     return '';
   }
+  return '';
 }
 
 let serviceAccountCache;

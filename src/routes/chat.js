@@ -6,8 +6,7 @@ import {
   askSupervisor,
   deleteConversation,
   getConversation,
-  listConversations,
-  setConversationMode
+  listConversations
 } from '../services/chat.js';
 import { cancelStepReview, editStepReview, saveStepReview } from '../services/step-review.js';
 import { isValidStepKeyForUser, stepTitle } from '../services/journey.js';
@@ -26,6 +25,9 @@ import { renderChatPage, renderChatUpdate } from '../views/chat.js';
  */
 const router = express.Router();
 
+/** حدّ قراءة واسع على صفحة الشات (M5): 120 طلباً/5 دقائق لكل حساب. */
+const pageReadLimit = rateLimitUser('page_read', { limit: 120, windowMs: 5 * 60 * 1000 });
+
 /** رسائل النتيجة بعد التحويل. */
 const FLASH = {
   sent: { type: 'ok', message: 'وصل رد المشرف الذكي.' },
@@ -35,8 +37,6 @@ const FLASH = {
   failed: { type: 'error', message: 'تعذّر الوصول للمشرف الذكي الآن — نقاطك أُعيدت لرصيدك، أعد المحاولة.' },
   bad_step: { type: 'error', message: 'الخطوة المحددة غير موجودة في مسارك.' },
   missing_conversation: { type: 'error', message: 'المحادثة غير موجودة.' },
-  mode_normal: { type: 'ok', message: 'رجعت المحادثة إلى وضع الإرشاد.' },
-  mode_defense: { type: 'ok', message: 'وضع المناقشة: سؤال واحد في كل مرة، ثم تقييم الإجابة.' },
   // بطاقة مراجعة اكتمال الخطوة: لا شيء يُكتب في المسار قبل «حفظ» الباحث
   review_saved: { type: 'ok', message: 'أُكملت الخطوة وحُفظت في مسارك.' },
   review_edited: { type: 'ok', message: 'عدّل البيانات ثم اضغط «حفظ وإتمام الخطوة» لإتمامها.' },
@@ -71,7 +71,7 @@ function flashKeyForError(error) {
 }
 
 /** صفحة الشات: القراءة مسموحة للجميع، والإرسال يتطلب الملف الأساسي. */
-router.get('/chat', requireAccount, async (req, res) => {
+router.get('/chat', pageReadLimit, requireAccount, async (req, res) => {
   try {
     const userId = req.account.id;
     const conversationId = String(req.query.c || '').trim();
@@ -112,7 +112,9 @@ router.get('/chat', requireAccount, async (req, res) => {
     const { html } = renderNotice({
       title: 'تعذّر تحميل المحادثة',
       message: 'حدث خطأ أثناء قراءة محادثاتك — أعد المحاولة.',
-      details: error?.message || ''
+      details: error?.message || '',
+      area: 'app',
+      activeKey: 'chat'
     });
     res.status(500).type('html').send(html);
   }
@@ -124,7 +126,7 @@ router.get('/chat', requireAccount, async (req, res) => {
  * مساران في معالج واحد:
  * - نموذج HTML عادي (بلا جافاسكربت): 303 مع flash في الرابط — كما كان دائماً.
  * - طلب JSON (Accept: application/json من chat-send.js): قطع HTML محدّثة
- *   (رسائل + شريط وضع + مراجع + سايدبار) — بلا إعادة تحميل الصفحة.
+ *   (رسائل + مراجع + سايدبار) — بلا إعادة تحميل الصفحة.
  */
 router.post('/chat', requireCoreOnboarding, rateLimitUser('chat_message', { limit: 30, windowMs: 5 * 60 * 1000 }), async (req, res) => {
   const body = req.body || {};
@@ -180,15 +182,6 @@ router.post('/chat', requireCoreOnboarding, rateLimitUser('chat_message', { limi
         `&err=${flashKeyForError(error)}${message ? `&msg=${encodeURIComponent(message)}` : ''}`
     );
   }
-});
-
-/** تبديل وضع المحادثة: إرشاد عادي ⇄ مناقشة تدريبية. */
-router.post('/chat/:id/mode', requireAccount, async (req, res) => {
-  const conversationId = String(req.params.id);
-  const mode = String(req.body?.mode || 'normal') === 'defense' ? 'defense' : 'normal';
-  const ok = await setConversationMode(req.account.id, conversationId, mode);
-
-  res.redirect(303, `/chat?c=${encodeURIComponent(conversationId)}&${ok ? 'ok' : 'err'}=${ok ? `mode_${mode}` : 'missing_conversation'}`);
 });
 
 /**

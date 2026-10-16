@@ -107,7 +107,7 @@
     if (!value) return '';
     var date = new Date(value);
     if (isNaN(date.getTime())) return '';
-    return date.toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' });
+    return date.toLocaleString('ar-EG-u-nu-latn', { dateStyle: 'medium', timeStyle: 'short' });
   }
 
   function showEmpty(message) {

@@ -10,39 +10,32 @@ export function formatNumber(value) {
   return Number(value ?? 0).toLocaleString('en-US');
 }
 
-/** تاريخ عربي مقروء (بدون وقت). */
+/** تاريخ عربي مقروء (بدون وقت) — بأرقام لاتينية (F1: لا خلط مع formatNumber). */
 export function formatDate(value) {
   if (!value) return '—';
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
 
-  return new Intl.DateTimeFormat('ar-EG', {
+  return new Intl.DateTimeFormat('ar-EG-u-nu-latn', {
     day: 'numeric',
     month: 'long',
     year: 'numeric'
   }).format(date);
 }
 
-/** تاريخ ووقت مختصر. */
+/** تاريخ ووقت مختصر — بأرقام لاتينية (F1). */
 export function formatDateTime(value) {
   if (!value) return '—';
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
 
-  return new Intl.DateTimeFormat('ar-EG', {
+  return new Intl.DateTimeFormat('ar-EG-u-nu-latn', {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit'
   }).format(date);
-}
-
-/** السعر بالريال/الدولار كما هو مخزّن، مع علامة العملة. */
-export function formatPrice(value) {
-  const amount = Number(value ?? 0);
-  if (amount === 0) return 'مجاناً';
-  return `${amount.toFixed(2)} ر.س`;
 }
 
 /**

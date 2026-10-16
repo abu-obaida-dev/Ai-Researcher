@@ -202,6 +202,7 @@ export async function saveOnboarding(userId, data) {
   const values = [
     userId,
     data.full_name || '',
+    data.gender || '',
     data.research_field || '',
     data.research_title || '',
     data.degree_level || 'bachelor',
@@ -219,11 +220,12 @@ export async function saveOnboarding(userId, data) {
   const { rows } = await pool.query(
     `INSERT INTO profiles (user_id, full_name, research_field, research_title, degree_level,
                            academic_year, university, faculty, research_interests,
-                           preferred_language, about, research_stage, methodology, citation_style,
+                           preferred_language, about, research_stage, methodology, citation_style, gender,
                            created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
      ON CONFLICT (user_id) DO UPDATE SET
        full_name = EXCLUDED.full_name,
+       gender = EXCLUDED.gender,
        research_field = EXCLUDED.research_field,
        research_title = EXCLUDED.research_title,
        degree_level = EXCLUDED.degree_level,
@@ -236,6 +238,7 @@ export async function saveOnboarding(userId, data) {
        research_stage = EXCLUDED.research_stage,
        methodology = EXCLUDED.methodology,
        citation_style = EXCLUDED.citation_style,
+       gender = EXCLUDED.gender,
        updated_at = NOW()
      RETURNING *`,
     values

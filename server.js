@@ -12,6 +12,7 @@ import { adminRouter } from './src/routes/admin.js';
 import { authRouter } from './src/routes/auth.js';
 import { chatRouter } from './src/routes/chat.js';
 import { assistantRouter } from './src/routes/assistant.js';
+import { voiceRouter } from './src/routes/voice.js';
 import { defenseRouter } from './src/routes/defense.js';
 import { paymentsRouter } from './src/routes/payments.js';
 import { requireSameOrigin, securityHeaders } from './src/middleware/security.js';
@@ -21,7 +22,6 @@ import { workspaceRouter } from './src/routes/workspace.js';
 import { attachAccount } from './src/middleware/auth.js';
 import { freeTrialTokens, listPublicPlans } from './src/services/plans.js';
 import { APP_NAME, APP_TAGLINE } from './src/constants.js';
-import {  } from './src/services/ai.js';
 import { renderLandingPage } from './src/views/landing.js';
 import { listPaymentMethods, siteCurrency } from './src/services/payments.js';
 import { renderNotFoundPage, renderStatusPage } from './src/views/home.js';
@@ -165,7 +165,8 @@ function assertProductionSecurity() {
     adminToken = crypto.randomBytes(32).toString('hex');
     process.env.ADMIN_TOKEN = adminToken;
     warnings.push(
-      `ADMIN_TOKEN ${reason} — وُلّد رمز مؤقّت للوحة الإدارة:\n     ${adminToken}\n` +
+      'ADMIN_TOKEN ' + reason + ' — وُلّد رمز مؤقّت للوحة الإدارة (أُوّله ' +
+        adminToken.slice(0, 4) + '… — القيمة الكاملة لا تُطبع في السجل).\n' +
         '     ⚠️  ثبّته في متغيّرات Vercel الآن، وإلا سيتغيّر عند كل نشر.'
     );
   }
@@ -208,7 +209,8 @@ const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'publ
 const BRAND_ICON = path.join(PUBLIC_DIR, 'zena-ai-icon.svg');
 
 // CSP: نضيف فقط ما تحتاجه إشعارات Firebase — سكربتات gstatic (مكتبة الإشعارات)
-// ونقاط اتصال FCM، مع السماح بصور الحسابات الخارجية. باقي الافتراضات تبقى كما هي
+// ونقاط اتصال FCM، مع السماح بصور حسابات جوجل فقط (M3: لا https: عام —
+// الصور الخارجية الوحيدة هي photo_url من ملف جوجل كما في auth.js:41 وlayout.js:1621).
 // (سكربتات self فقط، بدون أي inline scripts). وCOEP يُعطّل حتى لا يمنع تحميل مكتبة Firebase.
 // تشخيص البيئة: يُطبع في سجل النشر بأسماء المتغيّرات الناقصة فقط (بلا أي قيمة).
 for (const line of envPresenceReport().lines) console.log(line);
@@ -219,7 +221,7 @@ app.use(
       directives: {
         scriptSrc: ["'self'", 'https://www.gstatic.com'],
         connectSrc: ["'self'", 'https://*.googleapis.com', 'https://www.gstatic.com'],
-        imgSrc: ["'self'", 'data:', 'https:']
+        imgSrc: ["'self'", 'data:', 'https://lh3.googleusercontent.com', 'https://lh4.googleusercontent.com', 'https://lh5.googleusercontent.com', 'https://lh6.googleusercontent.com']
       }
     },
     crossOriginEmbedderPolicy: false
@@ -229,7 +231,7 @@ app.use(
  * CORS: لا نسمح إلا بأصل المنصة نفسه.
  *
  * قبل: `cors()` مفتوح ⇒ `Access-Control-Allow-Origin: *` ⇒ أي موقع يقرأ
- * ردود الـ API우리 (حتى لو الكوكي SameSite=Lax يمنع إرساله).
+ * ردود الـ API (حتى لو الكوكي SameSite=Lax يمنع إرساله).
  * بعد: نسمح فقط بـ SITE_URL/APP_BASE_URL إن ضُبطا، وإلا **لا نرسل** ترويسة CORS
  * إطلاقاً ⇒ الطلبات من مواقع أخرى يُحجبها المتصفح. وهذا آمن لأن كل واجهة
  * المنصة (الصفحات و Service Worker) على نفس الأصل ولا تحتاج CORS أصلاً.
@@ -373,10 +375,12 @@ app.get('/api/users', async (req, res) => {
     );
     res.json({ users: result.rows });
   } catch (error) {
+    // إخفاء تفاصيل driver قاعدة البيانات في الإنتاج (H1) — نفس نمط /api/health.
+    const isProd = process.env.NODE_ENV === 'production';
+    console.error('فشل جلب المستخدمين:', error?.message || error);
     res.status(500).json({
       message: 'Failed to fetch users',
-      hint: hintForDatabaseError(error),
-      error: error instanceof Error ? error.message : 'Unknown error'
+      ...(isProd ? {} : { hint: hintForDatabaseError(error), error: error instanceof Error ? error.message : 'Unknown error' })
     });
   }
 });
@@ -386,10 +390,12 @@ app.get('/api/plans', async (_req, res) => {
     const result = await pool.query('SELECT * FROM plans ORDER BY created_at DESC');
     res.json({ plans: result.rows });
   } catch (error) {
+    // مسار عام بلا مصادقة: الإخفاء واجب في الإنتاج (H1) — قد يكشف مضيف/مستخدم قاعدة البيانات.
+    const isProd = process.env.NODE_ENV === 'production';
+    console.error('فشل جلب الباقات:', error?.message || error);
     res.status(500).json({
       message: 'Failed to fetch plans',
-      hint: hintForDatabaseError(error),
-      error: error instanceof Error ? error.message : 'Unknown error'
+      ...(isProd ? {} : { hint: hintForDatabaseError(error), error: error instanceof Error ? error.message : 'Unknown error' })
     });
   }
 });
@@ -411,7 +417,6 @@ app.get('/manifest.webmanifest', (_req, res) => {
     orientation: 'portrait',
     background_color: '#ffffff',
     theme_color: '#102A43',
-    lang_ar: 'ar',
     icons: [
       { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
       { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
@@ -496,6 +501,7 @@ app.use(journeyRouter);
 app.use(workspaceRouter);
 app.use(chatRouter);
 app.use(assistantRouter);
+app.use(voiceRouter);
 app.use(defenseRouter);
 
 // الاشتراك والدفع اليدوي خارج المنصة (الباحث)
@@ -509,11 +515,11 @@ app.use('/admin', adminRouter);
 app.use((req, res) => {
   // مسارات الـ API تبقى JSON، وبقية المسارات تحصل على صفحة 404 عربية واضحة
   if (req.path.startsWith('/api')) {
-    res.status(404).json({ message: `Route not found: ${req.originalUrl}` });
+    res.status(404).json({ message: 'المسار غير موجود.' });
     return;
   }
 
-  res.status(404).type('html').send(renderNotFoundPage(req.originalUrl, req.account));
+  res.status(404).type('html').send(renderNotFoundPage('', req.account));
 });
 
 /**
@@ -542,7 +548,8 @@ app.use((error, req, res, next) => {
   const { html } = renderNotice({
     title: 'حدث خطأ غير متوقع',
     message: 'تعذّر تنفيذ الطلب — أعد المحاولة بعد قليل.',
-    details: isProd ? '' : String(error?.message || '')
+    details: isProd ? '' : String(error?.message || ''),
+    area: 'public'
   });
   res.status(500).type('html').send(html);
 });

@@ -8,8 +8,13 @@ import { renderNotice } from '../views/layout.js';
 import { notifyUser } from '../services/notifications.js';
 import {
   currentSupportWhatsapp,
+  currentVoiceWhatsappMale,
+  currentVoiceWhatsappFemale,
+  loadVoiceWhatsappMale,
+  loadVoiceWhatsappFemale,
   saveStorageLimits,
   saveSupportWhatsapp,
+  saveVoiceWhatsapp,
   storageLimits
 } from '../services/settings.js';
 import {
@@ -23,8 +28,6 @@ import {
 } from '../views/admin.js';
 import { deleteFile } from '../services/files.js';
 
-/** دور المشرف الأكاديمي — مرجع واحد لكل ما يخصّه في اللوحة. */
-const SUPERVISOR_ROLE = 'supervisor';
 import {
   addRolePermission,
   addSupervisor,
@@ -66,21 +69,23 @@ const router = express.Router();
 const PAGE_SIZE = 20;
 const ALLOWED_FILTERS = new Set(['all', 'active', 'disabled']);
 
+/** دور المشرف الأكاديمي — مرجع واحد لكل ما يخصّه في اللوحة. */
+const SUPERVISOR_ROLE = 'supervisor';
+
 /** معرّف UUID صالح (لوحة تفصيل الباحث) + بريد صالح + صلاحية صالحة. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const PERMISSION_RE = /^[A-Za-z0-9:_-]{1,100}$/;
 
 /**
- * يبني دالة عودة للصفحة نفسها بعد عملية POST مع الحفاظ على رمز الإدارة (?token=).
+ * يبني دالة عودة للصفحة نفسها بعد عملية POST (M2: بلا ?token= في الرابط —
+ * الدخول بالكوكي HttpOnly فقط؛ الرمز في الرابط يُحوَّل لكوكي ويُنظَّف فوراً
+ * في requireAdminAccess، فلا حاجة لإعادة نشره في أي رابط).
  * الاستخدام: const back = tokenBack(req); res.redirect(302, back('/admin/users', { ok: '...' }));
  */
-function tokenBack(req) {
-  const token = String(req.query.token || '').slice(0, 200);
+function tokenBack(_req) {
   return (path, extra = {}) => {
-    const params = new URLSearchParams(extra);
-    if (token) params.set('token', token);
-    const query = params.toString();
+    const query = new URLSearchParams(extra).toString();
     return query ? `${path}?${query}` : path;
   };
 }
@@ -736,6 +741,38 @@ router.post('/settings/support-whatsapp', requireAdminPermission('admin:settings
   }
 });
 
+/** رقم واتساب الصوت للشباب — يضبطه المدير من الإعدادات. */
+router.post('/settings/whatsapp-voice-male', requireAdminPermission('admin:settings'), async (req, res) => {
+  const back = tokenBack(req);
+  try {
+    const result = await saveVoiceWhatsapp('whatsapp_voice_male', req.body?.whatsapp);
+    res.redirect(
+      302,
+      back('/admin/settings', result.ok
+        ? { saved: '1', note: result.value ? 'voice_male_saved' : 'voice_male_cleared' }
+        : { error: result.error })
+    );
+  } catch (error) {
+    res.redirect(302, back('/admin/settings', { error: hintForDatabaseError(error) }));
+  }
+});
+
+/** رقم واتساب الصوت للبنات — يضبطه المدير من الإعدادات. */
+router.post('/settings/whatsapp-voice-female', requireAdminPermission('admin:settings'), async (req, res) => {
+  const back = tokenBack(req);
+  try {
+    const result = await saveVoiceWhatsapp('whatsapp_voice_female', req.body?.whatsapp);
+    res.redirect(
+      302,
+      back('/admin/settings', result.ok
+        ? { saved: '1', note: result.value ? 'voice_female_saved' : 'voice_female_cleared' }
+        : { error: result.error })
+    );
+  } catch (error) {
+    res.redirect(302, back('/admin/settings', { error: hintForDatabaseError(error) }));
+  }
+});
+
 /** حفظ عملة الموقع (دينار ليبي / دولار) — تسري على كل الأسعار فوراً. */
 router.post('/settings/currency', requireAdminPermission('admin:settings'), async (req, res) => {
   const back = tokenBack(req);
@@ -953,6 +990,8 @@ router.get('/settings', requireAdminPermission('admin:settings'), (req, res) =>
         supervisors,
         supervisorPermissions: await storedPermissionsOfRole(SUPERVISOR_ROLE),
         supportWhatsapp: currentSupportWhatsapp(),
+        voiceMale: currentVoiceWhatsappMale(),
+        voiceFemale: currentVoiceWhatsappFemale(),
         currency,
         methods,
         saved: req.query.saved === '1',

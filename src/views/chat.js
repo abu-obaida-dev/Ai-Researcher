@@ -67,30 +67,6 @@ function renderConversations(conversations, activeId) {
 </div>`;
 }
 
-/** شريط الوضع: إرشاد عادي ⇄ مناقشة تدريبية، مع عدّاد أسئلة المناقشة. */
-function renderModeBar(conversation) {
-  if (!conversation?.id) return '';
-
-  const isDefense = conversation.mode === 'defense';
-  const state = conversation.defense_state || {};
-  const asked = Number(state.asked) || 0;
-
-  const toggle = isDefense
-    ? `<form method="post" action="/chat/${escapeHtml(conversation.id)}/mode" class="inline-form">
-    <input type="hidden" name="mode" value="normal" />
-    <button class="btn btn-quiet btn-sm" type="submit">${icon('message', 'icon-sm')} إنهاء المناقشة</button>
-  </form>`
-    : `<form method="post" action="/chat/${escapeHtml(conversation.id)}/mode" class="inline-form">
-    <input type="hidden" name="mode" value="defense" />
-    <button class="btn btn-quiet btn-sm" type="submit">${icon('clipboard', 'icon-sm')} ابدأ مناقشة</button>
-  </form>`;
-
-  return `<div class="chat-modebar${isDefense ? ' is-defense' : ''}">
-  <span>${isDefense ? `${icon('clipboard', 'icon-sm')} وضع المناقشة${asked ? ` — ${asked} سؤال` : ''}` : `${icon('sparkles', 'icon-sm')} وضع الإرشاد`}</span>
-  ${toggle}
-</div>`;
-}
-
 /**
  * إرفاق ملفات مع الرسالة: مربّعات اختيار **داخل نموذج الإرسال** (كانت خارج النموذج
  * فلا تصل المشرف ولا واحدة)، مع وسم «يُقرأ/غير مقروء» لكل صيغة.
@@ -255,7 +231,7 @@ function renderStepReviewCard(conversation) {
 /**
  * قطع تحديث الشات بعد إرسال رسالة عبر الجافاسكربت (بلا إعادة تحميل الصفحة).
  * تعيد نفس مخرجات دوال العرض الحالية — مصدر واحد للشكل — ليستبدلها chat-send.js
- * في مواضعها: صندوق الرسائل (بما فيها بطاقة المراجعة)، شريط الوضع، لوحة المراجع،
+ * في مواضعها: صندوق الرسائل (بما فيها بطاقة المراجعة)، لوحة المراجع،
  * وقائمة المحادثات في السايدبار.
  */
 export function renderChatUpdate({ conversation = null, conversations = [] }) {
@@ -265,7 +241,6 @@ export function renderChatUpdate({ conversation = null, conversations = [] }) {
 
   return {
     messagesHtml,
-    modeBarHtml: renderModeBar(conversation),
     refsHtml: renderReferencesFound(conversation),
     conversationsHtml: renderConversations(conversations, conversation?.id || '')
   };
@@ -318,7 +293,6 @@ export function renderChatPage({
   ${profileNoticeHtml}
   ${flashHtml}
   ${stepContext}
-  ${renderModeBar(conversation)}
   <div class="chat-body" id="messages">${messagesHtml}${renderStepReviewCard(conversation)}</div>
 
   ${renderReferencesFound(conversation)}
@@ -328,7 +302,7 @@ export function renderChatPage({
     <input type="hidden" name="step" value="${escapeHtml(stepKey)}" />
     <div class="chat-composer-row">
       <textarea id="message" name="message" rows="1" required maxlength="8000"
-        placeholder="${conversation?.mode === 'defense' ? 'اكتب إجابتك…' : 'اكتب رسالتك إلى المشرف الذكي…'}"
+        placeholder="اكتب رسالتك إلى المشرف الذكي…"
         aria-label="رسالتك إلى المشرف الذكي">${escapeHtml(prefill)}</textarea>
       <button class="btn btn-primary chat-send" type="submit" title="إرسال" aria-label="إرسال">${icon('send')}</button>
     </div>

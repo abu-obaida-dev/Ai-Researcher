@@ -102,7 +102,6 @@ const APP_NAV = [
   { href: '/library', label: 'المكتبة', key: 'library', icon: 'searchCheck', service: 'library' },
   { href: '/notes', label: 'المفكرة', key: 'notes', icon: 'list', service: 'notes' },
   { href: '/files', label: 'ملفاتي ومراجعي', key: 'files', icon: 'clipboard', service: 'files' },
-  { href: '/defense', label: 'المناقشة', key: 'defense', icon: 'graduation', service: 'defense' },
   { href: '/payments', label: 'الاشتراك والدفع', key: 'payments', icon: 'coins' }
 ];
 
@@ -111,6 +110,12 @@ const APP_CHAT_NAV = { href: '/chat', label: 'المشرف الذكي', key: 'ch
 
 /** رابط «المعلم» — مساعد تعليمي مستقل (تعليم · ترجمة · تلخيص من المكتبة). */
 const APP_ASSISTANT_NAV = { href: '/assistant', label: 'المعلم', key: 'assistant', icon: 'sparkles', service: 'chat' };
+
+/** رابط «المناقشة الصوتية» — واتساب حسب نوع الباحث (شاب/بنت). */
+const APP_VOICE_NAV = { href: '/voice', label: 'مناقشة صوتية', key: 'voice', icon: 'phone', service: 'voice' };
+
+/** رابط «محاكاة المناقشة» — دردشة مناقشة مستقلة بملف بحث ثابت (ظاهر دائماً بلا بوابة باقة). */
+const APP_DEFENSE_NAV = { href: '/defense', label: 'محاكاة المناقشة', key: 'defense', icon: 'graduation' };
 
 /**
  * روابط الحساب (legacy): لم تعد تُستخدم في السايدبار — الحساب/الملف البحثي/الخروج
@@ -713,6 +718,9 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   transition: border-color .15s ease, box-shadow .15s ease;
 }
 .field textarea { min-height: 88px; line-height: 1.8; resize: vertical; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 640px) { .form-grid { grid-template-columns: 1fr; } }
+
 .field input[type=text]:focus, .field input[type=number]:focus, .field input[type=email]:focus,
 .field input[type=date]:focus, .field input[type=password]:focus,
 .field select:focus, .field textarea:focus { border-color: var(--fresh); box-shadow: 0 0 0 3px var(--fresh-12); }
@@ -805,6 +813,9 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 }
 .chat-modebar span { display: inline-flex; align-items: center; gap: 6px; }
 .chat-modebar.is-defense { background: rgba(15, 40, 62, 0.08); color: var(--ink); }
+.chat-thesis { flex: 0 0 auto; margin: 0 0 8px; padding: 10px 12px; border: 1px solid var(--mist); border-radius: 14px; background: var(--mist-soft); font-size: 13px; }
+.chat-thesis > summary { cursor: pointer; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+.chat-thesis.is-required { border-color: #d9a441; background: #fdf6e3; }
 
 /* نتائج أداة المراجع: لوحة قابلة للطي فوق صندوق الكتابة — لا تغطي الحوار أبداً.
    مطويّة افتراضياً، وعند الفتح لها تمرير داخلي بارتفاع محدود. */
@@ -1406,6 +1417,8 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 /* نحدّد اللون هنا لأن .bubble-user في صفحة الهبوط يستخدم خلفية غامقة ونصاً أبيض */
 .bubble-user { background: var(--mist-soft); color: var(--ink); border: 1px solid var(--mist); align-self: flex-start; }
 .bubble-ai { background: #fff; color: var(--ink); border: 1px solid #cfe3f0; align-self: flex-end; }
+/* رسالة نظام داخل دردشة المناقشة (كإشعار تثبيت الملف): مصغّرة ومتمركزة. */
+.bubble-system { background: transparent; color: var(--slate); border: 1px dashed var(--mist); align-self: center; font-size: 11.5px; padding: 5px 12px; max-width: min(92%, 560px); text-align: center; }
 .bubble-text { white-space: pre-wrap; line-height: 1.9; overflow-wrap: anywhere; }
 .bubble-meta { font-size: 10.5px; color: var(--slate); margin-top: 6px; }
 /* مؤشر «يكتب…» وفقاعة معلّقة أثناء الإرسال بلا إعادة تحميل (chat-send.js) */
@@ -1695,6 +1708,8 @@ function renderAppSidebar(activeKey, account, navBottom = '') {
       <div class="app-nav-sep"></div>
       ${visible(APP_CHAT_NAV) ? link(APP_CHAT_NAV) : ''}
       ${visible(APP_ASSISTANT_NAV) ? link(APP_ASSISTANT_NAV) : ''}
+      ${visible(APP_VOICE_NAV) ? link(APP_VOICE_NAV) : ''}
+      ${link(APP_DEFENSE_NAV)}
       ${navBottom}
     </div>
   </nav>
@@ -1949,17 +1964,27 @@ ${scriptTags}
 </html>`;
 }
 
-/** صفحة رسالة (خطأ أو تنبيه) بنفس هوية المنصة. */
-export function renderNotice({ title, message, details = '', status = 200, extraHtml = '' }) {
+/** صفحة رسالة (خطأ أو تنبيه) بنفس هوية المنصة.
+ * التفاصيل التقنية تُعرض في التطوير فقط (H1): في الإنتاج تُخفى تلقائياً
+ * حتى لا تكشف نصوص driver/مضيف/مستخدم قاعدة البيانات للمستخدم النهائي. */
+export function renderNotice({ title, message, details = '', status = 200, extraHtml = '', area = '', subtitle = '', activeKey = '' }) {
+  // نفس نمط /api/health: التفاصيل للسجل فقط في الإنتاج، وللشاشة في التطوير.
+  const showDetails = process.env.NODE_ENV !== 'production' ? details : '';
   const body = `
   <div class="notice">
     <h2>${escapeHtml(title)}</h2>
     <p>${escapeHtml(message)}</p>
-    ${details ? `<pre>${escapeHtml(details)}</pre>` : ''}
+    ${showDetails ? `<pre>${escapeHtml(showDetails)}</pre>` : ''}
     ${extraHtml}
   </div>`;
 
-  return { status, html: renderLayout({ title, subtitle: 'لوحة الإدارة', activeKey: 'home', body }) };
+  // F7: القيم الافتراضية تتبع السياق — نداءات الإدارة (بلا area) تحصل على
+  // «لوحة الإدارة/home» كما قبل، ونداءات المستخدم (مع area) تحصل على عنوان محايد.
+  const resolvedArea = area || 'public';
+  const resolvedSubtitle = subtitle || (area ? 'حدث خطأ' : 'لوحة الإدارة');
+  const resolvedKey = activeKey || (area ? area : 'home');
+
+  return { status, html: renderLayout({ title, subtitle: resolvedSubtitle, activeKey: resolvedKey, area: resolvedArea, body }) };
 }
 
 /**

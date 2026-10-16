@@ -242,7 +242,8 @@ export async function can(account, permission) {
  */
 export async function servicesFor(account) {
   const permissions = await permissionsFor(account);
-  const allowed = (service) => permissions.has('*') || permissions.has(service.permission);
+  const allowed = (service) =>
+    service.always || permissions.has('*') || permissions.has(service.permission);
 
   return PLATFORM_SERVICES.map((service) => ({
     ...service,

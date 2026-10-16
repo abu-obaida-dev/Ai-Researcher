@@ -7,7 +7,7 @@ import {
   TOKEN_COSTS
 } from '../constants.js';
 import { escapeHtml, renderLayout, renderStat, renderTable, whatsappLink } from './layout.js';
-import { formatDate, formatDateTime, formatMoney, formatNumber, formatPrice } from './format.js';
+import { formatDate, formatDateTime, formatMoney, formatNumber } from './format.js';
 import { icon } from './icons.js';
 import { LIBRARY_EXTENSIONS } from '../services/library.js';
 import { formatStorageMb, planFeaturesFromPermissions, storageLabel } from '../services/plans.js';
@@ -171,7 +171,6 @@ function operationsFilterBar({ action, adminToken = '', q = null, date = '', h1 
       <button class="btn btn-primary" type="submit">تصفية</button>
       <a class="btn btn-quiet" href="${escapeHtml(action)}">عرض الكل</a>
     </div>
-    ${adminToken ? `<input type="hidden" name="token" value="${escapeHtml(adminToken)}" />` : ''}
   </form>`;
 }
 
@@ -333,7 +332,7 @@ export function renderAdminHome({
   <div class="card">
     <h2>إرسال إشعار للباحثين</h2>
     <p class="muted">يُحفظ داخل موقع كل باحث فوراً، ويصل كإشعار هاتف (push) لمن سجّل توكن جهازه.</p>
-    <form method="post" action="/admin/notifications${adminToken ? `?token=${encodeURIComponent(adminToken)}` : ''}">
+    <form method="post" action="/admin/notifications">
       <div class="field">
         <label for="notif-title">عنوان الإشعار</label>
         <input type="text" id="notif-title" name="title" maxlength="120" required placeholder="مثال: بوابة الرسائل مفتوحة الآن" />
@@ -484,8 +483,8 @@ export function renderAdminUsers({
     ['disabled', 'الموقوفة']
   ];
 
-  // جزء ?token= يُعاد في كل رابط/نموذج ليعمل الزائر من localhost وصاحب الرمز من أي جهاز
-  const tokenQuery = adminToken ? `?token=${encodeURIComponent(adminToken)}` : '';
+  // (M2: الرمز لا يظهر في أي رابط — الدخول بالكوكي HttpOnly فقط).
+  const tokenQuery = '';
 
   const link = (nextFilter, nextPage = 1) => {
     const params = new URLSearchParams({ filter: nextFilter, page: String(nextPage) });
@@ -620,13 +619,13 @@ export function renderAdminPlans({
   adminToken = '',
   account = null
 }) {
-  const token = adminToken ? `?token=${encodeURIComponent(adminToken)}` : '';
+  const token = ''; // M2: الرمز لا يظهر في أي رابط.
 
   const rows = plans.map(
     (plan) => `
     <td class="strong">${escapeHtml(plan.code)}</td>
     <td>${escapeHtml(plan.title)}</td>
-    <td>${escapeHtml(formatPrice(plan.price))}</td>
+    <td>${escapeHtml(formatMoney(plan.price, plan.currency))}</td>
     <td>${escapeHtml(formatNumber(plan.tokens))}</td>
     <td>${escapeHtml(formatStorageMb(plan.storage_mb))}</td>
     <td>${escapeHtml(plan.role_code || '—')}</td>
@@ -866,6 +865,8 @@ export function renderAdminSettings({
   supervisors = [],
   supervisorPermissions = [],
   supportWhatsapp = '',
+  voiceMale = '',
+  voiceFemale = '',
   currency = 'LYD',
   methods = [],
   saved = false,
@@ -873,7 +874,7 @@ export function renderAdminSettings({
   adminToken = '',
   account = null
 }) {
-  const token = adminToken ? `?token=${encodeURIComponent(adminToken)}` : '';
+  const token = ''; // M2: الرمز لا يظهر في أي رابط.
   const stats = [
     ['أقصى حجم للملف الواحد', `${limits.maxUploadMb} MB`],
     ['المساحة الكلية لكل باحث', `${limits.maxStorageMb} MB`],
@@ -1035,6 +1036,65 @@ function supportSection(supportWhatsapp, token) {
   </div>`;
 }
 
+/**
+ * أرقام الواتساب للصوت (مناقشة صوتية): رقم منفصل للشباب ورقم منفصل للبنات.
+ * المدير يضبطهما من هنا ويُชี้ كل باحث إلى الرقم الذي يناسبه حسب جنسه.
+ */
+function voiceSection(voiceMale, voiceFemale, token) {
+  const currentMale = String(voiceMale || '').trim();
+  const currentFemale = String(voiceFemale || '').trim();
+  const previewMale = currentMale ? `https://wa.me/${currentMale.replace(/\D/g, '')}` : '';
+  const previewFemale = currentFemale ? `https://wa.me/${currentFemale.replace(/\D/g, '')}` : '';
+
+  return `<div class="card mt-16">
+    <div class="card-head">
+      <h2>المناقشة الصوتية عبر واتساب</h2>
+    </div>
+    <p class="muted">رقمان منفصلان للواتساب: أحدهما للشباب والآخر للبنات.
+      يُوجّه الباحث إلى الرقم الذي يناسب جنسه عند الضغط على زر «مناقشة صوتية»
+      في صفحته الشخصية. اترك الحقل فارغاً لإخفاء الرقم المعني.</p>
+
+    <div class="form-grid">
+      <form method="post" action="/admin/settings/whatsapp-voice-male${token}" class="form-card">
+        <div class="field">
+          <label for="wa-voice-male">رقم واتساب الصوت — الشباب</label>
+          <input type="text" id="wa-voice-male" name="whatsapp" inputmode="tel" maxlength="24"
+            value="${escapeHtml(currentMale)}" placeholder="09xxxxxxxx أو +2189xxxxxxxx" />
+          <p class="form-hint">أرقام فقط (8 إلى 15 رقماً). اتركه فارغاً لإخفاء رقم الشباب.</p>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" type="submit">حفظ رقم الشباب</button>
+          ${
+            previewMale
+              ? `<a class="btn" href="${escapeHtml(previewMale)}" target="_blank" rel="noopener">معاينة ↗</a>
+                 <span class="muted">${escapeHtml(currentMale)}</span>`
+              : '<span class="muted">لا رابط بعد.</span>'
+          }
+        </div>
+      </form>
+
+      <form method="post" action="/admin/settings/whatsapp-voice-female${token}" class="form-card">
+        <div class="field">
+          <label for="wa-voice-female">رقم واتساب الصوت — البنات</label>
+          <input type="text" id="wa-voice-female" name="whatsapp" inputmode="tel" maxlength="24"
+            value="${escapeHtml(currentFemale)}" placeholder="09xxxxxxxx أو +2189xxxxxxxx" />
+          <p class="form-hint">أرقام فقط (8 إلى 15 رقماً). اتركه فارغاً لإخفاء رقم البنات.</p>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" type="submit">حفظ رقم البنات</button>
+          ${
+            previewFemale
+              ? `<a class="btn" href="${escapeHtml(previewFemale)}" target="_blank" rel="noopener">معاينة ↗</a>
+                 <span class="muted">${escapeHtml(currentFemale)}</span>`
+              : '<span class="muted">لا رابط بعد.</span>'
+          }
+        </div>
+      </form>
+    </div>
+  </div>`;
+}
+
+
 const supervisorsSection = `<div class="card mt-16">
     <div class="card-head">
       <h2>المشرفون (${escapeHtml(formatNumber(supervisors.length))})</h2>
@@ -1106,6 +1166,7 @@ const supervisorsSection = `<div class="card mt-16">
   </div>
   ${paymentsSection}
   ${supportSection(supportWhatsapp, token)}
+  ${voiceSection(voiceMale, voiceFemale, token)}
   ${supervisorsSection}`;
 
   return renderLayout({
@@ -1133,7 +1194,7 @@ export function renderAdminUserDetail({
   adminToken = '',
   account = null
 }) {
-  const token = adminToken ? `?token=${encodeURIComponent(adminToken)}` : '';
+  const token = ''; // M2: الرمز لا يظهر في أي رابط.
   const base = `/admin/users/${user.id}`;
   const isSelf = Boolean(account && account.id === user.id);
   const notice = ok && OK_TEXT[ok] ? `<div class="notice">${escapeHtml(OK_TEXT[ok])}</div>` : '';
@@ -1466,7 +1527,6 @@ function libraryFetchPanel({ sources, search, q, status, adminToken, token }) {
     <div class="lib-section-head"><h2>جلب من مواقع مجانية</h2></div>
     <p class="lib-hint">اختر المصدر ثم اكتب كلمة بحث أو تصنيفاً — والنتيجة تظهر أسفل الصفحة.</p>
     <form class="lib-form" method="get" action="/admin/library">
-      ${adminToken ? `<input type="hidden" name="token" value="${escapeHtml(adminToken)}" />` : ''}
       <input type="hidden" name="q" value="${escapeHtml(q)}" />
       <input type="hidden" name="status" value="${escapeHtml(status)}" />
       <div class="lib-fields">
@@ -1536,7 +1596,7 @@ export function renderAdminLibrary({
   adminToken = '',
   account = null
 }) {
-  const token = adminToken ? `?token=${encodeURIComponent(adminToken)}` : '';
+  const token = ''; // M2: الرمز لا يظهر في أي رابط.
   const notice = OK_TEXT[ok] ? `<div class="notice">${escapeHtml(OK_TEXT[ok])}${note ? ` — ${escapeHtml(note)}` : ''}</div>` : '';
   const errorNotice = error ? `<div class="alert">${escapeHtml(error)}</div>` : '';
   const acceptTypes = LIBRARY_EXTENSIONS.map((ext) => `.${ext}`).join(',');
@@ -1551,7 +1611,7 @@ export function renderAdminLibrary({
   const filterLinks = ['all', 'active', 'off']
     .map((value) => {
       const label = { all: 'الكل', active: 'مفعّلة', off: 'معطّلة' }[value];
-      const href = `/admin/library${buildQuery({ q, status: value, page: 1, esrc: search.source, eq: search.q, subject: search.subject, token: adminToken })}`;
+      const href = `/admin/library${buildQuery({ q, status: value, page: 1, esrc: search.source, eq: search.q, subject: search.subject })}`;
       return `<a class="chip${status === value ? ' is-active' : ''}" href="${href}">${escapeHtml(label)}</a>`;
     })
     .join('');
@@ -1559,8 +1619,8 @@ export function renderAdminLibrary({
   const pager = pages > 1
     ? `<div class="toolbar mt-12">
       <span class="muted">صفحة ${escapeHtml(formatNumber(page))} من ${escapeHtml(formatNumber(pages))}</span>
-      ${page > 1 ? `<a class="btn btn-sm" href="/admin/library${buildQuery({ q, status, page: page - 1, esrc: search.source, eq: search.q, subject: search.subject, token: adminToken })}">السابق</a>` : ''}
-      ${page < pages ? `<a class="btn btn-sm" href="/admin/library${buildQuery({ q, status, page: page + 1, esrc: search.source, eq: search.q, subject: search.subject, token: adminToken })}">التالي</a>` : ''}
+      ${page > 1 ? `<a class="btn btn-sm" href="/admin/library${buildQuery({ q, status, page: page - 1, esrc: search.source, eq: search.q, subject: search.subject })}">السابق</a>` : ''}
+      ${page < pages ? `<a class="btn btn-sm" href="/admin/library${buildQuery({ q, status, page: page + 1, esrc: search.source, eq: search.q, subject: search.subject })}">التالي</a>` : ''}
     </div>`
     : '';
 
@@ -1579,7 +1639,6 @@ export function renderAdminLibrary({
       <div class="lib-section-head">
         <h2>عناصر المكتبة${total ? ` (${formatNumber(total)})` : ''}</h2>
         <form class="toolbar" method="get" action="/admin/library" role="search">
-          ${adminToken ? `<input type="hidden" name="token" value="${escapeHtml(adminToken)}" />` : ''}
           <input type="hidden" name="status" value="${escapeHtml(status)}" />
           <input type="hidden" name="esrc" value="${escapeHtml(search.source || '')}" />
           <input type="hidden" name="eq" value="${escapeHtml(search.q || '')}" />
@@ -1612,14 +1671,16 @@ export function renderAdminLibrary({
   });
 }
 
-/** رابط استعلام آمن من كائن قيم. */
+/** رابط استعلام آمن من كائن قيم (M2: مفتاح token مُتجاهَل عمداً —
+ * الرمز لا يظهر في أي رابط؛ الدخول بالكوكي HttpOnly فقط). */
 function buildQuery(values = {}) {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(values || {})) {
+    if (key === 'token') continue;
     if (value === undefined || value === null) continue;
     const text = String(value).trim();
     if (!text) continue;
-    params.set(key, key === 'token' ? text.slice(0, 200) : text.slice(0, 200));
+    params.set(key, text.slice(0, 200));
   }
   const query = params.toString();
   return query ? `?${query}` : '';

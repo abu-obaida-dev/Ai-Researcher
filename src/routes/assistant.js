@@ -6,7 +6,7 @@ import { askAssistant, deleteConversation, getConversation, listConversations } 
 import { unreadCount } from '../services/notifications.js';
 import { getProfile } from '../services/users.js';
 import { listFiles } from '../services/files.js';
-import { listUserReferences } from '../services/workspace.js';
+
 import { renderNotice } from '../views/layout.js';
 import { renderAssistantPage, renderAssistantUpdate } from '../views/assistant.js';
 
@@ -20,6 +20,9 @@ import { renderAssistantPage, renderAssistantUpdate } from '../views/assistant.j
  * المشرف الذكي — ولا يمسّ خطوات الرحلة ولا الذاكرة.
  */
 const router = express.Router();
+
+/** حدّ قراءة واسع على صفحة المعلم (M5): 120 طلباً/5 دقائق لكل حساب. */
+const pageReadLimit = rateLimitUser('page_read', { limit: 120, windowMs: 5 * 60 * 1000 });
 
 /** رسائل النتيجة بعد التحويل. */
 const FLASH = {
@@ -53,7 +56,7 @@ function flashKeyForError(error) {
 }
 
 /** صفحة المعلم: القراءة مسموحة للجميع، والإرسال يتطلب الملف الأساسي. */
-router.get('/assistant', requireAccount, async (req, res) => {
+router.get('/assistant', pageReadLimit, requireAccount, async (req, res) => {
   try {
     const userId = req.account.id;
     const conversationId = String(req.query.c || '').trim();
@@ -75,7 +78,6 @@ router.get('/assistant', requireAccount, async (req, res) => {
         conversations,
         prefill: seedPrompt,
         attachableFiles: await listFiles(userId, { limit: 12 }),
-        attachableRefs: await listUserReferences(userId).catch(() => []),
         providers: availableProviders(),
         flash: flashFromQuery(req.query)
       })
@@ -84,7 +86,9 @@ router.get('/assistant', requireAccount, async (req, res) => {
     const { html } = renderNotice({
       title: 'تعذّر تحميل المعلم',
       message: 'حدث خطأ أثناء قراءة محادثاتك — أعد المحاولة.',
-      details: error?.message || ''
+      details: error?.message || '',
+      area: 'app',
+      activeKey: 'assistant'
     });
     res.status(500).type('html').send(html);
   }
@@ -113,8 +117,6 @@ router.post(
         conversationId: conversationId || null,
         // ملفات يرفقها الباحث بهذه الرسالة (من ملفاته المرفوعة فقط — تُتحقّق الملكية)
         fileIds: body.file_ids,
-        // مراجع من «مراجعي» يحدّدها الباحث (نصّها الكامل إن كان لها ملف — تُتحقّق الملكية)
-        refIds: body.ref_ids,
         profile
       });
 

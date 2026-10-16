@@ -22,6 +22,77 @@ export const STORAGE_DEFAULTS = {
 let supportWhatsappCache = null;
 const SUPPORT_KEY = 'support_whatsapp';
 
+/** أرقام الواتساب للصوت (مناقشة صوتية): رقم للشباب ورقم للبنات.
+ * يُحدّدهما المدير من لوحة الإدارة ويُخزَّنان في settings تحت
+ * `whatsapp_voice_male` و `whatsapp_voice_female`. كاش في الذاكرة لكل منهما.
+ */
+let voiceWhatsappMaleCache = null;
+let voiceWhatsappFemaleCache = null;
+const VOICE_MALE_KEY = 'whatsapp_voice_male';
+const VOICE_FEMALE_KEY = 'whatsapp_voice_female';
+
+/** يحمل رقم WhatsApp للصوت للشباب من قاعدة البيانات إلى الكاش. */
+export async function loadVoiceWhatsappMale() {
+  try {
+    voiceWhatsappMaleCache = (await readSetting(VOICE_MALE_KEY)) || '';
+  } catch {
+    voiceWhatsappMaleCache = '';
+  }
+  return voiceWhatsappMaleCache;
+}
+
+/** يحمل رقم WhatsApp للصوت للبنات من قاعدة البيانات إلى الكاش. */
+export async function loadVoiceWhatsappFemale() {
+  try {
+    voiceWhatsappFemaleCache = (await readSetting(VOICE_FEMALE_KEY)) || '';
+  } catch {
+    voiceWhatsappFemaleCache = '';
+  }
+  return voiceWhatsappFemaleCache;
+}
+
+/** رقم الصوت الفعّال للشباب: المخزّن أولاً، ثم البيئة، ثم فارغ. */
+export function currentVoiceWhatsappMale() {
+  return String(voiceWhatsappMaleCache || '').trim() || String(process.env.WHATSAPP_VOICE_MALE || '').trim();
+}
+
+/** رقم الصوت الفعّال للبنات: المخزّن أولاً، ثم البيئة، ثم فارغ. */
+export function currentVoiceWhatsappFemale() {
+  return String(voiceWhatsappFemaleCache || '').trim() || String(process.env.WHATSAPP_VOICE_FEMALE || '').trim();
+}
+
+/** رقم الصوت حسب الجنس: 'male' ⇒ رقم الشباب، 'female' ⇒ رقم البنات. */
+export function currentVoiceWhatsappByGender(gender = '') {
+  const g = String(gender || '').trim().toLowerCase();
+  if (g === 'female' || g === 'أنثى' || g === 'بنت') return currentVoiceWhatsappFemale();
+  return currentVoiceWhatsappMale(); // الافتراضي: رقم الشباب
+}
+
+/** يحفظ رقم واتساب الصوت بعد التحقق من صحته (نفس تنسيق دعم الواتساب). */
+export async function saveVoiceWhatsapp(key, value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    if (key === VOICE_MALE_KEY) voiceWhatsappMaleCache = '';
+    else voiceWhatsappFemaleCache = '';
+    await writeSetting(key, '');
+    return { ok: true, value: '' };
+  }
+
+  const digits = raw.replace(/\D/g, '');
+  if (!/^\+?\d{8,15}$/.test(raw.replace(/[\s()-]/g, ''))) {
+    return { ok: false, error: 'رقم غير صالح — اكتبه أرقاماً فقط (8 إلى 15 رقماً)، مثل 0912345678.' };
+  }
+  if (digits.length < 8 || digits.length > 15) {
+    return { ok: false, error: `طول الرقم ${digits.length} رقماً — المطلوب 8 إلى 15.` };
+  }
+
+  const clean = raw.startsWith('+') ? `+${digits}` : digits;
+  if (key === VOICE_MALE_KEY) voiceWhatsappMaleCache = clean;
+  else voiceWhatsappFemaleCache = clean;
+  await writeSetting(key, clean);
+  return { ok: true, value: clean };
+}
+
 /** يحمّل الرقم من قاعدة البيانات إلى الكاش (مرة عند تشغيل الخادم). */
 export async function loadSupportWhatsapp() {
   try {

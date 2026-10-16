@@ -52,7 +52,9 @@ router.get('/journey', requireService('journey'), requireCoreOnboarding, async (
     const { html } = renderNotice({
       title: 'تعذّر تحميل مسار البحث',
       message: 'حدث خطأ أثناء قراءة خطوات المسار — أعد المحاولة بعد لحظات.',
-      details: error?.message || ''
+      details: error?.message || '',
+      area: 'app',
+      activeKey: 'journey'
     });
     res.status(500).type('html').send(html);
   }

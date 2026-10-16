@@ -1,7 +1,8 @@
 import { pool } from '../db/client.js';
 import { CHAT_REPLY_CAPS, TOKEN_COSTS, isUuid } from '../constants.js';
 import { runSupervisor } from './ai.js';
-import { extractStatedTopic, literatureToolFor, wantsLiterature } from './literature.js';
+import { extractDefenseFinalTag } from './defense.js';
+import { askedForReferenceTitle, extractStatedTopic, literatureToolFor, wantsLiterature } from './literature.js';
 import { isValidStepKeyForUser, recordTopic, registeredTopic } from './journey.js';
 import { buildSupervisorContext } from './supervisor-context.js';
 import { buildSystemPrompt } from './supervisor-prompt.js';
@@ -45,13 +46,13 @@ function sanitizeUserText(text) {
   return String(text || '').replace(STRIKE_TAG, '').replace(/\s+$/, '');
 }
 
-/** تاريخ محادثات الباحث (الأحدث أولاً) مع عدد الرسائل. */
+/** تاريخ محادثات الإرشاد فقط — جلسات المناقشة المستقلة لها صفحة /defense ولا تظهر هنا. */
 export async function listConversations(userId, { limit = 12 } = {}) {
   const { rows } = await pool.query(
     `SELECT c.id, c.title, c.step_key, c.mode, c.provider, c.created_at, c.updated_at,
             (SELECT count(*)::int FROM messages m WHERE m.conversation_id = c.id) AS messages_count
        FROM conversations c
-      WHERE c.user_id = $1
+      WHERE c.user_id = $1 AND c.mode <> 'defense'
       ORDER BY c.updated_at DESC
       LIMIT $2`,
     [userId, Math.min(Math.max(Number(limit) || 12, 1), 50)]
@@ -79,7 +80,9 @@ export async function getConversation(userId, conversationId) {
 
 /** إنشاء محادثة جديدة باسم مختصر من أول سؤال — والوضع إرشادي افتراضياً. */
 export async function createConversation(userId, { title = '', stepKey = null, mode = 'normal' } = {}) {
-  const nextMode = mode === 'defense' ? 'defense' : 'normal';
+  // /defense استخدم دائماً service defense (defense.js) — لا تسمح لـ chat.js بإنشاء
+  // محادثة ب mode='defense' أو كتابة defense_state (تفصل المسار بأكمله).
+  const nextMode = 'normal';
   const { rows } = await pool.query(
     'INSERT INTO conversations (user_id, title, step_key, mode) VALUES ($1, $2, $3, $4) RETURNING *',
     [userId, String(title || 'محادثة جديدة').trim().slice(0, TITLE_LIMIT), stepKey || null, nextMode]
@@ -119,11 +122,13 @@ function titleFromPrompt(prompt) {
   return line.trim().slice(0, 60);
 }
 
-/** آخر محادثة سابقة لها رسائل، لاستخدامها في تلخيص الذاكرة عند بدء جلسة جديدة. */
+/** آخر محادثة سابقة لها رسائل، لاستخدامها في تلخيص الذاكرة عند بدء جلسة جديدة —
+ * محادثات المناقشة (defense) مستثناة: ذاكرة المشرف من محادثاته الإرشادية وحدها. */
 async function lastRichConversation(userId, excludeId = null) {
   const { rows } = await pool.query(
     `SELECT c.id FROM conversations c
       WHERE c.user_id = $1 AND c.id IS DISTINCT FROM $2
+        AND c.mode <> 'defense'
         AND (SELECT count(*) FROM messages m WHERE m.conversation_id = c.id) >= 4
       ORDER BY c.updated_at DESC LIMIT 1`,
     [userId, excludeId || null]
@@ -132,14 +137,23 @@ async function lastRichConversation(userId, excludeId = null) {
   return rows[0]?.id || null;
 }
 
-/** حالة المناقشة: عدّاد الأسئلة والمحاور (تُحفظ في conversations.defense_state). */
+/**
+ * حالة المناقشة (تُحفظ في conversations.defense_state): العدّاد ووقت البدء
+ * وملف البحث المثبّت والأجزاء المغطاة وحالة الانتهاء — تُحفظ كل الحقول
+ * موجودة كي لا يُسقط أي ردّ من المناقِش تثبيت الملف أو علامة الانتهاء.
+ */
 function readDefenseState(conversation) {
   const state = conversation?.defense_state;
   if (!state || typeof state !== 'object') return { asked: 0, startedAt: null };
 
   return {
+    ...state,
     asked: Number(state.asked) || 0,
-    startedAt: state.startedAt || null
+    startedAt: state.startedAt || null,
+    thesisFileId: state.thesisFileId || null,
+    coveredParts: Array.isArray(state.coveredParts) ? state.coveredParts : [],
+    askedQuestions: Array.isArray(state.askedQuestions) ? state.askedQuestions : [],
+    done: Boolean(state.done)
   };
 }
 
@@ -171,7 +185,8 @@ export async function askSupervisor({
   stepKey = null,
   profile = {},
   fileIds = [],
-  mode = null
+  mode = null,
+  internal = false
 }) {
   const question = sanitizeUserText(String(prompt || '').trim().slice(0, PROMPT_LIMIT));
   if (!question) {
@@ -193,11 +208,10 @@ export async function askSupervisor({
     throw error;
   }
 
-  // محادثة جديدة: ننشئها أولاً لنعرف وضعها، ونتذكّر السابقة لتلخيص ذاكرتها
-  const previousId = conversation ? null : await lastRichConversation(userId);
+  // محادثة جديدة (الوضع الإرشادي فقط).
   if (!conversation) {
-    const created = await createConversation(userId, { title: titleFromPrompt(question), stepKey, mode });
-    conversation = { ...created, messages: [], mode: created.mode || mode || 'normal', defense_state: {} };
+    const created = await createConversation(userId, { title: titleFromPrompt(question), stepKey, mode: 'normal' });
+    conversation = created;
   }
 
   const context = await buildSupervisorContext({ userId, profile, conversation, fileIds });
@@ -230,6 +244,11 @@ export async function askSupervisor({
    * الروابط كلها حقيقية (DOI/الناشر/نسخة مفتوحة) وما دون ذلك يقول «ابحثت ولم أجد».
    * التكلفة: بلا خصم نقاط (نداء خارجي رخيص) مع تسجيله في سجل الاستهلاك.
    */
+  // جلسة المناقشة (defense): لا أداة مراجع إطلاقاً — لا بحث خارجي، ولا استبدال
+  // رسالة الباحث بتعليمات الأداة، ولا سؤال عن «عنوان تريد مراجعه» — المناقشة
+  // كلها حول نص البحث وحده. (كان سؤال أكاديمي يحوي «بعنوان… ومراجعات…؟» يُفعّل
+  // بوابة «سبق سؤاله عن العنوان» زوراً فتُستبدل إجابته بطلب مراجع لم يطلبه.)
+  const isDefenseConversation = conversation.mode === 'defense';
   let references = null;
   // هل ما زال في خطوة تحديد المشكلة؟ (topic أولى خطوات كل مسارات الرحلة).
   const inTopicStep = String(context.currentStepKey || stepKey || '') === 'topic';
@@ -255,18 +274,15 @@ export async function askSupervisor({
       .filter(Boolean)
       .join(' · ');
 
-    // هل سبق أن سألناه عن العنوان في هذه المحادثة؟ (لنفادي سؤال مكرّر)
-    // نتحقّق أننا سبق عن العنوان (المحرّك قد يصوغ السؤال بصيغ مختلفة)
-    const askedBefore = conversation.messages.slice(-3).some((message) => {
-      if (message.role !== 'assistant') return false;
-      const text = String(message.content || '');
-      if (/في أي عنوان|أي عنوان بالتحديد/.test(text)) return true;
-      return /(عنوان|موضوع)/.test(text) && /(مراجع|مصادر)/.test(text) && /[؟?]/.test(text);
-    });
+    // هل سبق أن سألناه عن العنوان الذي يريد مراجعه؟ (لنفادي سؤال مكرّر)
+    // عبر askedForReferenceTitle المشدّدة: لا يكفي ذكر (عنوان + مراجع + ؟) في أي
+    // ردّ أكاديمي — وإلا انطبق سؤال المناقشة («…بعنوان… ومراجعات العدالة…؟»)
+    // فتُعامَل إجابته كطلب مراجع لم يطلبه وتُستبدل رسالته بتعليمات الأداة.
+    const askedBefore = askedForReferenceTitle(conversation.messages);
 
     // بوابة مرحلة topic: لا أداة مراجع قبل اكتمال تعريف المشكلة وحدودها —
     // تسجيل موضوع عام وحده لا يكفي (المراجع تعود بعد اكتمال الخطوة).
-    references = inTopicStep
+    references = inTopicStep || isDefenseConversation
       ? null
       : await literatureToolFor(question, {
           limit: 6,
@@ -301,7 +317,8 @@ export async function askSupervisor({
           ? `اذكري أن تخصصه في ملفه «${context.field}» وتسأليه إن كان العنوان داخل هذا التخصص أو خارجه.\n`
           : '') +
         'لا تعرضي أي مرجع من معرفتكِ الآن، ولا تَعِدْه به. انتظري جوابه ثم ابحثي له في رسالته التالية.\n' +
-        'قاعدة عامة: لا تفترض شيئاً من عندك ولا تخمّن ما يريده.'
+        'قاعدة عامة: لا تفترض شيئاً من عندك ولا تخمّن ما يريده.\n' +
+        `\n---\nرسالة الباحث كما كتبها (لا تتجاهليها ولا تصنّعها كأنها طلب مراجع): ${question}`
     };
   } else if (references?.block) {
     messages[messages.length - 1] = {
@@ -315,7 +332,7 @@ export async function askSupervisor({
    * لرفض لطيف ثم سؤال إرشادي واحد يستكمل به تحديد المشكلة وحدودها —
    * لا مراجع ولا روابط ولا وعود بها في هذه المرحلة.
    */
-  if (inTopicStep && references === null && wantsLiterature(question)) {
+  if (inTopicStep && !isDefenseConversation && references === null && wantsLiterature(question)) {
     messages[messages.length - 1] = {
       role: 'user',
       content:
@@ -388,8 +405,22 @@ export async function askSupervisor({
   let strikes = context.strikes;
   if (cleaned.hadStrike) strikes = await addStrike(userId);
 
-  await appendMessage(conversation.id, { role: 'user', content: question, tokensUsed: charged });
-  await appendMessage(conversation.id, { role: 'assistant', content: cleaned.text, model: reply.model });
+  // وسم ختام المناقشة: المناقِش يوسم تقييمه النهائي [[defense-final]] فيُحذف
+  // الوسم ويُغلق مسار الجلسة فوراً — لا بعده سؤال ولا حاجة لزر «إنهاء».
+  let replyText = cleaned.text;
+  let defenseEnded = false;
+  if (conversation.mode === 'defense') {
+    const extracted = extractDefenseFinalTag(replyText);
+    replyText = extracted.text;
+    defenseEnded = extracted.ended;
+  }
+
+  // internal: برومبت تعليمات من النظام (كبدء المناقشة أو طلب رفع البحث) — يُحفظ ردّ
+  // المناقِش فقط، ولا تُحفظ رسالة التعليمات كأنها كتبها الباحث حتى لا تظهر له.
+  if (!internal) {
+    await appendMessage(conversation.id, { role: 'user', content: question, tokensUsed: charged });
+  }
+  await appendMessage(conversation.id, { role: 'assistant', content: replyText, model: reply.model });
   await pool.query('UPDATE conversations SET provider = $2 WHERE id = $1', [conversation.id, reply.provider]);
 
   // نتائج أداة المراجع: قواعد البيانات الخارجية + ما وجدناه في مكتبة المنصة (وروابطه).
@@ -458,10 +489,14 @@ export async function askSupervisor({
     }
   }
 
-  // عدّاد أسئلة المناقشة (الإجمالي 11 سؤالاً حتى التقييم النهائي)
+  // عدّاد أسئلة المناقشة وإغلاقها: المناقِش هو من يقرر الانتهاء بتقييمه
+  // (الوسم الداخلي [[defense-final]]) — عنده لا يُزاد عدّاد الأسئلة وتُغلق الجلسة.
+  //
+  // ملاحظة أمنية: يُثبَّت حالة المناقشة فقط بواسطة service defense (defense.js).
+  // لا يكتب chat.js إلى conversations.defense_state لمحادثة mode='defense'،
+  // لمنع تسرب مسار /defense إلى متجر محادثات الشات وتبادل الحالة.
   if (conversation.mode === 'defense') {
-    const state = readDefenseState(conversation);
-    await writeDefenseState(conversation.id, { ...state, asked: state.asked + 1, startedAt: state.startedAt || new Date().toISOString() });
+    // محادثة دفاعية: لا تؤثر chat.js على defense_state؛ المسار وحده يفعل ذلك.
   }
 
   // مراجعة اكتمال الخطوة: كشف حتمي يضع بطاقة معلّقة فقط — لا يمسّ المسار
@@ -478,7 +513,7 @@ export async function askSupervisor({
   return {
     conversationId: conversation.id,
     title: conversation.title,
-    answer: cleaned.text,
+    answer: replyText,
     provider: reply.provider,
     model: reply.model,
     tokensCharged: charged,
@@ -486,20 +521,9 @@ export async function askSupervisor({
     strikes,
     // المراجع التي عثرت عليها الأداة (خارجية + مكتبة المنصة): تُعرض تحت الرد برابط كل مرجع
     references: foundReferences,
-    mode: conversation.mode
+    mode: conversation.mode,
+    answer: replyText
   };
-}
-
-/** تبديل وضع المحادثة بين الإرشاد العادي ووضع المناقشة. */
-export async function setConversationMode(userId, conversationId, mode) {
-  if (!isUuid(conversationId)) return false;
-  const next = mode === 'defense' ? 'defense' : 'normal';
-  const { rowCount } = await pool.query(
-    "UPDATE conversations SET mode = $3, defense_state = '{}'::jsonb WHERE id = $2 AND user_id = $1",
-    [userId, conversationId, next]
-  );
-
-  return rowCount > 0;
 }
 
 /** تكلفة رسالة الشات التقديرية المعروضة في الواجهة قبل الإرسال. */

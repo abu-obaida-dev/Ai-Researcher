@@ -69,14 +69,13 @@ export function renderAdminPayments({
   adminToken = '',
   account = null
 }) {
-  const token = adminToken ? `?token=${encodeURIComponent(adminToken)}` : '';
+  const token = ''; // M2: الرمز لا يظهر في أي رابط.
   const notice = ok ? `<div class="notice">${escapeHtml(ok)}</div>` : '';
   const errorNotice = error ? `<div class="alert"><b>تعذّر:</b> ${escapeHtml(error)}</div>` : '';
 
   const link = (value, label, count) => {
     const params = new URLSearchParams({ status: value, page: '1' });
     if (q) params.set('q', q);
-    if (adminToken) params.set('token', adminToken);
     return `<a class="chip${status === value ? ' is-active' : ''}" href="/admin/payments?${params.toString()}">${escapeHtml(
       label
     )}: ${formatNumber(count)}</a>`;
@@ -116,7 +115,6 @@ export function renderAdminPayments({
     </div>
     <div class="lib-hero-filters">${filters}</div>
     <form class="toolbar" method="get" action="/admin/payments">
-      ${adminToken ? `<input type="hidden" name="token" value="${escapeHtml(adminToken)}" />` : ''}
       <input type="hidden" name="status" value="${escapeHtml(status)}" />
       <div class="field">
         <label for="pay-q">بحث</label>

@@ -34,14 +34,14 @@ function emptyStats() {
 function weekdayLabel(isoDay) {
   const date = new Date(`${isoDay}T00:00:00`);
   if (Number.isNaN(date.getTime())) return isoDay;
-  return new Intl.DateTimeFormat('ar-EG', { weekday: 'short' }).format(date);
+  return new Intl.DateTimeFormat('ar-EG-u-nu-latn', { weekday: 'short' }).format(date);
 }
 
 /** تسمية اليوم والشهر للعرض المختصر (مثل «1 أكتوبر»). */
 function dateLabel(isoDay) {
   const date = new Date(`${isoDay}T00:00:00`);
   if (Number.isNaN(date.getTime())) return isoDay;
-  return new Intl.DateTimeFormat('ar-EG', { day: 'numeric', month: 'long' }).format(date);
+  return new Intl.DateTimeFormat('ar-EG-u-nu-latn', { day: 'numeric', month: 'long' }).format(date);
 }
 
 /**

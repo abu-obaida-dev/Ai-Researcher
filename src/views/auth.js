@@ -1,6 +1,7 @@
 import {
   APP_NAME,
   DEGREE_LEVELS,
+  GENDER_OPTIONS,
   GOAL_OPTIONS,
   PLATFORM_SERVICES,
   PROGRESS_LEVELS,
@@ -10,6 +11,7 @@ import {
 } from '../constants.js';
 import { formatDate, formatDateTime, formatNumber } from './format.js';
 import { formatStorageMb } from '../services/plans.js';
+import { currentVoiceWhatsappByGender } from '../services/settings.js';
 import { googleIcon, icon } from './icons.js';
 import { BRAND, escapeHtml, renderLayout } from './layout.js';
 import { needsOnboarding } from '../middleware/auth.js';
@@ -213,6 +215,12 @@ export function renderOnboardingPage({ account, values, errors = [], profile = n
       ${errorBox}
 
       <section class="form-section first">
+        <h2>ما هو نوعك؟</h2>
+        <p class="form-hint">يُستخدم لتوجيهك إلى رقم واتساب المناقشة الصوتية المناسب (شاب/بنت).</p>
+        ${choiceGrid('gender', GENDER_OPTIONS, values.gender)}
+      </section>
+
+      <section class="form-section first">
         <h2>ما هي مرحلتك الأكاديمية؟</h2>
         <p class="form-hint">تُستخدم لضبط عمق الإشراف ومستوى المراجع المقترحة.</p>
         ${choiceGrid('degree_level', DEGREE_LEVELS, values.degree_level)}
@@ -358,10 +366,40 @@ export function renderAccountPage({ account, profile, plan, usage, unread = 0 })
     ${renderUsageList(usage.recent)}
   </div>`;
 
-  const body = `<div class="account-grid">
+  const voiceCard = (() => {
+  const gender = profile?.gender || '';
+  const number = currentVoiceWhatsappByGender(gender);
+  const hasNumber = Boolean(number);
+  const waLink = hasNumber ? `https://wa.me/${number.replace(/\D/g, '')}` : null;
+
+  return `<div class="card">
+    <div class="card-head">
+      <h2>المناقشة الصوتية (واتساب)</h2>
+    </div>
+    <p class="muted">رقم واتساب المناقشة الصوتية المُوجّه إليك حسب نوعك المسجَّل
+      (<span class="strong">${escapeHtml(gender || 'غير محدد')}</span>).</p>
+
+    ${hasNumber
+      ? `<div class="form-actions">
+         <a class="btn btn-primary btn-block" href="${escapeHtml(waLink)}" target="_blank" rel="noopener">
+           ${icon('phone', 'icon-sm')} فتح محادثة واتساب — ${escapeHtml(number)}
+         </a>
+       </div>`
+      : `<div class="alert">
+         <b>رقم غير متاح بعد.</b> لم يُضبط رقم واتساب للصوت لنوعك من قبل الإدارة.
+         يُرجى التواصل مع الدعم الفني.
+       </div>`
+    }
+
+    <p class="muted">يمكنك تعديل نوعك من <a href="/onboarding">ملفك البحثي</a> لتوجيهك إلى الرقم المناسب.</p>
+  </div>`;
+})();
+
+const body = `<div class="account-grid">
   ${hero}
   ${balanceCard}
   ${profileCard}
+  ${voiceCard}
   ${usageCard}
 </div>`;
 

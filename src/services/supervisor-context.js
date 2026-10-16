@@ -24,11 +24,12 @@ const MAX_ATTACHED_FILES = 3;
 const MAX_FILE_CHARS = 12000;
 const MAX_FILES_BLOCK_CHARS = 40000;
 
-/** تقدير «أيام منذ آخر نشاط» من أعلى طابع زمني بين الأنشطة. */
+/** تقدير «أيام منذ آخر نشاط» من أعلى طابع زمني بين الأنشطة — محادثات
+ * المناقشة (defense) مستثناة: للمشرف ذاكرته من إرشاده وحده (لكل شخصية ذاكرتها). */
 async function daysSinceLastActivity(userId) {
   const { rows } = await pool.query(
     `SELECT GREATEST(
-       COALESCE((SELECT MAX(updated_at) FROM conversations WHERE user_id = $1), '-infinity'::timestamptz),
+       COALESCE((SELECT MAX(updated_at) FROM conversations WHERE user_id = $1 AND mode <> 'defense'), '-infinity'::timestamptz),
        COALESCE((SELECT MAX(created_at) FROM files WHERE user_id = $1), '-infinity'::timestamptz),
        COALESCE((SELECT MAX(completed_at) FROM user_step_progress WHERE user_id = $1), '-infinity'::timestamptz)
      ) AS last_activity`,
@@ -41,12 +42,13 @@ async function daysSinceLastActivity(userId) {
   return Math.max(0, Math.floor((Date.now() - new Date(last).getTime()) / 864e5));
 }
 
-/** أول رسالة في تاريخ الباحث مع المنصة (عبر كل محادثاته). */
+/** أول رسالة إرشادية في تاريخ الباحث مع المشرف (محادثات المناقشة/المعلم
+ * مستثناة — لكل شخصية ذاكرتها وبدايتها). */
 async function isFirstMessageEver(userId) {
   const { rows } = await pool.query(
     `SELECT count(*)::int AS total
        FROM messages m JOIN conversations c ON c.id = m.conversation_id
-      WHERE c.user_id = $1 AND m.role = 'user'`,
+      WHERE c.user_id = $1 AND c.mode <> 'defense' AND m.role = 'user'`,
     [userId]
   );
 
@@ -136,19 +138,34 @@ async function buildFilesBlock(userId, fileIds = []) {
  * conversation: الصف الحالي (أو null لمحادثة جديدة) — يحدّد الوضع وسقف الرد.
  */
 export async function buildSupervisorContext({ userId, profile = {}, conversation = null, fileIds = [] } = {}) {
+  // جلسة المناقشة المستقلة: ملف البحث ثابت في defense_state ويُحقن تلقائياً
+  // في كل رسالة — لا يحتاج الباحث لإعادة إرفاقه في كل مرة.
+  const isDefenseConversation = conversation?.mode === 'defense';
+  let defenseThesisId = null;
+  if (isDefenseConversation) {
+    const raw = conversation?.defense_state;
+    const state = raw && typeof raw === 'object' ? raw : {};
+    if (state.thesisFileId) defenseThesisId = String(state.thesisFileId);
+  }
+  const effectiveFileIds = defenseThesisId ? [defenseThesisId] : fileIds;
+
+  // استقلال المناقِش عن المشرف: في defense لا تُقرأ ذاكرة المشرف ولا تنبيهاته
+  // ولا رحلة البحث أصلاً — سياق المناقِش = ملف الباحث + رسائل هذه الجلسة وحدها.
   const [journey, strikes, memoryRow, files] = await Promise.all([
-    getJourney(userId, profile.degree_level).catch(() => null),
-    getStrikes(userId).catch(() => 0),
-    pool
-      .query('SELECT memory, open_task FROM supervisor_memory WHERE user_id = $1', [userId])
-      .then(({ rows }) => rows[0] || {})
-      .catch(() => ({})),
-    buildFilesBlock(userId, fileIds)
+    isDefenseConversation ? Promise.resolve(null) : getJourney(userId, profile.degree_level).catch(() => null),
+    isDefenseConversation ? Promise.resolve(0) : getStrikes(userId).catch(() => 0),
+    isDefenseConversation
+      ? Promise.resolve({})
+      : pool
+          .query('SELECT memory, open_task FROM supervisor_memory WHERE user_id = $1', [userId])
+          .then(({ rows }) => rows[0] || {})
+          .catch(() => ({})),
+    buildFilesBlock(userId, effectiveFileIds)
   ]);
 
   const [firstEver, idleDays] = await Promise.all([
-    isFirstMessageEver(userId).catch(() => false),
-    daysSinceLastActivity(userId).catch(() => null)
+    isDefenseConversation ? Promise.resolve(false) : isFirstMessageEver(userId).catch(() => false),
+    isDefenseConversation ? Promise.resolve(null) : daysSinceLastActivity(userId).catch(() => null)
   ]);
 
   const degree = DEGREE_LEVELS.find((item) => item.value === profile.degree_level)?.label || '';
@@ -188,18 +205,21 @@ export async function buildSupervisorContext({ userId, profile = {}, conversatio
     university: orDash([profile.university, profile.faculty].filter(Boolean).join(' — ')),
     language,
     citationStyle,
-    currentStage: orDash(journey?.current?.title || stage),
+    currentStage: isDefenseConversation ? 'مناقشة أكاديمية مستقلة' : orDash(journey?.current?.title || stage),
     // مفتاح خطوة المرحلة الحالية — تستخدمه الأدوات للبوابة (مثلاً أداة المراجع
-    // لا تعمل إلا في مرحلة الدراسات السابقة).
-    currentStepKey: journey?.current?.key || '',
-    topicRecorded: String(journey?.steps?.find((step) => step.key === 'topic')?.outputNote || '').trim(),
-    stepsStatus: stepsStatusLine(journey),
-    journeyCompleted: Boolean(journey?.completed),
-    memorySummary: String(memoryRow.memory || ''),
-    openTask: String(memoryRow.open_task || ''),
+    // لا تعمل إلا في مرحلة الدراسات السابقة). في المناقشة: لا خطوة ولا بوابة.
+    currentStepKey: isDefenseConversation ? '' : journey?.current?.key || '',
+    topicRecorded: isDefenseConversation
+      ? ''
+      : String(journey?.steps?.find((step) => step.key === 'topic')?.outputNote || '').trim(),
+    stepsStatus: isDefenseConversation ? '' : stepsStatusLine(journey),
+    journeyCompleted: isDefenseConversation ? false : Boolean(journey?.completed),
+    // ذاكرة المشرفة والمهام والتنبيهات: لا شيء منها يصل المناقِش المستقل
+    memorySummary: isDefenseConversation ? '' : String(memoryRow.memory || ''),
+    openTask: isDefenseConversation ? '' : String(memoryRow.open_task || ''),
     daysSinceLast: idleDays,
     isFirstMessageEver: firstEver,
-    strikes,
+    strikes: isDefenseConversation ? 0 : strikes,
     mode: isDefense ? 'defense' : 'normal',
     files: files.block,
     fileNames: files.names,
