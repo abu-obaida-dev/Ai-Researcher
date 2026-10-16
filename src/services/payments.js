@@ -165,7 +165,7 @@ export async function createPaymentRequest(userId, input = {}) {
   if (!method) throw badInput('طريقة الدفع غير متاحة — حدّث الصفحة.', 'BAD_METHOD');
   if (Number(plan.price) <= 0) throw badInput('هذه الباقة مجانية — لا تحتاج طلب دفع.', 'BAD_PLAN');
   if (!whatsappNumber || !isValidWhatsapp(whatsappNumber)) {
-    throw badInput('رقم الواتساب مطلوب (مثال: 0912345678).', 'BAD_WHATSAPP');
+    throw badInput(`رقم الواتساب غير صالح: "${whatsappNumber}". الصيغ المقبولة: 0912345678 أو +218912345678 أو 00218912345678.`, 'BAD_WHATSAPP');
   }
 
   const { rows: pending } = await pool.query(
