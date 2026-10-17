@@ -689,11 +689,61 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 button.btn:disabled { opacity: .55; cursor: not-allowed; }
 
 /* ==== نماذج الملف البحثي ==== */
+.onboarding-card { max-width: 980px; margin: 0 auto 60px; padding: 0 20px; }
 .onboarding-grid { display: grid; gap: 18px; grid-template-columns: 1.6fr 1fr; align-items: start; }
 .onboarding-standalone { max-width: 980px; margin: 0 auto; padding: 34px 20px 48px; }
 .onboarding-standalone .page-head { text-align: center; margin-bottom: 20px; }
 .onboarding-aside { display: grid; gap: 14px; }
-.form-card { background: #fff; border: 1px solid var(--mist); border-radius: 20px; padding: 26px; }
+/* حقل الواتساب مع أيقونة */
+.wa-section { margin-top: 26px; padding-top: 24px; border-top: 1px solid var(--mist); }
+.wa-section h2 { font-size: 15px; margin-bottom: 8px; color: var(--ink); }
+.wa-field { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.wa-icon { width: 24px; height: 24px; color: #25D366; flex-shrink: 0; filter: drop-shadow(0 1px 2px rgba(0,0,0,.15)); }
+.wa-field input {
+  flex: 1;
+  padding: 12px 16px;
+  border: var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.wa-field input::placeholder { color: var(--mist); }
+.wa-field input:focus {
+  border-color: var(--sea);
+  box-shadow: 0 0 0 3px var(--mist-soft);
+}
+/* قائمة دولة الواتساب + عرض المفتاح أمام الرقم (الرقم يُكتب محلياً بدون المفتاح) */
+.wa-field .wa-country {
+  flex: 0 1 auto; width: auto; min-width: 148px; max-width: 60%;
+  padding: 12px 30px 12px 13px; border: var(--line); border-radius: var(--radius);
+  background: #fff; color: var(--ink); font-family: inherit; font-size: 13px; font-weight: 600;
+  outline: none;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.wa-field .wa-country:focus { border-color: var(--sea); box-shadow: 0 0 0 3px var(--mist-soft); }
+.wa-dial {
+  flex-shrink: 0; padding: 0 10px; height: 42px; display: inline-flex; align-items: center;
+  border: var(--line); border-radius: var(--radius); background: var(--mist-soft);
+  color: var(--sea-deep); font-family: inherit; font-size: 13px; font-weight: 800; direction: ltr;
+}
+.wa-field input { min-width: 120px; direction: ltr; text-align: right; }
+.wa-hint { margin-top: 8px; }
+@media (max-width: 640px) {
+  .wa-field { flex-wrap: wrap; }
+  .wa-field .wa-country { flex: 1 1 100%; max-width: none; }
+  .wa-field input { flex: 1 1 auto; }
+}
+/* ملاحظة صغيرة أسفل حقل النموذج + صنف إخفاء للقارئ الصوتي فقط */
+.field-note { display: block; margin-top: 6px; font-size: 11.5px; color: var(--slate); }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.form-card { background: #fff; border: var(--line); border-radius: var(--radius); padding: 32px; }
 .form-section { margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--mist); }
 .form-section.first { margin-top: 0; padding-top: 0; border-top: 0; }
 .form-section h2 { font-size: 14px; }

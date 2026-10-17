@@ -63,6 +63,7 @@ const PROFILES_TABLE = `
     supervisor_name VARCHAR(255),
     supervisor_notes TEXT,
     whatsapp_number VARCHAR(20),
+    wa_country VARCHAR(2),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
   );
@@ -665,6 +666,33 @@ const PROFILES_EXTRA_COLUMNS = `
   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS supervisor_notes TEXT;
   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS gender VARCHAR(20);
   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(20);
+  ALTER TABLE profiles ADD COLUMN IF NOT EXISTS wa_country VARCHAR(2);
+`;
+
+/** تعبئة رجعية لعمود wa_country من مفتاح الرقم الدولي المحفوظ (للملفات القديمة فقط). */
+const WA_COUNTRY_BACKFILL = `
+  UPDATE profiles SET wa_country = CASE
+    WHEN whatsapp_number LIKE '+218%' THEN 'LY'
+    WHEN whatsapp_number LIKE '+20%' THEN 'EG'
+    WHEN whatsapp_number LIKE '+966%' THEN 'SA'
+    WHEN whatsapp_number LIKE '+971%' THEN 'AE'
+    WHEN whatsapp_number LIKE '+965%' THEN 'KW'
+    WHEN whatsapp_number LIKE '+974%' THEN 'QA'
+    WHEN whatsapp_number LIKE '+973%' THEN 'BH'
+    WHEN whatsapp_number LIKE '+968%' THEN 'OM'
+    WHEN whatsapp_number LIKE '+964%' THEN 'IQ'
+    WHEN whatsapp_number LIKE '+962%' THEN 'JO'
+    WHEN whatsapp_number LIKE '+961%' THEN 'LB'
+    WHEN whatsapp_number LIKE '+963%' THEN 'SY'
+    WHEN whatsapp_number LIKE '+970%' THEN 'PS'
+    WHEN whatsapp_number LIKE '+967%' THEN 'YE'
+    WHEN whatsapp_number LIKE '+249%' THEN 'SD'
+    WHEN whatsapp_number LIKE '+212%' THEN 'MA'
+    WHEN whatsapp_number LIKE '+213%' THEN 'DZ'
+    WHEN whatsapp_number LIKE '+216%' THEN 'TN'
+    ELSE 'LY'
+  END
+  WHERE (wa_country IS NULL OR wa_country = '') AND whatsapp_number IS NOT NULL AND whatsapp_number <> '';
 `;
 
 /** ربط plan_code بجدول الباقات — يُضاف مرة واحدة فقط (idempotent). */
@@ -841,6 +869,7 @@ async function initializeDatabase() {
     await pool.query(USERS_EXTRA_COLUMNS);
     await pool.query(USERS_NOTIFICATIONS_COLUMN);
     await pool.query(PROFILES_EXTRA_COLUMNS);
+    await pool.query(WA_COUNTRY_BACKFILL);
     await pool.query(PAYMENT_REQUESTS_EXTRA_COLUMNS);
     await pool.query(PLANS_EXTRA_COLUMNS);
     await pool.query(LIBRARY_EXTRA_COLUMNS);

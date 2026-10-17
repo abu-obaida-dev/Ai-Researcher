@@ -80,6 +80,37 @@ export const GENDER_OPTIONS = [
   { value: 'female', label: 'بنت' }
 ];
 
+/**
+ * دول رقم الواتساب في صفحة الملف: مفتاح الدولة + أطوال الرقم الوطنية المتوقعة.
+ * pattern اختياري للتحقق الأدق من الأرقام الليبية (تبدأ بـ 91 أو 92 أو 94).
+ * sample مثال كامل يُعرض في رسالة الخطأ والـ placeholder.
+ * يُحفظ الرقم في القاعدة كاملاً بالمفتاح الدولي: +218912345678.
+ */
+export const WHATSAPP_COUNTRIES = [
+  { code: 'LY', name: 'ليبيا', dial: '218', lengths: [9], pattern: '^9[124][0-9]{7}$', sample: '+218912345678' },
+  { code: 'EG', name: 'مصر', dial: '20', lengths: [10, 11], sample: '+201012345678' },
+  { code: 'SA', name: 'السعودية', dial: '966', lengths: [9], sample: '+966512345678' },
+  { code: 'AE', name: 'الإمارات', dial: '971', lengths: [9], sample: '+971501234567' },
+  { code: 'KW', name: 'الكويت', dial: '965', lengths: [8], sample: '+96591234567' },
+  { code: 'QA', name: 'قطر', dial: '974', lengths: [8], sample: '+97433123456' },
+  { code: 'BH', name: 'البحرين', dial: '973', lengths: [8], sample: '+97336123456' },
+  { code: 'OM', name: 'عُمان', dial: '968', lengths: [8], sample: '+96891234567' },
+  { code: 'IQ', name: 'العراق', dial: '964', lengths: [10], sample: '+9647701234567' },
+  { code: 'JO', name: 'الأردن', dial: '962', lengths: [9], sample: '+962791234567' },
+  { code: 'LB', name: 'لبنان', dial: '961', lengths: [7, 8], sample: '+9617123456' },
+  { code: 'SY', name: 'سوريا', dial: '963', lengths: [9], sample: '+963912345678' },
+  { code: 'PS', name: 'فلسطين', dial: '970', lengths: [9], sample: '+970591234567' },
+  { code: 'YE', name: 'اليمن', dial: '967', lengths: [9], sample: '+967712345678' },
+  { code: 'SD', name: 'السودان', dial: '249', lengths: [9], sample: '+249912345678' },
+  { code: 'MA', name: 'المغرب', dial: '212', lengths: [9], sample: '+212612345678' },
+  { code: 'DZ', name: 'الجزائر', dial: '213', lengths: [9, 10], sample: '+213512345678' },
+  { code: 'TN', name: 'تونس', dial: '216', lengths: [8], sample: '+21621234567' },
+  { code: 'MR', name: 'موريتانيا', dial: '222', lengths: [8], sample: '+22241234567' },
+  { code: 'SO', name: 'الصومال', dial: '252', lengths: [8, 9], sample: '+252612345678' },
+  { code: 'DJ', name: 'جيبوتي', dial: '253', lengths: [8], sample: '+25377123456' },
+  { code: 'KM', name: 'جزر القمر', dial: '269', lengths: [7], sample: '+2693212345' }
+];
+
 export const DEGREE_LEVELS = [
   { value: 'bachelor', label: 'طالب جامعي (بكالوريوس)' },
   { value: 'master', label: 'باحث ماجستير' },

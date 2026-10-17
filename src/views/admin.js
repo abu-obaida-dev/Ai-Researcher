@@ -206,6 +206,8 @@ export function renderAdminHome({
   typeShare = [],
   latestUsers,
   recent = [],
+  countryStats = [],
+  unknownCountryUsers = 0,
   sent = 0,
   push = null,
   pushFailed = 0,
@@ -254,6 +256,36 @@ export function renderAdminHome({
   const weekEvents = days.reduce((total, day) => total + (Number(day.events) || 0), 0);
   const shareTotal = typeShare.reduce((total, row) => total + (Number(row.tokens) || 0), 0);
   const isFiltered = Boolean(filter.date) || String(filter.h1 ?? '') !== '' || String(filter.h2 ?? '') !== '';
+
+  // إحصائية الدول: من دولة الواتساب المختارة في إكمال الملف (مع استنتاج الملفات القديمة في المسار)
+  const countryTotal = countryStats.reduce((total, row) => total + (Number(row.users) || 0), 0) + (Number(unknownCountryUsers) || 0);
+  const countryRows = [
+    ...countryStats.map(
+      (row) => `    <td><p class="strong">${escapeHtml(row.name)}</p><p class="muted">+${escapeHtml(row.dial)} · ${escapeHtml(row.code)}</p></td>
+    <td>${escapeHtml(formatNumber(row.users))}</td>
+    <td>${countryTotal > 0 ? `${Math.round((Number(row.users) / countryTotal) * 100)}٪` : '—'}</td>`
+    ),
+    ...(Number(unknownCountryUsers) > 0
+      ? [
+          `    <td><p class="strong">غير محدد / دول أخرى</p><p class="muted">ملفات قديمة أو أرقام خارج القائمة</p></td>
+    <td>${escapeHtml(formatNumber(unknownCountryUsers))}</td>
+    <td>${countryTotal > 0 ? `${Math.round((Number(unknownCountryUsers) / countryTotal) * 100)}٪` : '—'}</td>`
+        ]
+      : [])
+  ];
+  const countryCard = `
+  <div class="card mt-16">
+    <div class="card-head">
+      <h2>توزيع الباحثين حسب الدولة</h2>
+      <span class="muted">${escapeHtml(formatNumber(countryTotal))} باحث بملف بحثي</span>
+    </div>
+    <p class="muted">تُحسب من دولة رقم الواتساب المختارة في إكمال الملف الشخصي، مع استنتاج تلقائي من مفتاح الرقم للملفات القديمة.</p>
+    <div class="table-scroll">${renderTable({
+      columns: ['الدولة', 'عدد الباحثين', 'النسبة'],
+      rows: countryRows,
+      emptyMessage: 'لا توجد بيانات دول بعد — تظهر هنا بمجرد إكمال الباحثين لملفاتهم.'
+    })}</div>
+  </div>`;
 
   const recentRows = recent.map(
     (item) => `
@@ -329,7 +361,8 @@ export function renderAdminHome({
       <p class="muted mt-12">عرض ${escapeHtml(formatNumber(recent.length))} عملية — مرّر داخل القائمة للأسفل، أو افتح «سجل الاستهلاك الكامل» للبحث والتفاصيل.</p>
     </div>
   </div>
-  <div class="card">
+  ${countryCard}
+  <div class="card mt-16">
     <h2>إرسال إشعار للباحثين</h2>
     <p class="muted">يُحفظ داخل موقع كل باحث فوراً، ويصل كإشعار هاتف (push) لمن سجّل توكن جهازه.</p>
     <form method="post" action="/admin/notifications">
@@ -709,14 +742,6 @@ export function renderAdminPlans({
         <label for="tagline-${code}">الوصف المختصر</label>
         <input type="text" id="tagline-${code}" name="tagline" maxlength="160" value="${escapeHtml(plan.tagline || '')}" />
       </div>
-      ${plan.role_code
-        ? permissionsEditor({
-            permissions: permissionsByRole[plan.role_code] || [],
-            addAction: `/admin/plans/${encodeURIComponent(plan.code)}/permissions${token}`,
-            deleteAction: `/admin/plans/${encodeURIComponent(plan.code)}/permissions/delete${token}`,
-            ownerLabel: plan.title
-          })
-        : '<p class="muted">اختر دور الباقة أولاً لتظهر صلاحياتها هنا.</p>'}
       <div class="field">
         <label for="features-${code}">أسطر إضافية تُعرض مع المزايا (سطر لكل ميزة — اختياري)</label>
         <textarea id="features-${code}" name="features" rows="5" maxlength="4000">${escapeHtml(String(plan.features ?? ''))}</textarea>
@@ -732,6 +757,14 @@ export function renderAdminPlans({
         <span class="muted">يُطبَّق فوراً — لا يحتاج إعادة تشغيل الخادم.</span>
       </div>
     </form>
+    ${plan.role_code
+        ? `<div class="field mt-16"><h3 class="mt-0">صلاحيات دور الباقة</h3>${permissionsEditor({
+            permissions: permissionsByRole[plan.role_code] || [],
+            addAction: `/admin/plans/${encodeURIComponent(plan.code)}/permissions${token}`,
+            deleteAction: `/admin/plans/${encodeURIComponent(plan.code)}/permissions/delete${token}`,
+            ownerLabel: plan.title
+          })}</div>`
+        : '<p class="muted">اختر دور الباقة أولاً ثم احفظ لتظهر صلاحياتها هنا.</p>'}
     ${
       isFree
         ? '<p class="muted mt-12">الباقة المجانية لا تُحذف — كل الحسابات تعود إليها تلقائياً.</p>'

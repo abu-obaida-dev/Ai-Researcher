@@ -7,7 +7,8 @@ import {
   PROGRESS_LEVELS,
   RESEARCH_STAGES,
   SPECIALIZATIONS,
-  TOKEN_COSTS
+  TOKEN_COSTS,
+  WHATSAPP_COUNTRIES
 } from '../constants.js';
 import { formatDate, formatDateTime, formatNumber } from './format.js';
 import { formatStorageMb } from '../services/plans.js';
@@ -171,25 +172,6 @@ function choiceGrid(name, options, selected) {
     .join('')}</div>`;
 }
 
-/** أسباب وأهمية إكمال الملف البحثي — العمود الجانبي في صفحة التسجيل. */
-const ONBOARDING_REASONS = [
-  {
-    icon: 'bulb',
-    title: 'إجابات مبنية على مجالك',
-    text: 'يعرف المشرف الذكي تخصصك ومنهجيتك، فيقترح عليك مراجع وأساليب مناسبة لمجالك بالتحديد.'
-  },
-  {
-    icon: 'graduation',
-    title: 'مستوى علمي مناسب',
-    text: 'تختلف احتياجات طالب البكالوريوس عن باحث الدكتوراه، لذلك نُخصّص عمق الإشراف حسب مرحلتك.'
-  },
-  {
-    icon: 'shield',
-    title: 'بياناتك محفوظة عندنا',
-    text: 'بياناتك تُحفظ في خوادم المنصة وتُستخدم لتخصيص الإشراف فقط، ويمكنك تعديلها في أي وقت.'
-  }
-];
-
 /** صفحة إكمال الملف البحثي (خطوة واحدة بعد أول تسجيل دخول، وتُستخدم أيضاً للتعديل). */
 export function renderOnboardingPage({ account, values, errors = [], profile = null, next = '' }) {
   const backTarget = String(next || '').startsWith('/') && !String(next).startsWith('//') ? String(next) : '';
@@ -197,71 +179,85 @@ export function renderOnboardingPage({ account, values, errors = [], profile = n
   // لوحة الباحث لا تُفتح إلا بعد إكمال التسجيل والملف. بعد الإكمال يُفتح
   // تعديل الملف من داخل اللوحة (area:'app') كالسابق.
   const standalone = needsOnboarding(account);
-  const reasons = ONBOARDING_REASONS.map(
-    (reason) => `<div class="feature-card">
-  <span class="feature-icon">${icon(reason.icon)}</span>
-  <h3>${escapeHtml(reason.title)}</h3>
-  <p>${escapeHtml(reason.text)}</p>
-</div>`
-  ).join('');
 
   const errorBox = errors.length
     ? `<div class="alert"><b>تحقّق من البيانات:</b><ul>${errors.map((error) => `<li>${escapeHtml(error)}</li>`).join('')}</ul></div>`
     : '';
 
-  const body = `<div class="onboarding-grid">
-  <div>
-    <form class="form-card" method="post" action="/onboarding${backTarget ? `?next=${encodeURIComponent(backTarget)}` : ''}">
-      ${errorBox}
+  // الدولة الحالية في حقل الواتساب (خيار القائمة المحدَّد + المفتاح والأطوال المعروضة)
+  const waCountry = WHATSAPP_COUNTRIES.find((country) => country.code === values.wa_country) || WHATSAPP_COUNTRIES[0];
+  const waLocalSample = waCountry.sample.replace(`+${waCountry.dial}`, '');
+  const waMaxLength = Math.max(...waCountry.lengths);
+  const countryOptions = WHATSAPP_COUNTRIES.map((country) => {
+    const selected = country.code === waCountry.code ? ' selected' : '';
+    const localSample = country.sample.replace(`+${country.dial}`, '');
+    return `<option value="${country.code}" data-dial="${country.dial}" data-lengths="${country.lengths.join(',')}" data-sample="${localSample}"${selected}>${escapeHtml(country.name)} (+${country.dial})</option>`;
+  }).join('');
 
-      <section class="form-section first">
-        <h2>ما هو نوعك؟</h2>
-        <p class="form-hint">يُستخدم لتوجيهك إلى رقم واتساب المناقشة الصوتية المناسب (شاب/بنت).</p>
-        ${choiceGrid('gender', GENDER_OPTIONS, values.gender)}
-      </section>
+  const body = `<div class="onboarding-card">
+  <div class="form-card">
+    ${errorBox}
 
-      <section class="form-section first">
-        <h2>ما هي مرحلتك الأكاديمية؟</h2>
-        <p class="form-hint">تُستخدم لضبط عمق الإشراف ومستوى المراجع المقترحة.</p>
-        ${choiceGrid('degree_level', DEGREE_LEVELS, values.degree_level)}
-      </section>
-
-      <section class="form-section">
-        <h2>ما هو تخصصك الأكاديمي؟</h2>
-        ${choiceGrid('research_field', SPECIALIZATIONS.map((item) => ({ value: item, label: item })), values.research_field)}
-        <div class="field">
-          <label for="custom_field">اكتب تخصصك (إن اخترت «أخرى»)</label>
-          <input type="text" id="custom_field" name="custom_field" value="${escapeHtml(values.custom_field)}" placeholder="مثال: القانون الدولي" />
-        </div>
-      </section>
-
-      <section class="form-section">
-        <h2>ما الذي تريد إنجازه الآن؟</h2>
-        ${choiceGrid('research_stage', GOAL_OPTIONS, values.research_stage)}
-      </section>
-
-      <section class="form-section">
-        <h2>أين وصلت في مشروعك البحثي؟</h2>
-        ${choiceGrid('progress_stage', PROGRESS_LEVELS, values.progress_stage)}
-      </section>
-
-      <section class="form-section">
-        <h2>رقم الواتساب</h2>
-        <p class="form-hint">رقم إلزامي للتواصل معك وللعرض في لوحة الإدارة.</p>
-        <div class="field">
-          <label for="whatsapp_number">رقم واتساب</label>
-          <input type="tel" id="whatsapp_number" name="whatsapp_number" value="${escapeHtml(values.whatsapp_number)}" placeholder="مثال: 0912345678" required />
-        </div>
-      </section>
-
-      <div class="form-actions">
-        <button class="btn btn-primary" type="submit">${profile ? 'حفظ التعديلات' : 'ابدأ مع المشرف الذكي'}</button>
-        <span class="muted">يُحفظ الملف في خوادم المنصة ويمكنك تعديله في أي وقت.</span>
+    <section class="form-section first">
+      <h2>اسم المستخدم</h2>
+      <p class="form-hint">اسم واحد فقط (بدون مسافات) — هذا هو الاسم الذي سيظهر لك في الموقع بدل اسم حساب جوجل.</p>
+      <div class="field">
+        <label for="full_name">اسم المستخدم</label>
+        <input type="text" id="full_name" name="full_name" value="${escapeHtml(values.full_name)}" placeholder="مثال: أحمد" maxlength="40" autocomplete="name" data-single-word required />
+        <small class="field-note">يُقبل اسم واحد من حروف فقط (عربي أو إنجليزي).</small>
       </div>
-    </form>
-  </div>
+    </section>
 
-  <aside class="onboarding-aside">${reasons}</aside>
+    <section class="form-section first">
+      <h2>ما هو نوعك؟</h2>
+      <p class="form-hint">يُستخدم لتوجيهك إلى رقم واتساب المناقشة الصوتية المناسب (شاب/بنت).</p>
+      ${choiceGrid('gender', GENDER_OPTIONS, values.gender)}
+    </section>
+
+    <section class="form-section first">
+      <h2>ما هي مرحلتك الأكاديمية؟</h2>
+      <p class="form-hint">تُستخدم لضبط عمق الإشراف ومستوى المراجع المقترحة.</p>
+      ${choiceGrid('degree_level', DEGREE_LEVELS, values.degree_level)}
+    </section>
+
+    <section class="form-section">
+      <h2>ما هو تخصصك الأكاديمي؟</h2>
+      ${choiceGrid('research_field', SPECIALIZATIONS.map((item) => ({ value: item, label: item })), values.research_field)}
+      <div class="field">
+        <label for="custom_field">اكتب تخصصك (إن اخترت «أخرى»)</label>
+        <input type="text" id="custom_field" name="custom_field" value="${escapeHtml(values.custom_field)}" placeholder="مثال: القانون الدولي" />
+      </div>
+    </section>
+
+    <section class="form-section">
+      <h2>ما الذي تريد إنجازه الآن؟</h2>
+      ${choiceGrid('research_stage', GOAL_OPTIONS, values.research_stage)}
+    </section>
+
+    <section class="form-section">
+      <h2>أين وصلت في مشروعك البحثي؟</h2>
+      ${choiceGrid('progress_stage', PROGRESS_LEVELS, values.progress_stage)}
+    </section>
+
+    <section class="form-section wa-section">
+      <h2>رقم الواتساب</h2>
+      <p class="form-hint">رقم إلزامي للتواصل معك وللعرض في لوحة الإدارة — اختر دولتك ثم أدخل الرقم بدون مفتاح الدولة.</p>
+      <div class="field wa-field">
+        <span class="wa-icon">${icon('whatsapp')}</span>
+        <label class="visually-hidden" for="wa_country">دولة رقم الواتساب</label>
+        <select id="wa_country" name="wa_country" class="wa-country" required>${countryOptions}</select>
+        <span class="wa-dial" id="wa_dial" aria-hidden="true">+${waCountry.dial}</span>
+        <label class="visually-hidden" for="whatsapp_number">رقم الواتساب</label>
+        <input type="tel" id="whatsapp_number" name="whatsapp_number" value="${escapeHtml(values.whatsapp_number)}" placeholder="${waLocalSample}" inputmode="numeric" autocomplete="tel-national" maxlength="${waMaxLength}" data-lengths="${waCountry.lengths.join(',')}" required />
+      </div>
+      <p class="form-hint wa-hint" id="wa_hint">الرقم المطلوب لدولة ${escapeHtml(waCountry.name)}: ${waCountry.lengths.join(' أو ')} أرقام بعد المفتاح +${waCountry.dial} (مثال: ${waLocalSample}).</p>
+    </section>
+
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">${profile ? 'حفظ التعديلات' : 'ابدأ مع المشرف الذكي'}</button>
+      <span class="muted">يُحفظ الملف في خوادم المنصة ويمكنك تعديله في أي وقت.</span>
+    </div>
+  </div>
 </div>`;
 
   // الصفحة المستقلة تحمل عنوانها وطريق العودة بنفسها (لا توب بار ولا سايدبار يحملهما)
@@ -280,7 +276,7 @@ export function renderOnboardingPage({ account, values, errors = [], profile = n
     activeKey: 'onboarding',
     account,
     unread: 0,
-    scripts: standalone ? [] : ['/js/app-shell.js'],
+    scripts: standalone ? ['/js/onboarding.js'] : ['/js/app-shell.js', '/js/onboarding.js'],
     pageHead: !account,
     body: standalone ? `<div class="onboarding-standalone">${heading}${body}${exitLinks}</div>` : body
   });

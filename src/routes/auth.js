@@ -17,11 +17,13 @@ import {
   DEGREE_LEVELS,
   FREE_PLAN_CODE,
   GOAL_OPTIONS,
+  GENDER_OPTIONS,
   PREFERRED_LANGUAGES,
   PROGRESS_LEVELS,
   RESEARCH_STAGES,
   SPECIALIZATIONS,
-  UNIVERSITIES
+  UNIVERSITIES,
+  WHATSAPP_COUNTRIES
 } from '../constants.js';
 import { homePathFor, requireAccount } from '../middleware/auth.js';
 import { getJourneySummary } from '../services/journey.js';
@@ -180,13 +182,40 @@ router.get('/logout', (_req, res) => {
   res.redirect(302, '/');
 });
 
-/** قيم نموذج التسجيل: الملف المحفوظ إن وُجد، ثم القيم الافتراضية. */
-function onboardingValues(profile) {
+/** يفصل رقم واتساب محفوظاً (بأي صيغة قديمة) إلى رمز الدولة والرقم الوطني. */
+function splitStoredWhatsapp(stored) {
+  const raw = String(stored || '').trim();
+  if (!raw) return { country: 'LY', number: '' };
+
+  let digits = raw.replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+
+  // نجرّب أطول مفتاح دولية أولاً حتى لا يخطئ رقم ليبي يبدأ بـ 91 مثلاً
+  const sorted = [...WHATSAPP_COUNTRIES].sort((a, b) => b.dial.length - a.dial.length);
+  for (const country of sorted) {
+    if (!digits.startsWith(country.dial)) continue;
+    const local = digits.slice(country.dial.length).replace(/^0+(?=\d)/, '');
+    if (country.lengths.includes(local.length)) return { country: country.code, number: local };
+  }
+
+  // صيغة محلية بدون مفتاح (مثل 0912345678) — ليبيا هي الدولة الافتراضية
+  const local = digits.replace(/^0+(?=\d)/, '');
+  const ly = WHATSAPP_COUNTRIES.find((country) => country.code === 'LY');
+  if (ly.lengths.includes(local.length)) return { country: 'LY', number: local };
+
+  return { country: 'LY', number: digits };
+}
+
+/** قيم نموذج التسجيل: الملف المحفوظ إن وُجد، ثم اسم الحساب والقيم الافتراضية. */
+function onboardingValues(profile, account = null) {
   const knownFields = SPECIALIZATIONS.filter((item) => item !== 'أخرى');
   const field = profile?.research_field || '';
   const isCustom = Boolean(field) && !knownFields.includes(field);
+  const whatsapp = splitStoredWhatsapp(profile?.whatsapp_number);
 
   return {
+    full_name: profile?.full_name || account?.full_name || '',
+    gender: profile?.gender || '',
     degree_level: profile?.degree_level || 'bachelor',
     research_field: isCustom ? 'أخرى' : field || 'أخرى',
     custom_field: isCustom ? field : '',
@@ -198,7 +227,8 @@ function onboardingValues(profile) {
     preferred_language: profile?.preferred_language || 'ar',
     citation_style: profile?.citation_style || 'apa7',
     research_title: profile?.research_title || '',
-    whatsapp_number: profile?.whatsapp_number || ''
+    wa_country: whatsapp.country,
+    whatsapp_number: whatsapp.number
   };
 }
 
@@ -207,7 +237,13 @@ function readValues(body) {
   const pick = (value, allowed, fallback) => (allowed.includes(value) ? value : fallback);
   const text = (value, max = 200) => String(value ?? '').trim().slice(0, max);
 
+  // الدولة تُقبل من القائمة فقط، واسم المستخدم حروف فقط (عربي/لاتيني) بدون مسافات أو رموز
+  const waCountryCode = pick(body.wa_country, WHATSAPP_COUNTRIES.map((item) => item.code), 'LY');
+  const fullName = text(body.full_name, 100).replace(/\p{M}/gu, '');
+
   return {
+    full_name: fullName,
+    gender: pick(body.gender, GENDER_OPTIONS.map((item) => item.value), ''),
     degree_level: pick(body.degree_level, DEGREE_LEVELS.map((item) => item.value), 'bachelor'),
     research_field: pick(body.research_field, SPECIALIZATIONS, 'أخرى'),
     custom_field: text(body.custom_field, 120),
@@ -219,24 +255,57 @@ function readValues(body) {
     preferred_language: pick(body.preferred_language, PREFERRED_LANGUAGES.map((item) => item.value), 'ar'),
     citation_style: pick(body.citation_style, CITATION_STYLES.map((item) => item.value), 'apa7'),
     research_title: text(body.research_title, 250),
-    whatsapp_number: text(body.whatsapp_number, 20)
+    wa_country: waCountryCode,
+    // أرقام فقط: تُنزع علامة + و00، وإن لُصق الرقم بمفتاح دولته يُقصّ المفتاح
+    whatsapp_number: sanitizeWhatsappDigits(body.whatsapp_number, waCountryCode)
   };
+}
+
+/** ينظّف رقم الواتساب إلى أرقام محلية فقط حسب الدولة المختارة. */
+function sanitizeWhatsappDigits(value, countryCode) {
+  let digits = String(value ?? '').replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+
+  const country = WHATSAPP_COUNTRIES.find((item) => item.code === countryCode);
+  if (country && digits.startsWith(country.dial)) {
+    const local = digits.slice(country.dial.length).replace(/^0+(?=\d)/, '');
+    if (country.lengths.includes(local.length)) return local.slice(0, Math.max(...country.lengths));
+  }
+
+  return digits.replace(/^0+(?=\d)/, '').slice(0, 15);
 }
 
 /** تحقّق من الحقول الإلزامية (نفس شروط خطوة التسجيل في النسخة القديمة). */
 function validateValues(values) {
   const errors = [];
 
+  // اسم واحد فقط: حروف عربية أو لاتينية، بلا مسافات أو أرقام أو رموز
+  if (!values.full_name) {
+    errors.push('اكتب اسم المستخدم.');
+  } else if (/\s/.test(values.full_name)) {
+    errors.push('اسم المستخدم اسم واحد فقط — بدون مسافات.');
+  } else if (!/^[\p{L}][\p{L}-]*$/u.test(values.full_name)) {
+    errors.push('اسم المستخدم يُكوَّن من حروف فقط (عربي أو إنجليزي) بدون أرقام أو رموز.');
+  } else if (values.full_name.length < 2) {
+    errors.push('اسم المستخدم حرفان على الأقل.');
+  }
+
+  if (!values.gender) errors.push('اختر نوعك (شاب/بنت).');
   if (!values.degree_level) errors.push('اختر مرحلتك الأكاديمية أولاً.');
   if (!values.research_field) errors.push('اختر تخصصك الأكاديمي.');
   if (values.research_field === 'أخرى' && !values.custom_field) errors.push('اكتب تخصصك الأكاديمي في الحقل المخصص.');
   if (!values.research_stage) errors.push('اختر ما الذي تريد إنجازه الآن.');
 
-  const wa = String(values.whatsapp_number || '').replace(/[^\d+]/g, '');
-  if (!values.whatsapp_number || !wa) {
+  const country = WHATSAPP_COUNTRIES.find((item) => item.code === values.wa_country);
+  const wa = String(values.whatsapp_number || '');
+  if (!country) {
+    errors.push('اختر دولة رقم الواتساب.');
+  } else if (!wa) {
     errors.push('رقم الواتساب مطلوب.');
-  } else if (!/^(00218|\+?218|0)?9[124]\d{7}$/.test(wa)) {
-    errors.push('أدخل رقم واتساب ليبي صالح (مثال: 0912345678 أو +218912345678 أو 00218912345678).');
+  } else if (!country.lengths.includes(wa.length)) {
+    errors.push(`رقم واتساب ${country.name} يتكون من ${country.lengths.join(' أو ')} أرقام بعد مفتاح الدولة +${country.dial}.`);
+  } else if (country.pattern && !new RegExp(country.pattern).test(wa)) {
+    errors.push(`أدخل رقم واتساب ${country.name} صحيحاً (مثال: ${country.sample}).`);
   }
 
   return errors;
@@ -247,7 +316,7 @@ router.get('/onboarding', requireAccount, async (req, res) => {
   const profile = await getProfile(req.account.id);
   res
     .type('html')
-    .send(renderOnboardingPage({ account: req.account, profile, values: onboardingValues(profile), next: safeNextPath(req.query.next) }));
+    .send(renderOnboardingPage({ account: req.account, profile, values: onboardingValues(profile, req.account), next: safeNextPath(req.query.next) }));
 });
 
 /** حفظ الملف البحثي في PostgreSQL ثم العودة للوجهة المحفوظة (?next=) أو الإحصائية. */
@@ -268,9 +337,12 @@ router.post('/onboarding', requireAccount, async (req, res) => {
     PROGRESS_LEVELS.find((item) => item.value === values.progress_stage)?.label ||
     RESEARCH_STAGES.find((item) => item.value === values.progress_stage)?.label ||
     '';
+  // يُعاد تركيب الصيغة الدولية الكاملة قبل الحفظ: +218912345678
+  const waCountry = WHATSAPP_COUNTRIES.find((item) => item.code === values.wa_country) || WHATSAPP_COUNTRIES[0];
 
   await saveOnboarding(req.account.id, {
-    full_name: req.account.full_name || '',
+    full_name: values.full_name,
+    gender: values.gender,
     research_field: researchField,
     research_title: values.research_title,
     degree_level: values.degree_level,
@@ -281,7 +353,8 @@ router.post('/onboarding', requireAccount, async (req, res) => {
     citation_style: values.citation_style,
     research_stage: values.progress_stage || values.research_stage,
     about: `الهدف الحالي: ${goalLabel} | حالة المشروع: ${progressLabel}`.trim(),
-    whatsapp_number: values.whatsapp_number
+    whatsapp_number: `+${waCountry.dial}${values.whatsapp_number}`,
+    wa_country: waCountry.code
   });
 
   res.redirect(302, backTarget || '/dashboard');

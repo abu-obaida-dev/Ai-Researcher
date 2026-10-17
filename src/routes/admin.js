@@ -2,7 +2,7 @@ import express from 'express';
 import { Readable } from 'node:stream';
 import { pool } from '../db/client.js';
 import { hintForDatabaseError } from '../db/errors.js';
-import { ADMIN_PERMISSIONS, FREE_PLAN_CODE, PLAN_STORAGE_DEFAULT_MB, PLAN_STORAGE_MAX_MB } from '../constants.js';
+import { ADMIN_PERMISSIONS, FREE_PLAN_CODE, PLAN_STORAGE_DEFAULT_MB, PLAN_STORAGE_MAX_MB, WHATSAPP_COUNTRIES } from '../constants.js';
 import { rateLimit, concurrencyLimit, safeEqual } from '../middleware/security.js';
 import { renderNotice } from '../views/layout.js';
 import { notifyUser } from '../services/notifications.js';
@@ -297,7 +297,7 @@ async function blockIfAdmin(req, res, redirect) {
   const found = await pool.query('SELECT role FROM users WHERE id = $1', [id]).catch(() => ({ rows: [] }));
 
   if (found.rows[0]?.role === 'admin') {
-    res.redirect(302, redirect(adminProtectedMessage(id)));
+    res.redirect(302, redirect(await adminProtectedMessage(id)));
     return true;
   }
   return false;
@@ -388,7 +388,7 @@ router.get('/', requireAdminPermission('admin:panel'), (req, res) => {
   return renderPage(
     res,
     async () => {
-      const [counts, days, latestUsers, recent, typeShare] = await Promise.all([
+      const [counts, days, latestUsers, recent, typeShare, countryRaw] = await Promise.all([
         pool.query(`SELECT
             (SELECT count(*) FROM users)::int AS users,
             (SELECT count(*) FROM users WHERE is_active)::int AS active_users,
@@ -433,8 +433,35 @@ router.get('/', requireAdminPermission('admin:panel'), (req, res) => {
             FROM usage_logs
            WHERE created_at::date >= current_date - interval '6 days'
            GROUP BY type
-           ORDER BY SUM(tokens_used) DESC`)
+           ORDER BY SUM(tokens_used) DESC`),
+        // إحصائية الدول: من عمود wa_country، وسقوط آمن من مفتاح الرقم للملفات القديمة
+        pool.query(`SELECT COALESCE(NULLIF(p.wa_country, ''), NULL) AS code, p.whatsapp_number AS wa
+            FROM profiles p`)
       ]);
+
+      // تجميع الدول في الخادم: العمود أولاً، ثم استنتاج من المفتاح الدولي، ثم «غير محدد»
+      const byDial = [...WHATSAPP_COUNTRIES].sort((a, b) => b.dial.length - a.dial.length);
+      const codeOf = (row) => {
+        const code = String(row.code || '').trim().toUpperCase();
+        if (code && WHATSAPP_COUNTRIES.some((c) => c.code === code)) return code;
+        const digits = String(row.wa || '').replace(/\D/g, '').replace(/^00/, '');
+        for (const c of byDial) {
+          if (digits.startsWith(c.dial)) return c.code;
+        }
+        return null;
+      };
+      const countsByCode = new Map();
+      for (const row of countryRaw.rows) {
+        const code = codeOf(row);
+        countsByCode.set(code, (countsByCode.get(code) || 0) + 1);
+      }
+      const countryStats = WHATSAPP_COUNTRIES.map((c) => ({
+        code: c.code,
+        name: c.name,
+        dial: c.dial,
+        users: countsByCode.get(c.code) || 0
+      })).filter((c) => c.users > 0);
+      const unknownCountryUsers = countsByCode.get(null) || 0;
 
       return {
         counts: counts.rows[0],
@@ -442,6 +469,8 @@ router.get('/', requireAdminPermission('admin:panel'), (req, res) => {
         typeShare: typeShare.rows,
         latestUsers: latestUsers.rows,
         recent: recent.rows,
+        countryStats,
+        unknownCountryUsers,
         filter,
         sent: Math.max(0, Number.parseInt(req.query.sent, 10) || 0),
         // تقرير وصول الإشعار للهاتف (يملؤه مسار الإرسال بعد كل بث)
@@ -895,6 +924,7 @@ router.get('/users', requireAdminPermission('admin:users'), (req, res) => {
   // شرط البحث والفلترة مشترك بين استعلام البيانات واستعلام العدد
   const where = `WHERE ($1 = '' OR u.email ILIKE $2 OR COALESCE(u.full_name, '') ILIKE $2
       OR COALESCE(p.university, '') ILIKE $2 OR COALESCE(p.research_field, '') ILIKE $2)
+    AND NOT COALESCE(u.deleted, false)
     AND ($3 = 'all' OR ($3 = 'active' AND u.is_active) OR ($3 = 'disabled' AND NOT u.is_active))`;
 
   return renderPage(
@@ -903,13 +933,13 @@ router.get('/users', requireAdminPermission('admin:users'), (req, res) => {
       const [users, count] = await Promise.all([
         pool.query(
           `SELECT u.id, u.email, u.full_name, u.role, u.is_active, u.plan_code, u.tokens_balance, u.created_at,
-              p.university, p.research_field, p.degree_level,
+              p.university, p.research_field, p.degree_level, p.whatsapp_number,
               COALESCE(SUM(l.tokens_used), 0)::int AS tokens_used
             FROM users u
             LEFT JOIN profiles p ON p.user_id = u.id
             LEFT JOIN usage_logs l ON l.user_id = u.id
             ${where}
-            GROUP BY u.id, p.university, p.research_field, p.degree_level
+            GROUP BY u.id, p.university, p.research_field, p.degree_level, p.whatsapp_number
             ORDER BY u.created_at DESC
             LIMIT $4 OFFSET $5`,
           [search, term, filter, PAGE_SIZE, (page - 1) * PAGE_SIZE]
@@ -1284,7 +1314,47 @@ router.post('/users/:id/notify', requireAdminPermission('admin:users'), async (r
   }
 });
 
-/** حذف حساب نهائياً من قاعدة البيانات: بايتات الملفات أولاً ثم صف المستخدم — وكل سجلاته بـ CASCADE. */
+/** حذف حساب باحث نهائياً من قاعدة البيانات (حذف فعلي DELETE).
+ *  كل البيانات المرتبطة (الملف البحثي بما فيه رقم الواتساب، المحادثات،
+ *  الملفات، الملاحظات، المراجع، الإشعارات، سجل الاستهلاك) تُحذف تلقائياً
+ *  عبر ON DELETE CASCADE المعرّف في مخطط قاعدة البيانات. */
+router.post('/users/:id/delete', requireAdminPermission('admin:users'), async (req, res) => {
+  const id = String(req.params.id);
+  const back = tokenBack(req);
+
+  if (!UUID_RE.test(id)) {
+    res.redirect(302, back('/admin/users', { error: 'معرّف باحث غير صالح.' }));
+    return;
+  }
+  if (req.account && req.account.id === id) {
+    res.redirect(302, back(`/admin/users/${id}`, { error: 'لا يمكنك حذف حسابك أنت — اطلب ذلك من مدير آخر.' }));
+    return;
+  }
+
+  try {
+    // حماية حساب المدير من أي حذف — حتى من مدير آخر
+    if (await blockIfAdmin(req, res, (msg) => back(`/admin/users/${id}`, { error: msg }))) return;
+
+    // حذف فعلي نهائي: ON DELETE CASCADE في المخطط يزيل تلقائياً الملف
+    // البحثي (بما فيه رقم الواتساب) وكل البيانات المرتبطة بالحساب.
+    const result = await pool.query(
+      `DELETE FROM users
+         WHERE id = $1 AND COALESCE(role, 'user') <> 'admin'
+         RETURNING id`,
+      [id]
+    );
+
+    if (!result.rows.length) {
+      res.redirect(302, back(`/admin/users/${id}`, { error: 'هذا الحساب غير موجود أو محمي.' }));
+      return;
+    }
+
+    res.redirect(302, back('/admin/users', { ok: 'user_deleted' }));
+  } catch (error) {
+    res.redirect(302, back(`/admin/users/${id}`, { error: hintForDatabaseError(error) }));
+  }
+});
+
 /**
  * صلاحيات الخدمات التي تمنحها الباقة لمشتركيها — تعديلها من **صفحة الباقات**
  * نفسها (لا صفحة أدوار منفصلة): الباقة ودورها وجه واحد في نظر المدير.

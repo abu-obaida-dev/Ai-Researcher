@@ -108,7 +108,7 @@ export async function ensureUserFromGoogle({ googleSub, email, name, picture }) 
                           tokens_balance, tokens_granted, onboarding_complete, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, NOW(), NOW())
        ON CONFLICT (email) DO UPDATE SET
-         full_name = COALESCE(NULLIF(EXCLUDED.full_name, ''), users.full_name),
+         full_name = COALESCE(NULLIF(users.full_name, ''), EXCLUDED.full_name),
          photo_url = COALESCE(NULLIF(EXCLUDED.photo_url, ''), users.photo_url),
          google_sub = COALESCE(EXCLUDED.google_sub, users.google_sub),
          role = EXCLUDED.role,
@@ -125,7 +125,7 @@ export async function ensureUserFromGoogle({ googleSub, email, name, picture }) 
       const { rows } = await pool.query(
         `UPDATE users
             SET email = $1,
-                full_name = COALESCE(NULLIF($2, ''), full_name),
+                full_name = COALESCE(NULLIF(full_name, ''), NULLIF($2, '')),
                 photo_url = COALESCE(NULLIF($3, ''), photo_url),
                 role = $4,
                 onboarding_complete = onboarding_complete OR $5,
@@ -216,19 +216,21 @@ export async function saveOnboarding(userId, data) {
     data.research_stage || 'topic',
     data.methodology || '',
     data.citation_style || 'apa7',
-    data.whatsapp_number || ''
+    data.whatsapp_number || '',
+    data.wa_country || ''
   ];
 
   const { rows } = await pool.query(
-    `INSERT INTO profiles (user_id, full_name, research_field, research_title, degree_level,
+    `INSERT INTO profiles (user_id, full_name, gender, research_field, research_title, degree_level,
                            academic_year, university, faculty, research_interests,
-                           preferred_language, about, research_stage, methodology, citation_style, whatsapp_number,
+                           preferred_language, about, research_stage, methodology, citation_style, whatsapp_number, wa_country,
                            created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW())
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
      ON CONFLICT (user_id) DO UPDATE SET
        full_name = EXCLUDED.full_name,
        gender = EXCLUDED.gender,
-        whatsapp_number = EXCLUDED.whatsapp_number,
+       whatsapp_number = EXCLUDED.whatsapp_number,
+       wa_country = EXCLUDED.wa_country,
        research_field = EXCLUDED.research_field,
        research_title = EXCLUDED.research_title,
        degree_level = EXCLUDED.degree_level,
@@ -241,7 +243,6 @@ export async function saveOnboarding(userId, data) {
        research_stage = EXCLUDED.research_stage,
        methodology = EXCLUDED.methodology,
        citation_style = EXCLUDED.citation_style,
-       gender = EXCLUDED.gender,
        updated_at = NOW()
      RETURNING *`,
     values
