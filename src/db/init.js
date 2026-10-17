@@ -690,6 +690,10 @@ const WA_COUNTRY_BACKFILL = `
     WHEN whatsapp_number LIKE '+212%' THEN 'MA'
     WHEN whatsapp_number LIKE '+213%' THEN 'DZ'
     WHEN whatsapp_number LIKE '+216%' THEN 'TN'
+    WHEN whatsapp_number LIKE '+222%' THEN 'MR'
+    WHEN whatsapp_number LIKE '+252%' THEN 'SO'
+    WHEN whatsapp_number LIKE '+253%' THEN 'DJ'
+    WHEN whatsapp_number LIKE '+269%' THEN 'KM'
     ELSE 'LY'
   END
   WHERE (wa_country IS NULL OR wa_country = '') AND whatsapp_number IS NOT NULL AND whatsapp_number <> '';
