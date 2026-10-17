@@ -642,6 +642,7 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
   margin-top: 18px; padding: 13px 15px; border: 1px solid var(--mist); border-inline-start: 4px solid var(--apricot);
   border-radius: 14px; background: #fff; color: var(--ink); font-size: 12.5px; line-height: 1.95;
 }
+.alert[hidden] { display: none; }
 .alert ul { margin-top: 6px; }
 
 /* ==== زر واتساب العائم (دعم فني) ==== */

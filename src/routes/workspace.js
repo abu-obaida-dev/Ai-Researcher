@@ -70,15 +70,35 @@ const FLASH = {
   file_deleted: { type: 'ok', message: 'حُذف الملف.' },
   file_missing: { type: 'error', message: 'الملف غير موجود.' },
   file_bad: { type: 'error', message: 'تعذّر رفع الملف — تحقق من النوع والحجم.' },
+  // تنبيهات رفع مفصّلة: كل رفض له سببه الواضح بدل رسالة غامضة واحدة.
+  // نصوصها تُخصَّص في flashFromQuery بأرقام المستخدم الفعلية عند توفرها.
+  file_too_large: { type: 'error', message: 'حجم الملف أكبر من الحد المسموح لباقتك.' },
+  file_type_bad: { type: 'error', message: 'نوع الملف غير مدعوم — الأنواع المسموحة فقط.' },
+  file_mime: { type: 'error', message: 'نوع محتوى الملف لا يطابق امتداده — قد يكون الامتداد قد عُدِّل.' },
+  file_quota: { type: 'error', message: 'مساحة باقتك لا تتسع لهذا الملف — احذف ملفات أو احجز مساحة أكبر.' },
+  file_step_bad: { type: 'error', message: 'هذه الخطوة غير موجودة في مسار بحثك.' },
   file_no_storage: {
     type: 'error',
     message: 'رفع الملفات غير متاح على هذه المنصة حالياً (نظام الملفات مؤقّت) — بقية المنصة تعمل كما هي.'
   }
 };
 
-/** تنبيه النتيجة من باراميترات الرابط (?ok= أو ?err=). */
-function flashFromQuery(query) {
-  return FLASH[String(query.ok || query.err || '')] || null;
+/** تنبيه النتيجة من باراميترات الرابط (?ok= أو ?err=).
+ *  ctx اختياري (maxMb · allowedTypes · summary): تنبيهات الرفع تُبنى بأرقام
+ *  المستخدم الفعلية فيفهم سبب الرفض مباشرة بلا تخمين. */
+function flashFromQuery(query, ctx = {}) {
+  const entry = FLASH[String(query.ok || query.err || '')];
+  if (!entry) return null;
+  const key = String(query.ok || query.err || '');
+  const dynamic = {
+    file_too_large: `حجم الملف أكبر من الحد المسموح: حتى ${Number(ctx.maxMb || 0)} MB للملف الواحد في باقتك.`,
+    file_type_bad: `نوع الملف غير مدعوم — الأنواع المسموحة فقط: ${ctx.allowedTypes || ''}.`,
+    file_quota: `مساحة باقتك لا تتسع لهذا الملف: المستخدم ${ctx.summary?.usedLabel || '0'} من ${
+      ctx.summary?.quotaLabel || '0'
+    } — احذف ملفاً أو احجز مساحة أكبر.`,
+    file_mime: 'نوع محتوى الملف لا يطابق امتداده — قد يكون الامتداد قد عُدِّل.'
+  };
+  return { type: entry.type, message: dynamic[key] || entry.message };
 }
 
 /** خريطة { step_key: '1. عنوان' } من مسار درجة الباحث لعرض أسماء الخطوات. */
@@ -402,6 +422,8 @@ router.get('/files', pageReadLimit, requireService('files'), async (req, res) =>
       userFileMaxBytes(userId)
     ]);
 
+    const maxMb = Math.round(maxBytes / (1024 * 1024));
+
     res.type('html').send(
       renderFilesPage({
         account: req.account,
@@ -413,9 +435,9 @@ router.get('/files', pageReadLimit, requireService('files'), async (req, res) =>
         stepKey,
         stepOptions,
         stepTitles,
-        maxMb: Math.round(maxBytes / (1024 * 1024)),
+        maxMb,
         allowedTypes: allowedTypesLabel(),
-        flash: flashFromQuery(req.query)
+        flash: flashFromQuery(req.query, { maxMb, allowedTypes: allowedTypesLabel(), summary })
       })
     );
   } catch (error) {
@@ -447,7 +469,7 @@ router.post(
       const maxBytes = await userFileMaxBytes(req.account.id);
       if (declared > maxBytes + 2 * 1024 * 1024) {
         console.warn(`رُفض رفع ضخم بلا قراءة: ${declared} بايت`);
-        res.redirect(303, '/files?err=file_bad');
+        res.redirect(303, '/files?err=file_too_large');
         return;
       }
     }
@@ -476,11 +498,17 @@ router.post(
     res.redirect(303, `/files?ok=file_uploaded${step ? `&step=${encodeURIComponent(step)}` : ''}`);
   } catch (error) {
     console.warn(`فشل رفع الملف: ${error?.code || error?.message}`);
-    const key = ['TOO_LARGE', 'BAD_TYPE', 'BAD_MIME', 'BAD_STEP', 'BAD_CONTENT', 'QUOTA_EXCEEDED'].includes(error?.code)
-      ? 'file_bad'
-      : error?.code === 'NO_STORAGE'
-        ? 'file_no_storage'
-        : 'file_missing';
+    // كل سبب رفض يتحوّل إلى تنبيه محدّد يشرح ما حدث للمستخدم فعلاً.
+    const CODE_TO_KEY = {
+      TOO_LARGE: 'file_too_large',
+      BAD_TYPE: 'file_type_bad',
+      BAD_MIME: 'file_mime',
+      QUOTA_EXCEEDED: 'file_quota',
+      BAD_STEP: 'file_step_bad',
+      BAD_CONTENT: 'file_bad',
+      NO_STORAGE: 'file_no_storage'
+    };
+    const key = CODE_TO_KEY[error?.code] || 'file_missing';
     res.redirect(303, `/files?err=${key}`);
   }
   }

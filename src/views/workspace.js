@@ -1,5 +1,5 @@
 import { formatFileSize } from '../services/files.js';
-import { READING_STATUSES } from '../constants.js';
+import { FILE_UPLOAD_LIMITS, READING_STATUSES } from '../constants.js';
 import { SOURCE_GROUPS, sourceGroup } from '../services/library-sources.js';
 import { formatDate, formatDateTime, formatNumber } from './format.js';
 import { icon } from './icons.js';
@@ -660,7 +660,19 @@ export function renderFilesPage({ account, unread = 0, files = [], summary = { t
       <div class="field">
         <span class="field-label">الملف</span>
         <div class="file-picker">
-          <input type="file" id="file_input" name="file" required class="file-picker-input" />
+          <input
+            type="file"
+            id="file_input"
+            name="file"
+            required
+            class="file-picker-input"
+            accept="${escapeHtml(FILE_UPLOAD_LIMITS.allowedExtensions.map((ext) => `.${ext}`).join(','))}"
+            data-max-mb="${Number(maxMb) || 0}"
+            data-allowed-ext="${escapeHtml(FILE_UPLOAD_LIMITS.allowedExtensions.join(','))}"
+            data-remaining-bytes="${Number(
+              summary.remainingBytes ?? Math.max(0, (summary.quotaBytes ?? (summary.quotaMb || 0) * 1048576) - (summary.bytes || 0))
+            )}"
+          />
           <label class="file-picker-label" for="file_input">
             <span class="file-picker-icon">${icon('paperclip')}</span>
             <span class="file-picker-text">
@@ -672,6 +684,8 @@ export function renderFilesPage({ account, unread = 0, files = [], summary = { t
             <span class="file-picker-btn">استعراض</span>
           </label>
           <p class="file-picker-name" id="file-picked-name" aria-live="polite"></p>
+          <!-- تنبيه فوري عند اختيار ملف مرفوض (نوع أو حجم أو مساحة) قبل الإرسال -->
+          <p class="alert" id="file-upload-error" role="alert" aria-live="assertive" hidden></p>
         </div>
         <p class="form-hint">الأنواع المسموحة: ${escapeHtml(allowedTypes)}</p>
       </div>

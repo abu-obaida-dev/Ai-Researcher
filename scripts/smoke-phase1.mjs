@@ -284,7 +284,13 @@ async function testFiles(userId, cookie) {
   const badForm = new FormData();
   badForm.append('file', new Blob(['#!/bin/sh\necho hi'], { type: 'application/x-sh' }), 'evil.sh');
   const badUpload = await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: badForm, redirect: 'manual' });
-  check('1E يرفض رفع ملف من نوع ممنوع', badUpload.status === 303 && (badUpload.headers.get('location') || '').includes('err=file_bad'));
+  check('1E يرفض رفع ملف من نوع ممنوع', badUpload.status === 303 && (badUpload.headers.get('location') || '').includes('err=file_type_bad'));
+  // التنبيه بعد الرفض يشرح السبب ويوثّق الأنواع المسموحة
+  const typeFlash = (await call('/files?err=file_type_bad', { cookie })).text;
+  check(
+    '1E تنبيه النوع يذكر الأنواع المسموحة',
+    typeFlash.includes('نوع الملف غير مدعوم') && typeFlash.includes('.pdf')
+  );
 
   // مستخدم آخر لا يستطيع تحميل الملف
   const stamp = Date.now();
@@ -1111,7 +1117,13 @@ async function testStorageLimits() {
   const form = new FormData();
   form.append('file', new Blob([megabytes(10)], { type: 'application/pdf' }), 'ten.pdf');
   const viaForm = await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: form, redirect: 'manual' });
-  check('1E الحد الجديد يطبَّق فوراً على الرفع', viaForm.status === 303 && (viaForm.headers.get('location') || '').includes('err=file_bad'));
+  check('1E الحد الجديد يطبَّق فوراً على الرفع', viaForm.status === 303 && (viaForm.headers.get('location') || '').includes('err=file_too_large'));
+  // التنبيه يشرح الحجم وحدّ الباقة الفعلي
+  const tooLargeFlash = (await call('/files?err=file_too_large', { cookie })).text;
+  check(
+    '1E تنبيه الحجم يشرح الحد الفعلي',
+    tooLargeFlash.includes('أكبر من الحد المسموح') && tooLargeFlash.includes('حتى 5 MB')
+  );
 
   // تنظيف + إعادة الافتراضي (حصة الباقة وحدّ الملف اللذان خفضهما الاختبار)
   const files = await pool.query('SELECT id FROM files WHERE user_id = $1', [user.id]);
