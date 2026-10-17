@@ -1549,8 +1549,8 @@ router.post('/plans/:code', requireAdminPermission('admin:plans'), async (req, r
         isActive,
         roleCode || null,
         storageMb,
-        // الباقة المجانية لا تنتهي أبداً — تبقى مدة صفر مهما أُرسل من النموذج
-        code === FREE_PLAN_CODE ? 0 : periodDays,
+        // 0 = لا تنتهي؛ والمجانية صارت مدةً قابلة للتعديل كبقية الباقات
+        periodDays,
         maxFileMb
       ]
     );
@@ -1567,19 +1567,15 @@ router.post('/plans/:code', requireAdminPermission('admin:plans'), async (req, r
  * حذف باقة: الخيار الأخير حين تصبح الباقة بلا فائدة.
  *
  * قواعد الأمان:
- *   - الباقة المجانية (free_trial) لا تُحذف أبداً — هي أساس المنصة.
- *   - إن كان مشتركون عليها يُنقلون أولاً إلى الباقة المجانية (وليس
- *     plan_code = NULL) حتى لا يفقدوا خدماتهم.
+ *   - تُحذف أي باقة بقرار المدير — منها الباقة المجانية (free_trial) أيضاً.
+ *   - مشتركو الباقة الحذوفة يُنقلون إلى المجانية إن بقي صفّها، وإلا إلى
+ *     «بلا باقة» (NULL) — فالحساب بلا باقة يبقى على دور الباحث ولا يُقفل.
  *   - لا يحدث شيء إلا بتأكيد صريح (confirm=1) من نموذج يحمل data-confirm.
  */
 router.post('/plans/:code/delete', requireAdminPermission('admin:plans'), async (req, res) => {
   const back = tokenBack(req);
   const code = String(req.params.code || '').trim().slice(0, 100);
 
-  if (code === FREE_PLAN_CODE) {
-    res.redirect(302, back('/admin/plans', { error: 'لا يمكن حذف الباقة المجانية — هي أساس المنصة.' }));
-    return;
-  }
   if (req.body?.confirm !== '1') {
     res.redirect(302, back('/admin/plans', { error: 'الحذف يحتاج تأكيداً صريحاً — لم يُنفَّذ.' }));
     return;
@@ -1592,13 +1588,18 @@ router.post('/plans/:code/delete', requireAdminPermission('admin:plans'), async 
       return;
     }
 
-    // نقل المشتركين إلى الباقة المجانية أولاً ( ضمن معاملة مع الحذف )
+    // نقل المشتركين داخل معاملة الحذف — وجهتهم: المجانية إن بقي صفّها، وإلا
+    // «بلا باقة» (NULL). وعند حذف المجانية نفسها تُفرَغ حساباتها إلى NULL مباشرة.
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const freeExists = (
+        await client.query('SELECT 1 FROM plans WHERE code = $1', [FREE_PLAN_CODE])
+      ).rows.length > 0;
+      const target = code === FREE_PLAN_CODE || !freeExists ? null : FREE_PLAN_CODE;
       const moved = await client.query(
         'UPDATE users SET plan_code = $2, updated_at = NOW() WHERE plan_code = $1',
-        [code, FREE_PLAN_CODE]
+        [code, target]
       );
       const deleted = await client.query('DELETE FROM plans WHERE code = $1', [code]);
       await client.query('COMMIT');
@@ -1614,7 +1615,13 @@ router.post('/plans/:code/delete', requireAdminPermission('admin:plans'), async 
         302,
         back('/admin/plans', {
           saved: 'plan_deleted',
-          note: `${found.rows[0].title}${Number(moved.rowCount) ? ` · نُقل ${moved.rowCount} مشترك إلى الباقة المجانية` : ''}`
+          note: `${found.rows[0].title}${
+            Number(moved.rowCount)
+              ? target
+                ? ` · نُقل ${moved.rowCount} مشترك إلى الباقة المجانية`
+                : ` · ${moved.rowCount} حساب بلا باقة`
+              : ''
+          }`
         })
       );
     } catch (error) {

@@ -2,14 +2,12 @@ import {
   APP_NAME,
   PAYMENT_METHODS,
   PLATFORM_SERVICES,
-  PLAN_FILE_DEFAULT_MB,
   SITE_CURRENCIES,
   SUPPORT_EMAIL,
   SUPPORT_WHATSAPP
 } from '../constants.js';
 import { whatsappLink } from './layout.js';
 import { formatNumber } from './format.js';
-import { formatStorageMb } from '../services/plans.js';
 import { icon } from './icons.js';
 import { BRAND, escapeHtml, renderLayout } from './layout.js';
 
@@ -264,10 +262,6 @@ function renderPlanCard(plan, currency) {
   </div>
   <p class="plan-period">${escapeHtml(plan.period)}</p>
   <span class="plan-tokens">${icon('coin', 'icon-sm')} ${escapeHtml(formatNumber(plan.tokens))} نقطة</span>
-  <span class="plan-storage">${icon('clipboard', 'icon-sm')} ${escapeHtml(formatStorageMb(plan.storageMb))} مساحة تخزين</span>
-  <span class="plan-storage">${icon('file', 'icon-sm')} ${escapeHtml(
-    formatStorageMb(plan.maxFileMb ?? PLAN_FILE_DEFAULT_MB)
-  )} للملف الواحد</span>
   <ul class="plan-features">${features}</ul>
   <a class="btn${isFree ? '' : ' btn-primary'}" href="${isFree ? '/login' : `/payments?plan=${encodeURIComponent(plan.code)}`}">${escapeHtml(
     plan.cta

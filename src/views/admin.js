@@ -731,19 +731,17 @@ export function renderAdminPlans({
     <td>${escapeHtml(formatNumber(plan.subscribers))}</td>
     <td class="row-actions">
       <a class="btn btn-sm" href="#edit-${escapeHtml(plan.code)}">تعديل</a>
-      ${
-        plan.code === FREE_PLAN_CODE
-          ? '<span class="badge">لا تُحذف</span>'
-          : `<form class="inline-form" method="post" action="/admin/plans/${encodeURIComponent(plan.code)}/delete${token}"
-            data-confirm="حذف باقة «${escapeHtml(plan.title)}» نهائياً؟${
-              Number(plan.subscribers) > 0
-                ? ` سينتقل ${Number(plan.subscribers)} مشترك إلى الباقة المجانية.`
-                : ''
-            } لا يمكن التراجع.">
-            <input type="hidden" name="confirm" value="1" />
-            <button class="btn btn-sm btn-danger" type="submit">حذف</button>
-          </form>`
-      }
+      <form class="inline-form" method="post" action="/admin/plans/${encodeURIComponent(plan.code)}/delete${token}"
+        data-confirm="حذف باقة «${escapeHtml(plan.title)}» نهائياً؟${
+          Number(plan.subscribers) > 0
+            ? plan.code === FREE_PLAN_CODE
+              ? ` سيصبح ${Number(plan.subscribers)} حساب بلا باقة.`
+              : ` سينتقل ${Number(plan.subscribers)} مشترك إلى الباقة المجانية.`
+            : ''
+        } لا يمكن التراجع.">
+        <input type="hidden" name="confirm" value="1" />
+        <button class="btn btn-sm btn-danger" type="submit">حذف</button>
+      </form>
     </td>`
   );
 
@@ -775,8 +773,8 @@ export function renderAdminPlans({
         <div class="field">
           <label for="period-days-${code}">مدة الباقة (أيام)</label>
           <input type="number" id="period-days-${code}" name="period_days" min="0" max="3650" step="1"
-            value="${escapeHtml(String(Number(plan.period_days) || 0))}" ${isFree ? 'readonly' : ''} />
-          <p class="form-hint">${isFree ? 'الباقة المجانية لا تنتهي (صفر).' : '0 = لا تنتهي. بها يُحسب انتهاء الباقة وفترة السماح 48 ساعة.'}</p>
+            value="${escapeHtml(String(Number(plan.period_days) || 0))}" />
+          <p class="form-hint">0 = لا تنتهي. بها يُحسب انتهاء الباقة وفترة السماح 48 ساعة.</p>
         </div>
         <div class="field">
           <label for="price-${code}">السعر</label>
@@ -837,19 +835,17 @@ export function renderAdminPlans({
             ownerLabel: plan.title
           })}</div>`
         : '<p class="muted">اختر دور الباقة أولاً ثم احفظ لتظهر صلاحياتها هنا.</p>'}
-    ${
-      isFree
-        ? '<p class="muted mt-12">الباقة المجانية لا تُحذف — كل الحسابات تعود إليها تلقائياً.</p>'
-        : `<form class="mt-12" method="post" action="/admin/plans/${encodeURIComponent(code)}/delete${token}"
-          data-confirm="حذف باقة «${escapeHtml(plan.title)}» نهائياً؟${
-            Number(plan.subscribers) > 0
-              ? ` she'll ${Number(plan.subscribers)} مشترك سينتقلون إلى الباقة المجانية.`
-              : ''
-          } لا يمكن التراجع.">
-          <input type="hidden" name="confirm" value="1" />
-          <button class="btn btn-sm btn-danger" type="submit">${icon('trash', 'icon-sm')} حذف الباقة</button>
-        </form>`
-    }
+    <form class="mt-12" method="post" action="/admin/plans/${encodeURIComponent(code)}/delete${token}"
+      data-confirm="حذف باقة «${escapeHtml(plan.title)}» نهائياً؟${
+        Number(plan.subscribers) > 0
+          ? plan.code === FREE_PLAN_CODE
+            ? ` سيصبح ${Number(plan.subscribers)} حساب بلا باقة.`
+            : ` سينتقل ${Number(plan.subscribers)} مشترك إلى الباقة المجانية.`
+          : ''
+      } لا يمكن التراجع.">
+      <input type="hidden" name="confirm" value="1" />
+      <button class="btn btn-sm btn-danger" type="submit">${icon('trash', 'icon-sm')} حذف الباقة</button>
+    </form>
    </div>
   </div>`;
     })

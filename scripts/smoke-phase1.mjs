@@ -782,17 +782,19 @@ async function testChat(userId, cookie) {
 }
 
 /**
- * اختبارات حدود التخزين: الافتراضي لكل باقة (ملف 100 / حصة 500 من جدول plans)،
- * ضبط المدير من صفحة الباقات، ورفض الرفع عند تجاوز حجم الملف أو حصة الباقة.
- * تُعيد القيم الافتراضية في النهاية.
+ * اختبارات حدود التخزين: حدّا الباقة معرّفة وسليمة (ملف ≤ حصة) — الرقمان بيانات
+ * يضبطها المدير من صفحة الباقات لا ثوابت — ثم ضبط المدير ورفض الرفع عند تجاوز
+ * حجم الملف أو حصة الباقة. تُعيد القيم المحفوظة في النهاية.
  */
 async function testStorageLimits() {
   const defaults = (
     await pool.query(`SELECT storage_mb, max_file_mb FROM plans WHERE code = 'free_trial'`)
   ).rows[0];
+  const defStorage = Number(defaults?.storage_mb);
+  const defFile = Number(defaults?.max_file_mb);
   check(
-    '1E حدود الباقة الافتراضية: ملف 100 MB / حصة 500 MB',
-    Number(defaults?.max_file_mb) === 100 && Number(defaults?.storage_mb) === 500,
+    '1E حدود الباقة معرّفة وسليمة في جدولها (ملف ≤ حصة)',
+    defStorage > 0 && defFile > 0 && defFile <= defStorage,
     JSON.stringify(defaults)
   );
 
