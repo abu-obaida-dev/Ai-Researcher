@@ -194,8 +194,9 @@ export function renderOnboardingPage({ account, values, errors = [], profile = n
     return `<option value="${country.code}" data-dial="${country.dial}" data-lengths="${country.lengths.join(',')}" data-sample="${localSample}"${selected}>${escapeHtml(country.name)} (+${country.dial})</option>`;
   }).join('');
 
+  const formAction = `/onboarding${backTarget ? `?next=${encodeURIComponent(backTarget)}` : ''}`;
   const body = `<div class="onboarding-card">
-  <div class="form-card">
+  <form class="form-card" method="post" action="${formAction}">
     ${errorBox}
 
     <section class="form-section first">
@@ -257,7 +258,7 @@ export function renderOnboardingPage({ account, values, errors = [], profile = n
       <button class="btn btn-primary" type="submit">${profile ? 'حفظ التعديلات' : 'ابدأ مع المشرف الذكي'}</button>
       <span class="muted">يُحفظ الملف في خوادم المنصة ويمكنك تعديله في أي وقت.</span>
     </div>
-  </div>
+  </form>
 </div>`;
 
   // الصفحة المستقلة تحمل عنوانها وطريق العودة بنفسها (لا توب بار ولا سايدبار يحملهما)
