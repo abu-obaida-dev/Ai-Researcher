@@ -11,23 +11,15 @@ const { Pool } = pg;
 /**
  * بذرة قاعدة البيانات: الباقات (بنفس نصوص الموقع وأسعاره) + إعدادات المنصة الافتراضية.
  * المزايا تُخزَّن نصاً بأسطر متعددة وتُعرض كقائمة في بطاقات الأسعار.
- * لا نلمس is_active عند التحديث حتى لا نُلغي تعطيل المدير لأي باقة.
+ *
+ * مهم: البذرة تملأ الفراغ فقط (DO NOTHING) — تعديلات المدير من صفحة الباقات
+ * (النقاط/السعر/الاسم...) مقدَّسة ولا يمسّها أي تشغيل لاحق لـ db:seed،
+ * وإلا عادت كل تعديلاته إلى القيم الافتراضية صامتاً في كل عملية نشر.
  */
 const PLANS_SEED = `
   INSERT INTO plans (code, title, tagline, price, tokens, storage_mb, period, period_days, cta, popular, display_order, features, role_code, is_active)
   VALUES ($1, $2, $3, $4, $5, $6, $7, $13, $8, $9, $10, $11, $12, true)
-  ON CONFLICT (code) DO UPDATE SET
-    title = EXCLUDED.title,
-    tagline = EXCLUDED.tagline,
-    price = EXCLUDED.price,
-    tokens = EXCLUDED.tokens,
-    period = EXCLUDED.period,
-    period_days = COALESCE(plans.period_days, EXCLUDED.period_days),
-    cta = EXCLUDED.cta,
-    popular = EXCLUDED.popular,
-    display_order = EXCLUDED.display_order,
-    features = EXCLUDED.features,
-    role_code = COALESCE(plans.role_code, EXCLUDED.role_code);
+  ON CONFLICT (code) DO NOTHING;
 `;
 
 const SETTINGS_SEED = `
