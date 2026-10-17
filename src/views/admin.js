@@ -2,6 +2,7 @@ import {
   ADMIN_PERMISSIONS,
   DEFAULT_ROLES,
   FREE_PLAN_CODE,
+  PLAN_FILE_DEFAULT_MB,
   PLAN_STORAGE_DEFAULT_MB,
   SITE_CURRENCIES,
   TOKEN_COSTS
@@ -10,7 +11,7 @@ import { escapeHtml, renderLayout, renderStat, renderTable, whatsappLink } from 
 import { formatDate, formatDateTime, formatMoney, formatNumber } from './format.js';
 import { icon } from './icons.js';
 import { LIBRARY_EXTENSIONS } from '../services/library.js';
-import { formatStorageMb, planFeaturesFromPermissions, storageLabel } from '../services/plans.js';
+import { fileMaxLabel, formatStorageMb, planFeaturesFromPermissions, storageLabel } from '../services/plans.js';
 
 /**
  * صفحات لوحة الإدارة مولَّدة على الخادم (Server-Side Rendering) — بدون React
@@ -688,13 +689,17 @@ function roleOptions(current) {
 /**
  * معاينة ما سيظهر للباحث في بطاقة الباقة على صفحة الهبوط: يُبنى بنفس
  * دالة المزايا العامة (planFeaturesFromPermissions) من صلاحيات دور الباقة،
- * مضافاً إليها سطر حصة التخزين القادمة من قاعدة البيانات.
+ * مضافاً إليها سطرّا حصة التخزين وأقصى ملف واحد القادمين من قاعدة البيانات.
  */
-function rolePermissionsPreview(roleCode, storageMb) {
+function rolePermissionsPreview(roleCode, storageMb, fileMaxMb) {
   const role = DEFAULT_ROLES.find((item) => item.code === String(roleCode || ''));
   const permissions = new Set(role?.permissions || []);
 
-  return [...planFeaturesFromPermissions(permissions), storageLabel(storageMb)];
+  return [
+    ...planFeaturesFromPermissions(permissions),
+    storageLabel(storageMb),
+    fileMaxLabel(fileMaxMb ?? PLAN_FILE_DEFAULT_MB)
+  ];
 }
 
 export function renderAdminPlans({
@@ -716,6 +721,7 @@ export function renderAdminPlans({
     <td>${escapeHtml(formatMoney(plan.price, plan.currency))}</td>
     <td>${escapeHtml(formatNumber(plan.tokens))}</td>
     <td>${escapeHtml(formatStorageMb(plan.storage_mb))}</td>
+    <td>${escapeHtml(formatStorageMb(plan.max_file_mb))}</td>
     <td>${escapeHtml(plan.role_code || '—')}</td>
     <td>${
       plan.is_active
@@ -790,6 +796,12 @@ export function renderAdminPlans({
             value="${escapeHtml(String(Number(plan.storage_mb) || PLAN_STORAGE_DEFAULT_MB))}" />
           <p class="form-hint">تُحفظ لهذه الباقة وتُطبَّق على كل باحثيها عند رفع الملفات.</p>
         </div>
+        <div class="field">
+          <label for="max-file-${code}">أقصى حجم للملف الواحد (MB)</label>
+          <input type="number" id="max-file-${code}" name="max_file_mb" min="1" max="2048" step="1" required
+            value="${escapeHtml(String(Number(plan.max_file_mb) || PLAN_FILE_DEFAULT_MB))}" />
+          <p class="form-hint">حدّ خاص بهذه الباقة — لا يتجاوز مساحتها الكلية (تُقتطع من الحصة أولاً).</p>
+        </div>
       </div>
       <div class="field">
         <label for="role-${code}">دور الباقة (يحدد الخدمات المفتوحة)</label>
@@ -807,7 +819,7 @@ export function renderAdminPlans({
         <textarea id="features-${code}" name="features" rows="5" maxlength="4000">${escapeHtml(String(plan.features ?? ''))}</textarea>
         <p class="form-hint">مزايا الباقة تُولَّد تلقائياً من صلاحيات دور الباقة (كل خدمة مفتوحة سطر). ما تكتبه هنا يظهر بعدها.</p>
         <ul class="info-list mt-8">
-          ${rolePermissionsPreview(plan.role_code, plan.storage_mb).map((line) => `<li>${escapeHtml(line)}</li>`).join('')}
+          ${rolePermissionsPreview(plan.role_code, plan.storage_mb, plan.max_file_mb).map((line) => `<li>${escapeHtml(line)}</li>`).join('')}
         </ul>
       </div>
       <label class="check"><input type="checkbox" name="popular" value="1" ${plan.popular ? 'checked' : ''} /> باقة مميّزة (شريط «الأكثر طلباً»)</label>
@@ -894,6 +906,12 @@ export function renderAdminPlans({
             <input type="number" id="new-storage" name="storage_mb" min="10" max="102400" step="10" required
               value="${escapeHtml(String(PLAN_STORAGE_DEFAULT_MB))}" />
           </div>
+          <div class="field">
+            <label for="new-max-file">أقصى حجم للملف الواحد (MB)</label>
+            <input type="number" id="new-max-file" name="max_file_mb" min="1" max="2048" step="1" required
+              value="${escapeHtml(String(PLAN_FILE_DEFAULT_MB))}" />
+            <p class="form-hint">لا يتجاوز مساحة التخزين الكلية (تُقتطع الحصة أولاً).</p>
+          </div>
         <div class="field">
             <label for="new-role">دور الباقة (يحدد الخدمات)</label>
             <select id="new-role" name="role_code">${roleOptions('')}</select>
@@ -927,7 +945,7 @@ export function renderAdminPlans({
       <a class="btn btn-primary" href="#add-plan">إضافة باقة</a>
     </div>
     ${renderTable({
-      columns: ['الكود', 'الاسم', 'السعر', 'النقاط', 'مساحة التخزين', 'الدور', 'الحالة', 'المشتركون', 'إجراءات'],
+      columns: ['الكود', 'الاسم', 'السعر', 'النقاط', 'مساحة التخزين', 'أقصى ملف', 'الدور', 'الحالة', 'المشتركون', 'إجراءات'],
       rows,
       emptyMessage: 'لا توجد باقات بعد — شغّل npm run db:seed لإضافة الباقات الافتراضية.'
     })}
@@ -955,11 +973,11 @@ function humanBytes(bytes) {
 }
 
 /**
- * إعدادات التخزين: يضبط المدير حجم الملف الواحد والمساحة الكلية لكل باحث.
- * التغيير يُحفظ في جدول settings ويسري فوراً على كل الحسابات بلا إعادة تشغيل.
+ * إعدادات المنصة: طرق الدفع وواتساب والمشرفون.
+ * حدود التخزين (الحصة الكلية + حجم الملف الواحد) صارت لكل باقة على حدة
+ * من صفحة «الباقات» فحُذف قسمها من هنا نهائياً.
  */
 export function renderAdminSettings({
-  limits,
   usage = {},
   supervisors = [],
   supervisorPermissions = [],
@@ -974,15 +992,13 @@ export function renderAdminSettings({
 }) {
   const token = ''; // M2: الرمز لا يظهر في أي رابط.
   const stats = [
-    ['أقصى حجم للملف الواحد', `${limits.maxUploadMb} MB`],
-    ['المساحة الكلية لكل باحث', `${limits.maxStorageMb} MB`],
     ['إجمالي ملفات المنصة', `${humanBytes(usage.bytes)} · ${usage.files || 0} ملف`],
     ['باحثون رفعوا ملفات', `${usage.users || 0} باحث`]
   ]
     .map(([label, value]) => renderStat(label, value))
     .join('');
 
-  const notice = saved ? '<div class="notice">حُفظت حدود التخزين — تسري على كل الباحثين فوراً.</div>' : '';
+  const notice = saved ? '<div class="notice">حُفظت الإعدادات — سرت فوراً على كل المنصة.</div>' : '';
   const errorNotice = error ? `<div class="alert"><b>تعذّر الحفظ:</b> ${escapeHtml(error)}</div>` : '';
 
   // قسم المشرفين: جدول supervisors + إضافة بريد (حساب بريد جوجل)
@@ -1167,44 +1183,6 @@ const supervisorsSection = `<div class="card mt-16">
   const body = `
   <div class="grid">${stats}</div>
   ${notice}${errorNotice}
-  <div class="duo mt-16">
-    <div class="card">
-      <div class="card-head">
-        <h2>حدود رفع الملفات</h2>
-        <a class="btn btn-sm" href="#limits-help">ماذا تعني؟</a>
-      </div>
-      <form method="post" action="/admin/settings/storage${token}" class="form-card">
-      <div class="field-row">
-        <div class="field">
-          <label for="max_upload_mb">أقصى حجم للملف الواحد (MB)</label>
-          <input type="number" id="max_upload_mb" name="max_upload_mb" min="1" max="2048" step="1" required
-            value="${escapeHtml(String(limits.maxUploadMb))}" />
-          <p class="form-hint">مثال: 100 يعني 100 ميجابايت كحد أقصى للملف.</p>
-        </div>
-        <div class="field">
-          <label for="max_storage_mb">الحصة العامة (fallback) لكل باحث (MB)</label>
-          <input type="number" id="max_storage_mb" name="max_storage_mb" min="10" max="102400" step="10" required
-            value="${escapeHtml(String(limits.maxStorageMb))}" />
-          <p class="form-hint">تُستعمل فقط إن لم تكن للباقة حصة محدّدة. حصة كل باقة تُضبط من صفحة «الباقات» (storage_mb).</p>
-        </div>
-      </div>
-      <div class="form-actions">
-        <button class="btn btn-primary" type="submit">حفظ الحدود</button>
-        <span class="muted">يُطبَّق فوراً — لا يحتاج إعادة تشغيل الخادم.</span>
-      </div>
-      </form>
-    </div>
-  </div>
-  <div class="modal" id="limits-help">
-    <div class="card">
-      <div class="card-head"><h2>حدود التخزين</h2><a class="btn btn-sm" href="#" title="إغلاق">إغلاق ✕</a></div>
-      <ul class="muted">
-        <li><b>حجم الملف الواحد</b> — أقصى حجم لملف يرفعه الباحث (بين 1 و2048 MB).</li>
-        <li><b>المساحة الكلية</b> — مجموع ما يرفعه باحث واحد؛ لو ملأها لا يستطيع الرفع حتى يحذف ملفاً، ويجب ألا تقل عن حجم الملف الواحد.</li>
-        <li>كل تعديل يُحفظ فوراً ويسري على كل الحسابات بلا إعادة تشغيل.</li>
-      </ul>
-    </div>
-  </div>
   ${paymentsSection}
   ${supportSection(supportWhatsapp, token)}
   ${voiceSection(voiceMale, voiceFemale, token)}
@@ -1212,7 +1190,7 @@ const supervisorsSection = `<div class="card mt-16">
 
   return renderLayout({
     title: 'الإعدادات',
-    subtitle: 'حدود التخزين + طرق الدفع + المشرفون',
+    subtitle: 'طرق الدفع + واتساب + المشرفون — حدود التخزين تُضبط من صفحة «الباقات»',
     activeKey: 'settings',
     account,
     scripts: ['/js/app-shell.js'],

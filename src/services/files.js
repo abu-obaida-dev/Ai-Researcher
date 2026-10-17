@@ -2,18 +2,17 @@ import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool } from '../db/client.js';
-import { FILE_UPLOAD_LIMITS, FREE_PLAN_CODE, isUuid } from '../constants.js';
+import { FILE_UPLOAD_LIMITS, PLAN_FILE_DEFAULT_MB, PLAN_STORAGE_DEFAULT_MB, isUuid } from '../constants.js';
 import { isValidStepKeyForUser } from './journey.js';
-import { maxStorageBytes, maxUploadBytes } from './settings.js';
-import { planStorageBytes } from './plans.js';
+import { normalizeFileMaxMb, normalizeStorageMb } from './plans.js';
 import { assertContentMatchesExtension } from './upload-guard.js';
 
 /**
  * ملفات الباحث (1E): الميتاداتا في جدول files والبايتات على القرص تحت
  * storage/users/{userId}/files/ كما هو موصوف في storage/README.md.
  * كل عملية تتأكد أن الملف مملوك لصاحب الجلسة، والرفع محدود بـ:
- *   - حجم الملف الواحد  (حدّ يضبطه المدير من لوحة الإدارة)
- *   - المساحة الكلية للمستخدم (حدّ يضبطه المدير من لوحة الإدارة)
+ *   - حجم الملف الواحد  (حدّ يضبطه المدير لكل باقة من صفحة «الباقات»)
+ *   - المساحة الكلية للمستخدم (حصة باقته في جدول plans)
  *   - قائمة الأنواع المسموحة (constants.js → FILE_UPLOAD_LIMITS)
  * مع اسم ملف نظيف داخل المجلد.
  */
@@ -31,8 +30,6 @@ const TEXT_PREVIEW_LIMIT = 400 * 1024;
 export function isEphemeralStorage() {
   return Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 }
-
-export { maxUploadBytes, maxStorageBytes };
 
 /** نص الأنواع المسموحة للعرض في الصفحة. */
 export function allowedTypesLabel() {
@@ -132,18 +129,47 @@ export async function listFiles(userId, { step = '', limit = 100 } = {}) {
 }
 
 /**
+ * حدود رفع الباحث من باقته في قاعدة البيانات دفعة واحدة
+ * (plans.max_file_mb لحجم الملف الواحد + plans.storage_mb للحصة الكلية):
+ * استعلام JOIN واحد لكلا الحدّين — فلا تعارض بين قيمتين ولا مساران للقراءة.
+ * السقوط المتدرّج: قيمة الباقة ← الحدّين الافتراضيين الثابتين عند أي خلل.
+ */
+export async function userUploadLimits(userId) {
+  try {
+    const { rows } = await pool.query(
+      `SELECT p.storage_mb, p.max_file_mb
+         FROM users u
+         JOIN plans p ON p.code = u.plan_code
+        WHERE u.id = $1`,
+      [userId]
+    );
+    if (rows.length) {
+      return {
+        quotaBytes: normalizeStorageMb(rows[0].storage_mb) * 1024 * 1024,
+        fileMaxBytes: normalizeFileMaxMb(rows[0].max_file_mb) * 1024 * 1024
+      };
+    }
+  } catch (error) {
+    console.warn(`تعذّرت قراءة حدود الباقة للمستخدم: ${error.code || error.message}`);
+  }
+  return {
+    quotaBytes: PLAN_STORAGE_DEFAULT_MB * 1024 * 1024,
+    fileMaxBytes: PLAN_FILE_DEFAULT_MB * 1024 * 1024
+  };
+}
+
+/**
  * حصة تخزين الباحث بالبايت: القيمة الحقيقية من باقته في قاعدة البيانات
  * (plans.storage_mb — يضبطها المدير من صفحة الباقات)، مع سقوط آمن على
- * حدّ المنصة العام (settings.max_storage_mb) إن تعذّرت القراءة.
+ * الحدّ الافتراضي الثابت إن تعذّرت القراءة.
  */
 export async function userQuotaBytes(userId) {
-  try {
-    const { rows } = await pool.query('SELECT plan_code FROM users WHERE id = $1', [userId]);
-    return await planStorageBytes(rows[0]?.plan_code || FREE_PLAN_CODE);
-  } catch (error) {
-    console.warn(`تعذّرت قراءة حصة التخزين للمستخدم: ${error.code || error.message}`);
-    return maxStorageBytes();
-  }
+  return (await userUploadLimits(userId)).quotaBytes;
+}
+
+/** أقصى حجم للملف الواحد بالبايت الذي يسمح به باقته (plans.max_file_mb). */
+export async function userFileMaxBytes(userId) {
+  return (await userUploadLimits(userId)).fileMaxBytes;
 }
 
 /**
@@ -261,7 +287,7 @@ export async function saveUpload(userId, { file, title = '', step = '' } = {}) {
     throw error;
   }
 
-  const [limit, quotaBytes] = await Promise.all([maxUploadBytes(), userQuotaBytes(userId)]);
+  const { fileMaxBytes: limit, quotaBytes } = await userUploadLimits(userId);
   if (Number(file.size || 0) > limit) {
     const error = new Error(`حجم الملف أكبر من الحد المسموح (${Math.round(limit / (1024 * 1024))} MB).`);
     error.code = 'TOO_LARGE';

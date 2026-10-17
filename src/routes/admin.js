@@ -2,7 +2,7 @@ import express from 'express';
 import { Readable } from 'node:stream';
 import { pool } from '../db/client.js';
 import { hintForDatabaseError } from '../db/errors.js';
-import { ADMIN_PERMISSIONS, FREE_PLAN_CODE, PLAN_STORAGE_DEFAULT_MB, PLAN_STORAGE_MAX_MB, WHATSAPP_COUNTRIES } from '../constants.js';
+import { ADMIN_PERMISSIONS, FREE_PLAN_CODE, PLAN_FILE_DEFAULT_MB, PLAN_FILE_MAX_MB, PLAN_STORAGE_DEFAULT_MB, PLAN_STORAGE_MAX_MB, WHATSAPP_COUNTRIES } from '../constants.js';
 import { rateLimit, concurrencyLimit, safeEqual } from '../middleware/security.js';
 import { renderNotice } from '../views/layout.js';
 import { notifyUser } from '../services/notifications.js';
@@ -12,10 +12,8 @@ import {
   currentVoiceWhatsappFemale,
   loadVoiceWhatsappMale,
   loadVoiceWhatsappFemale,
-  saveStorageLimits,
   saveSupportWhatsapp,
-  saveVoiceWhatsapp,
-  storageLimits
+  saveVoiceWhatsapp
 } from '../services/settings.js';
 import {
   renderAdminHome,
@@ -499,7 +497,7 @@ router.get('/plans', requireAdminPermission('admin:plans'), (req, res) =>
   renderPage(
     res,
     async () => {
-      const { rows } = await pool.query(`SELECT p.code, p.title, p.tagline, p.price, p.tokens, p.storage_mb, p.period,
+      const { rows } = await pool.query(`SELECT p.code, p.title, p.tagline, p.price, p.tokens, p.storage_mb, p.max_file_mb, p.period,
             p.period_days, p.features, p.popular, p.is_active, p.created_at, p.role_code,
             (SELECT count(*) FROM users u WHERE u.plan_code = p.code)::int AS subscribers
           FROM plans p
@@ -983,15 +981,14 @@ router.get('/users', requireAdminPermission('admin:users'), (req, res) => {
 });
 
 /**
- * إعدادات التخزين: يضبط المدير أقصى حجم للملف الواحد وأقصى مساحة إجمالية
- * لكل باحث. تُحفظ في جدول settings فتُطبَّق فوراً على كل الحسابات بلا إعادة تشغيل.
+ * إعدادات المنصة (ما عدا حدود التخزين — صارت لكل باقة في صفحة «الباقات»).
+ * الإحصاء هنا للعرض فقط (عدد الملفات والمساحة المستهلكة).
  */
 router.get('/settings', requireAdminPermission('admin:settings'), (req, res) =>
   renderPage(
     res,
     async () => {
-      const [limits, usage, supervisors, currency] = await Promise.all([
-        storageLimits(),
+      const [usage, supervisors, currency] = await Promise.all([
         pool.query(
           `SELECT count(*)::int AS files, COALESCE(sum(size_bytes), 0)::bigint AS bytes,
                   count(DISTINCT user_id)::int AS users
@@ -1002,7 +999,6 @@ router.get('/settings', requireAdminPermission('admin:settings'), (req, res) =>
       ]);
 
       return {
-        limits,
         usage: usage.rows[0],
         supervisors,
         supervisorPermissions: await storedPermissionsOfRole(SUPERVISOR_ROLE),
@@ -1055,25 +1051,6 @@ router.post('/settings/supervisors/delete', requireAdminPermission('admin:settin
   }
 });
 
-/** حفظ حدود التخزين بعد التحقق (المساحة الكلية ≥ حجم الملف). */
-router.post('/settings/storage', requireAdminPermission('admin:settings'), async (req, res) => {
-  const backToken = String(req.query.token || '').slice(0, 200);
-  const params = (extra) => {
-    const query = new URLSearchParams(extra);
-    if (backToken) query.set('token', backToken);
-    return `/admin/settings?${query.toString()}`;
-  };
-
-  try {
-    await saveStorageLimits({
-      maxUploadMb: req.body?.max_upload_mb,
-      maxStorageMb: req.body?.max_storage_mb
-    });
-    res.redirect(302, params({ saved: '1' }));
-  } catch (error) {
-    res.redirect(302, params({ error: error?.message || 'تعذّر الحفظ' }));
-  }
-});
 
 /**
  * إرسال إشعار لكل الباحثين النشطين: يُحفظ داخل موقع كل حساب فوراً،
@@ -1454,6 +1431,18 @@ function readStorageMb(body) {
   return Math.min(Math.max(n, 10), PLAN_STORAGE_MAX_MB);
 }
 
+/**
+ * يقرأ أقصى حجم ملف واحد (MB) من نموذج الباقة ويحدّه ضمن [1, PLAN_FILE_MAX_MB].
+ * القيمة الفارغة أو غير الرقمية ⇒ PLAN_FILE_DEFAULT_MB (100) دون رفض النموذج.
+ */
+function readFileMaxMb(body) {
+  const raw = String(body?.max_file_mb ?? '').trim();
+  if (!raw) return PLAN_FILE_DEFAULT_MB;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isInteger(n)) return PLAN_FILE_DEFAULT_MB;
+  return Math.min(Math.max(n, 1), PLAN_FILE_MAX_MB);
+}
+
 /** إضافة باقة جديدة — تظهر فوراً في صفحة الهبوط وكل نصوص الموقع. يسبق مسار :code عمداً. */
 router.post('/plans/add', requireAdminPermission('admin:plans'), async (req, res) => {
   const back = tokenBack(req);
@@ -1465,6 +1454,8 @@ router.post('/plans/add', requireAdminPermission('admin:plans'), async (req, res
   const price = Number.parseInt(String(req.body?.price ?? '0'), 10);
   const tokens = Number.parseInt(String(req.body?.tokens ?? ''), 10);
   const storageMb = readStorageMb(req.body);
+  // رابط حاكم: حصة التخزين الكلية أبداً أقل من أقصى ملف واحد (تُستهلك الحصة أولاً دائماً)
+  const maxFileMb = Math.min(readFileMaxMb(req.body), storageMb);
   const features = String(req.body?.features || '')
     .split('\n')
     .map((line) => line.trim().slice(0, 300))
@@ -1494,9 +1485,9 @@ router.post('/plans/add', requireAdminPermission('admin:plans'), async (req, res
     if (exists.rows.length) return fail('هذا الكود مستخدم لباقة أخرى — اختر كوداً مختلفاً.');
 
     await pool.query(
-      `INSERT INTO plans (code, title, tagline, period, period_days, price, tokens, storage_mb, features, popular, is_active, role_code, created_at)
-       VALUES ($1, $2, $3, $4, $12, $5, $6, $7, $8, $9, $10, $11, NOW())`,
-      [code, title, tagline, period, price, tokens, storageMb, features, popular, isActive, roleCode || 'free', periodDays]
+      `INSERT INTO plans (code, title, tagline, period, period_days, price, tokens, storage_mb, max_file_mb, features, popular, is_active, role_code, created_at)
+       VALUES ($1, $2, $3, $4, $13, $5, $6, $7, $8, $9, $10, $11, $12, NOW())`,
+      [code, title, tagline, period, price, tokens, storageMb, maxFileMb, features, popular, isActive, roleCode || 'free', periodDays]
     );
     clearAccessCache();
     res.redirect(302, back('/admin/plans', { saved: code }));
@@ -1516,6 +1507,8 @@ router.post('/plans/:code', requireAdminPermission('admin:plans'), async (req, r
   const price = Number.parseInt(String(req.body?.price ?? ''), 10);
   const tokens = Number.parseInt(String(req.body?.tokens ?? ''), 10);
   const storageMb = readStorageMb(req.body);
+  // رابط حاكم: حصة التخزين الكلية أبداً أقل من أقصى ملف واحد (تُستهلك الحصة أولاً دائماً)
+  const maxFileMb = Math.min(readFileMaxMb(req.body), storageMb);
   const features = String(req.body?.features || '')
     .split('\n')
     .map((line) => line.trim().slice(0, 300))
@@ -1542,7 +1535,7 @@ router.post('/plans/:code', requireAdminPermission('admin:plans'), async (req, r
     const result = await pool.query(
       `UPDATE plans
           SET title = $2, tagline = $3, period = $4, price = $5, tokens = $6, storage_mb = $11,
-              features = $7, popular = $8, is_active = $9, role_code = $10, period_days = $12
+              max_file_mb = $13, features = $7, popular = $8, is_active = $9, role_code = $10, period_days = $12
         WHERE code = $1`,
       [
         code,
@@ -1557,7 +1550,8 @@ router.post('/plans/:code', requireAdminPermission('admin:plans'), async (req, r
         roleCode || null,
         storageMb,
         // الباقة المجانية لا تنتهي أبداً — تبقى مدة صفر مهما أُرسل من النموذج
-        code === FREE_PLAN_CODE ? 0 : periodDays
+        code === FREE_PLAN_CODE ? 0 : periodDays,
+        maxFileMb
       ]
     );
 

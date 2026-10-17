@@ -72,7 +72,8 @@ const PROFILES_TABLE = `
 `;
 
 /** الباقات المتاحة — تُدار من جدول plans كما كانت تُدار من مجموعة plans في Firestore.
- *  storage_mb = حصة التخزين التي يمنحها المدير لهذه الباقة (تعديله من لوحة الباقات فقط). */
+ *  storage_mb = حصة التخزين التي يمنحها المدير لهذه الباقة،
+ *  max_file_mb = أقصى حجم للملف الواحد — كلاهما يُضبط من صفحة الباقات فقط. */
 const PLANS_TABLE = `
   CREATE TABLE IF NOT EXISTS plans (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -82,6 +83,7 @@ const PLANS_TABLE = `
     price DECIMAL(10,2) DEFAULT 0,
     tokens INTEGER NOT NULL DEFAULT 0,
     storage_mb INTEGER NOT NULL DEFAULT 500,
+    max_file_mb INTEGER NOT NULL DEFAULT 100,
     period VARCHAR(100) DEFAULT 'شهرياً',
     period_days INTEGER,
     features TEXT,
@@ -648,6 +650,8 @@ const PLANS_EXTRA_COLUMNS = `
   ALTER TABLE plans ADD COLUMN IF NOT EXISTS display_order INTEGER DEFAULT 0;
   ALTER TABLE plans ADD COLUMN IF NOT EXISTS role_code VARCHAR(50);
   ALTER TABLE plans ADD COLUMN IF NOT EXISTS storage_mb INTEGER NOT NULL DEFAULT 500;
+  -- أقصى حجم للملف الواحد (MB) لكل باقة — حدّ المنصة العام (settings) أُلغي بقرار المنصة
+  ALTER TABLE plans ADD COLUMN IF NOT EXISTS max_file_mb INTEGER NOT NULL DEFAULT 100;
   -- مدة الباقة بالأيام (يُحسب منها plan_expires_at عند تأكيد الدفع) — NULL = لا تنتهي (مجانية)
   ALTER TABLE plans ADD COLUMN IF NOT EXISTS period_days INTEGER;
 `;

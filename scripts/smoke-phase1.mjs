@@ -6,7 +6,6 @@
 import { createSessionCookie, SESSION_COOKIE_NAME } from '../src/auth/google.js';
 import { pool } from '../src/db/client.js';
 import { deleteFile, filesSummary, saveUpload } from '../src/services/files.js';
-import { saveStorageLimits, storageLimits } from '../src/services/settings.js';
 import { isFcmServerConfigured } from '../src/services/firebase.js';
 import { whatsappLink } from '../src/views/layout.js';
 import ExcelJS from 'exceljs';
@@ -42,6 +41,8 @@ function check(name, ok, extra = '') {
 /** طلب HTTP مع كوكي الجلسة، ويعيد الحالة والنص ورابط التحويل. */
 async function call(path, { method = 'GET', form, cookie, expect = [200], accept = 'text/html' } = {}) {
   const headers = { accept };
+  // بوابة لوحة الإدارة: الرمز يُرسل في ترويسة x-admin-token (يقرأه السكربت من .env نفسه)
+  if (path.startsWith('/admin') && process.env.ADMIN_TOKEN) headers['x-admin-token'] = process.env.ADMIN_TOKEN;
   if (cookie) headers.cookie = cookie;
   let body;
   if (form) {
@@ -781,15 +782,32 @@ async function testChat(userId, cookie) {
 }
 
 /**
- * اختبارات حدود التخزين: الافتراضي 100/500، ضبط المدير، رفض القيم غير المنطقية،
- * ورفض الرفع عند تجاوز حصة المستخدم. تُعيد القيم الافتراضية في النهاية.
+ * اختبارات حدود التخزين: الافتراضي لكل باقة (ملف 100 / حصة 500 من جدول plans)،
+ * ضبط المدير من صفحة الباقات، ورفض الرفع عند تجاوز حجم الملف أو حصة الباقة.
+ * تُعيد القيم الافتراضية في النهاية.
  */
 async function testStorageLimits() {
-  const defaults = await storageLimits();
-  check('1E الحد الافتراضي: ملف 100 MB / حصة 500 MB', defaults.maxUploadMb === 100 && defaults.maxStorageMb === 500, JSON.stringify(defaults));
+  const defaults = (
+    await pool.query(`SELECT storage_mb, max_file_mb FROM plans WHERE code = 'free_trial'`)
+  ).rows[0];
+  check(
+    '1E حدود الباقة الافتراضية: ملف 100 MB / حصة 500 MB',
+    Number(defaults?.max_file_mb) === 100 && Number(defaults?.storage_mb) === 500,
+    JSON.stringify(defaults)
+  );
 
   const adminPage = await call('/admin/settings', { expect: [200] });
-  check('1E صفحة إعدادات التخزين تفتح للمدير', adminPage.ok && adminPage.text.includes('name="max_upload_mb"') && adminPage.text.includes('name="max_storage_mb"'));
+  // قسم حدود التخزين حُذف من الإعدادات نهائياً — صار لكل باقة في صفحة الباقات.
+  check(
+    '1E قسم حدود التخزين حُذف من الإعدادات',
+    adminPage.ok && !adminPage.text.includes('name="max_upload_mb"') && !adminPage.text.includes('/admin/settings/storage')
+  );
+  const limitsGone = await call('/admin/settings/storage', {
+    method: 'POST',
+    form: { max_upload_mb: '10', max_storage_mb: '20' },
+    expect: [404]
+  });
+  check('1E مسار حفظ الحدود العام محذوف (404)', limitsGone.status === 404, `الحالة ${limitsGone.status}`);
   // «حالة النظام» حُذفت من الإعدادات بقرار المنصة: لا البطاقة ولا نافذة شرحها.
   check(
     '1E لا قسم «حالة النظام» في الإعدادات',
@@ -808,6 +826,7 @@ async function testStorageLimits() {
     '1E صلاحيات الباقات داخل صفحة الباقات',
     plansPage.text.includes('/permissions') && plansPage.text.includes('ما تفتحه هذه الباقة لمشتركيها')
   );
+  check('1E حد الملف الواحد حقل في نموذج الباقة', plansPage.text.includes('name="max_file_mb"'));
   const settingsPage = await call('/admin/settings', { expect: [200] });
   check(
     '1E صلاحيات المشرف داخل الإعدادات',
@@ -983,17 +1002,40 @@ async function testStorageLimits() {
     !settingsPagePush.text.includes('name="apiKey"') && !settingsPagePush.text.includes('name="vapidKey"')
   );
 
-  await saveStorageLimits({ maxUploadMb: 30, maxStorageMb: 50 });
-  const changed = await storageLimits();
-  check('1E المدير يغيّر الحدود (30/50)', changed.maxUploadMb === 30 && changed.maxStorageMb === 50, JSON.stringify(changed));
-
-  let rejected = false;
-  try {
-    await saveStorageLimits({ maxUploadMb: 100, maxStorageMb: 10 });
-  } catch (error) {
-    rejected = error.code === 'INVALID_LIMITS';
-  }
-  check('1E ترفض حصة أقل من حجم الملف الواحد', rejected);
+  // المدير يضبط حدود الباقة من صفحة الباقات (المسار الفعلي للنموذج) —
+  // والرابط حاكم: طلب «حجم ملف» أكبر من الحصة يُقتطع إلى الحصة لا يُرفض النموذج.
+  const freeBefore = (await pool.query(`SELECT * FROM plans WHERE code = 'free_trial'`)).rows[0];
+  const planLimitsSave = await call('/admin/plans/free_trial', {
+    method: 'POST',
+    form: {
+      title: freeBefore.title,
+      tagline: freeBefore.tagline || '',
+      period: freeBefore.period || '',
+      period_days: String(freeBefore.period_days ?? 0),
+      price: String(freeBefore.price ?? 0),
+      tokens: String(freeBefore.tokens ?? 0),
+      storage_mb: '50',
+      max_file_mb: '100', // أكبر من الحصة ⇒ يجب أن يُقتطع إلى 50
+      role_code: freeBefore.role_code || '',
+      features: freeBefore.features || '',
+      ...(freeBefore.popular ? { popular: '1' } : {}),
+      ...(freeBefore.is_active ? { is_active: '1' } : {})
+    },
+    expect: [302]
+  });
+  const clamped = (
+    await pool.query(`SELECT storage_mb, max_file_mb FROM plans WHERE code = 'free_trial'`)
+  ).rows[0];
+  check(
+    '1E المدير يحفظ حدود الباقة والرابط يقتطع الحجم إلى الحصة',
+    planLimitsSave.ok && Number(clamped.storage_mb) === 50 && Number(clamped.max_file_mb) === 50,
+    JSON.stringify(clamped)
+  );
+  // إعادة الباقة كما كانت فوراً حتى لا تتأثر بقية الاختبارات (حصة 500 / ملف 100)
+  await pool.query(`UPDATE plans SET storage_mb = $1, max_file_mb = $2 WHERE code = 'free_trial'`, [
+    Number(freeBefore.storage_mb) || 500,
+    Number(freeBefore.max_file_mb) || 100
+  ]);
 
   // باحث يرفع 30MB ثم يحاول تجاوز الحصة الباقية (20MB)
   // الحصة الآن تأتي من باقته في قاعدة البيانات (plans.storage_mb) لا من الحد العام،
@@ -1013,12 +1055,19 @@ async function testStorageLimits() {
   });
 
   const planCode = user.plan_code;
-  const planStorageBefore = await pool.query('SELECT storage_mb FROM plans WHERE code = $1', [planCode]);
+  const planStorageBefore = await pool.query('SELECT storage_mb, max_file_mb FROM plans WHERE code = $1', [planCode]);
   const defaultsPlanStorage = Number(planStorageBefore.rows[0]?.storage_mb) || 500;
-  const savedPlanStorage = await pool.query('UPDATE plans SET storage_mb = 50 WHERE code = $1 RETURNING storage_mb', [
-    planCode
-  ]);
-  check('1E تغيير المدير لحصة تخزين الباقة ينعكس على الحصة', Number(savedPlanStorage.rows[0]?.storage_mb) === 50);
+  const defaultsPlanFile = Number(planStorageBefore.rows[0]?.max_file_mb) || 100;
+  // الحدّان الآن من باقة الاختبار نفسها (storage_mb=50 + max_file_mb=30):
+  // تُحذَّف ثم تُستعاد في نهاية الدالة كما يضبطها المدير من صفحة الباقات.
+  const savedPlanStorage = await pool.query(
+    'UPDATE plans SET storage_mb = 50, max_file_mb = 30 WHERE code = $1 RETURNING storage_mb, max_file_mb',
+    [planCode]
+  );
+  check(
+    '1E تغيير المدير لحدود الباقة ينعكس على الرفع',
+    Number(savedPlanStorage.rows[0]?.storage_mb) === 50 && Number(savedPlanStorage.rows[0]?.max_file_mb) === 30
+  );
 
   await saveUpload(user.id, { file: fakeFile('a.pdf', 30) });
   const summary = await filesSummary(user.id);
@@ -1055,25 +1104,28 @@ async function testStorageLimits() {
     flatPage.includes('مساحة ملفاتك') && flatPage.includes('المتاح:') && /من [\d.]+ (MB|GB|KB)/.test(flatPage)
   );
 
-  // الترقية عبر الواجهة: ننزّل الحد إلى 5MB والرفع بالحقل يجب أن يُرفض
-  await saveStorageLimits({ maxUploadMb: 5, maxStorageMb: 50 });
+  // الرفع بالحقل بعد خفض حد الملف الواحد للباقة إلى 5MB (كما يضبطه المدير من صفحة الباقات)
+  await pool.query('UPDATE plans SET max_file_mb = 5 WHERE code = $1', [planCode]);
   const form = new FormData();
   form.append('file', new Blob([megabytes(10)], { type: 'application/pdf' }), 'ten.pdf');
   const viaForm = await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: form, redirect: 'manual' });
   check('1E الحد الجديد يطبَّق فوراً على الرفع', viaForm.status === 303 && (viaForm.headers.get('location') || '').includes('err=file_bad'));
 
-  // تنظيف + إعادة الافتراضي (حدود المنصة + حصة الباقة التي loweredها الاختبار)
+  // تنظيف + إعادة الافتراضي (حصة الباقة وحدّ الملف اللذان خفضهما الاختبار)
   const files = await pool.query('SELECT id FROM files WHERE user_id = $1', [user.id]);
   for (const file of files.rows) await deleteFile(user.id, file.id);
   await pool.query('DELETE FROM users WHERE id = $1', [user.id]);
-  await pool.query('UPDATE plans SET storage_mb = $2 WHERE code = $1', [planCode, defaultsPlanStorage]);
-  await saveStorageLimits({ maxUploadMb: defaults.maxUploadMb, maxStorageMb: defaults.maxStorageMb });
-  const restored = await storageLimits();
-  const restoredPlan = await pool.query('SELECT storage_mb FROM plans WHERE code = $1', [planCode]);
+  await pool.query('UPDATE plans SET storage_mb = $2, max_file_mb = $3 WHERE code = $1', [
+    planCode,
+    defaultsPlanStorage,
+    defaultsPlanFile
+  ]);
+  const restoredPlan = await pool.query('SELECT storage_mb, max_file_mb FROM plans WHERE code = $1', [planCode]);
   check(
     '1E العودة للافتراضي بعد الاختبار',
-    restored.maxUploadMb === 100 && restored.maxStorageMb === 500 && Number(restoredPlan.rows[0]?.storage_mb) === defaultsPlanStorage,
-    JSON.stringify(restored)
+    Number(restoredPlan.rows[0]?.storage_mb) === defaultsPlanStorage &&
+      Number(restoredPlan.rows[0]?.max_file_mb) === defaultsPlanFile,
+    JSON.stringify(restoredPlan.rows[0])
   );
 }
 

@@ -17,8 +17,8 @@ const { Pool } = pg;
  * وإلا عادت كل تعديلاته إلى القيم الافتراضية صامتاً في كل عملية نشر.
  */
 const PLANS_SEED = `
-  INSERT INTO plans (code, title, tagline, price, tokens, storage_mb, period, period_days, cta, popular, display_order, features, role_code, is_active)
-  VALUES ($1, $2, $3, $4, $5, $6, $7, $13, $8, $9, $10, $11, $12, true)
+  INSERT INTO plans (code, title, tagline, price, tokens, storage_mb, max_file_mb, period, period_days, cta, popular, display_order, features, role_code, is_active)
+  VALUES ($1, $2, $3, $4, $5, $6, $14, $7, $13, $8, $9, $10, $11, $12, true)
   ON CONFLICT (code) DO NOTHING;
 `;
 
@@ -134,7 +134,8 @@ async function seedData() {
         plan.displayOrder,
         plan.features.join('\n'),
         plan.roleCode || 'free',
-        plan.periodDays ?? null
+        plan.periodDays ?? null,
+        plan.fileMaxMb ?? 100
       ]);
     }
 

@@ -23,12 +23,12 @@ import {
   deleteFile,
   filesSummary,
   listFiles,
-  maxUploadBytes,
   normalizeFile,
   previewKind,
   readOwnedFile,
   saveUpload,
-  textPreview
+  textPreview,
+  userFileMaxBytes
 } from '../services/files.js';
 import { renderNotice } from '../views/layout.js';
 import { renderFileViewerPage, renderFilesPage, renderLibraryPage, renderNotesPage } from '../views/workspace.js';
@@ -399,7 +399,7 @@ router.get('/files', pageReadLimit, requireService('files'), async (req, res) =>
       stepOptionsForDegree(await degreeOfUser(userId)),
       stepTitlesForUser(userId),
       unreadCount(userId),
-      maxUploadBytes()
+      userFileMaxBytes(userId)
     ]);
 
     res.type('html').send(
@@ -441,10 +441,10 @@ router.post(
 
   try {
     // رفض مبكر قبل قراءة الجسم كاملاً في الذاكرة (حماية من DoS):
-    // حد الطلب = حدّ الملف الواحد + 2MB لحدود النموذج وترويسات multipart.
+    // حد الطلب = حدّ الملف الواحد في باقة الباحث + 2MB لحدود النموذج وترويسات multipart.
     const declared = Number(req.headers['content-length'] || 0);
     if (declared > 0) {
-      const maxBytes = await maxUploadBytes();
+      const maxBytes = await userFileMaxBytes(req.account.id);
       if (declared > maxBytes + 2 * 1024 * 1024) {
         console.warn(`رُفض رفع ضخم بلا قراءة: ${declared} بايت`);
         res.redirect(303, '/files?err=file_bad');

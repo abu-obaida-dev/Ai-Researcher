@@ -4,8 +4,7 @@ import { requireCoreOnboarding, requireService } from '../middleware/auth.js';
 import { concurrencyLimit, rateLimitUser } from '../middleware/security.js';
 import { deleteConversation, getConversation, askSupervisor, appendMessage } from '../services/chat.js';
 import { defenseChecklist, defenseProgress, listDefenses, setDefenseThesisFile, startDefense } from '../services/defense.js';
-import { getFileRow, listFiles, saveUpload } from '../services/files.js';
-import { maxUploadBytes } from '../services/settings.js';
+import { getFileRow, listFiles, saveUpload, userFileMaxBytes } from '../services/files.js';
 import { unreadCount } from '../services/notifications.js';
 import { getProfile } from '../services/users.js';
 import { renderNotice } from '../views/layout.js';
@@ -137,7 +136,7 @@ router.post(
     // الهامش 2MB لأن ترميز multipart يضيف ~100 بايت فقط لكل حقل.
     const declared = Number(req.headers['content-length'] || 0);
     if (declared > 0) {
-      const maxBytes = await maxUploadBytes();
+      const maxBytes = await userFileMaxBytes(req.account.id);
       if (declared > maxBytes + 2 * 1024 * 1024) {
         console.warn(`رُفض رفع thesis ضخم بلا قراءة: ${declared} بايت`);
         res.redirect(303, back('err=file_bad'));

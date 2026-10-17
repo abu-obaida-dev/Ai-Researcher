@@ -3,12 +3,13 @@ import {
   DEFAULT_PLANS,
   FREE_PLAN_CODE,
   FREE_TRIAL_TOKENS,
+  PLAN_FILE_DEFAULT_MB,
+  PLAN_FILE_MAX_MB,
   PLAN_STORAGE_DEFAULT_MB,
   PLAN_STORAGE_MAX_MB,
   PLATFORM_SERVICES
 } from '../constants.js';
 import { permissionsForRoles } from './access.js';
-import { maxStorageBytes } from './settings.js';
 
 /**
  * باقة/باقات المنصة من PostgreSQL (جدول plans) — بدون أي Firestore.
@@ -16,8 +17,9 @@ import { maxStorageBytes } from './settings.js';
  * حتى تعمل صفحة الهبوط قبل تهيئة قاعدة البيانات.
  *
  * مصدران حقيقيان لبيانات البطاقة:
- *   - role_code  → صلاحيات الدور في role_permissions ⇒ الخدمات المفتوحة فعلياً.
- *   - storage_mb → حصة التخزين التي يمنحها المدير لهذه الباقة.
+ *   - role_code   → صلاحيات الدور في role_permissions ⇒ الخدمات المفتوحة فعلياً.
+ *   - storage_mb  → حصة التخزين التي يمنحها المدير لهذه الباقة.
+ *   - max_file_mb → أقصى حجم للملف الواحد الذي يسمح به مشتركي الباقة.
  * لذلك تُولَّد «المزايا» المعروضة من الصلاحيات نفسها (planFeatures) فلا تُخالف
  * الواجهة ما يفتحه الباحث فعلاً باقته.
  */
@@ -38,6 +40,13 @@ export function normalizeStorageMb(value, fallback = PLAN_STORAGE_DEFAULT_MB) {
   return Math.min(n, PLAN_STORAGE_MAX_MB);
 }
 
+/** يحوّل أي قيمة إلى أقصى حجم ملف (MB) صالح ضمن [1, PLAN_FILE_MAX_MB] مع سقوط آمن. */
+export function normalizeFileMaxMb(value, fallback = PLAN_FILE_DEFAULT_MB) {
+  const n = Number.parseInt(String(value ?? '').trim(), 10);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.min(Math.max(n, 1), PLAN_FILE_MAX_MB);
+}
+
 /** فاصل آلاف بنفس صيغة الواجهة (بدون استيراد views لتفادي دورة). */
 function formatNumber(value) {
   return Number(value || 0).toLocaleString('en-US');
@@ -53,6 +62,11 @@ export function formatStorageMb(mb) {
 /** سطر الميزة الخاص بحصة التخزين (يُعرض في بطاقة الباقة). */
 export function storageLabel(mb) {
   return `${formatStorageMb(mb)} مساحة تخزين لملفاتك (رفع · معاينة · تحميل)`;
+}
+
+/** سطر الميزة الخاص بأقصى حجم للملف الواحد (يُعرض في بطاقة الباقة). */
+export function fileMaxLabel(mb) {
+  return `رفع الملفات حتى ${formatStorageMb(mb)} في الملف الواحد`;
 }
 
 /**
@@ -83,7 +97,12 @@ export async function decoratePlans(plans) {
     return {
       ...plan,
       services: services.map((service) => service.key),
-      features: [...planFeaturesFromPermissions(permissions), storageLabel(plan.storageMb), ...plan.extraFeatures]
+      features: [
+        ...planFeaturesFromPermissions(permissions),
+        storageLabel(plan.storageMb),
+        fileMaxLabel(plan.maxFileMb),
+        ...plan.extraFeatures
+      ]
     };
   });
 }
@@ -101,6 +120,7 @@ export function normalizePlan(row) {
     price,
     tokens,
     storageMb: normalizeStorageMb(row.storage_mb),
+    maxFileMb: normalizeFileMaxMb(row.max_file_mb),
     period: row.period || 'شهرياً',
     cta: row.cta || (price > 0 ? 'اشترك الآن' : 'ابدأ مجاناً'),
     popular: Boolean(row.popular),
@@ -123,6 +143,7 @@ export function fallbackPlans() {
         price: plan.price,
         tokens: plan.tokens,
         storage_mb: plan.storageMb,
+        max_file_mb: plan.fileMaxMb,
         period: plan.period,
         cta: plan.cta,
         popular: plan.popular,
@@ -138,7 +159,7 @@ export function fallbackPlans() {
 export async function listPublicPlans() {
   try {
     const { rows } = await pool.query(
-      `SELECT code, title, tagline, price, tokens, storage_mb, period, features, cta, popular, is_active, role_code
+      `SELECT code, title, tagline, price, tokens, storage_mb, max_file_mb, period, features, cta, popular, is_active, role_code
          FROM plans
         WHERE is_active = true
         ORDER BY (price = 0) DESC, display_order ASC, price ASC`
@@ -170,7 +191,7 @@ export async function getPlanByCode(code) {
 
 /**
  * حصة التخزين بالبايت لباقة — تُقرأ من plans.storage_mb وتُطبَّق عند رفع الملفات.
- * السقوط المتدرّج: قيمة الباقة ← حدّ المنصة العام (settings.max_storage_mb).
+ * السقوط المتدرّج: قيمة الباقة ← الحدّ الافتراضي الثابت (PLAN_STORAGE_DEFAULT_MB).
  */
 export async function planStorageBytes(planCode) {
   const code = String(planCode || '').trim() || FREE_PLAN_CODE;
@@ -180,7 +201,7 @@ export async function planStorageBytes(planCode) {
   } catch (error) {
     console.warn(`تعذّرت قراءة حصة التخزين للباقة ${code}: ${error.code || error.message}`);
   }
-  return maxStorageBytes();
+  return PLAN_STORAGE_DEFAULT_MB * 1024 * 1024;
 }
 
 /**

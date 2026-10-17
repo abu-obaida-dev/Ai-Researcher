@@ -217,13 +217,24 @@ export const PLAN_STORAGE_DEFAULT_MB = 500;
 export const PLAN_STORAGE_MAX_MB = 102400;
 
 /**
+ * حدّ حجم الملف الواحد الافتراضي للمشترك (MB) — مصدره plans.max_file_mb
+ * القيمة تُضبط لكل باقة على حدة من صفحة «الباقات» (أقصى حجم للملف الواحد)،
+ * وتُطبَّق عند رفع الملفات ومعاينتها. حدّ المنصة العام (settings) أُلغي بقرار المنصة.
+ */
+export const PLAN_FILE_DEFAULT_MB = 100;
+
+/** أقصى حجم ملف واحد يمكن أن يمنحه المدير لباقة (2048 MB) — حدّ حماية. */
+export const PLAN_FILE_MAX_MB = 2048;
+
+/**
  * الباقات الافتراضية — مصدر واحد مزدوج الاستخدام:
  * 1) بذرة جدول plans عند تنفيذ npm run db:seed.
  * 2) سقوط آمن لعرض صفحة الهبوط إذا تعذّرت قراءة قاعدة البيانات.
  *
  * ملاحظة مهمة عن «المزايا»: ما يُعرض في بطاقة الباقة **ليس** هنا، بل يُولَّد في
  * services/plans.js من صلاحيات دور الباقة في قاعدة البيانات (role_permissions)
- * + حصة التخزين من plans.storage_mb — فلا تختلف advertorial عن ما يفتحه فعلياً.
+ * + حصة التخزين من plans.storage_mb + حد الملف الواحد من plans.max_file_mb — فلا
+ * تختلف advertorial عن ما يفتحه فعلياً.
  * الحقل features هنا/في الجدول = أسطر إضافية اختيارية يكتبها المدير، تُعرض
  * بعد المزايا المولَّدة (مثل «بدون بطاقة بنكية»).
  */
@@ -241,6 +252,7 @@ export const DEFAULT_PLANS = [
     displayOrder: 1,
     roleCode: 'free',
     storageMb: PLAN_STORAGE_DEFAULT_MB,
+    fileMaxMb: PLAN_FILE_DEFAULT_MB,
     features: [`${FREE_TRIAL_TOKENS.toLocaleString('en-US')} نقطة عند إنشاء الحساب`, 'بدون بطاقة بنكية — الدخول بحساب جوجل']
   },
   {
@@ -256,6 +268,7 @@ export const DEFAULT_PLANS = [
     displayOrder: 2,
     roleCode: 'student',
     storageMb: PLAN_STORAGE_DEFAULT_MB,
+    fileMaxMb: PLAN_FILE_DEFAULT_MB,
     features: ['النقاط تُستخدم في كل أدوات المنصة بلا استثناء']
   },
   {
@@ -271,6 +284,7 @@ export const DEFAULT_PLANS = [
     displayOrder: 3,
     roleCode: 'researcher',
     storageMb: PLAN_STORAGE_DEFAULT_MB,
+    fileMaxMb: PLAN_FILE_DEFAULT_MB,
     features: ['ملف بحثي مخصص حسب مجالك وجامعتك واللغة المفضلة لديك']
   },
   {
@@ -286,6 +300,7 @@ export const DEFAULT_PLANS = [
     displayOrder: 4,
     roleCode: 'thesis',
     storageMb: PLAN_STORAGE_DEFAULT_MB,
+    fileMaxMb: PLAN_FILE_DEFAULT_MB,
     features: ['أولوية في الرد على استفساراتك خلال ساعات العمل']
   }
 ];
