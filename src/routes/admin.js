@@ -45,6 +45,12 @@ import {
   setSiteCurrency,
   siteCurrency
 } from '../services/payments.js';
+import {
+  ACTIVITY_COLUMNS_SQL,
+  ACTIVITY_FILTERS,
+  activityFilterWhere,
+  activityStats
+} from '../services/activity.js';
 import { renderAdminPayments } from '../views/admin-payments.js';
 import {
   addLibraryItem,
@@ -64,7 +70,8 @@ import { downloadExternalFile, LIBRARY_SOURCES, searchExternalLibrary } from '..
 const router = express.Router();
 
 const PAGE_SIZE = 20;
-const ALLOWED_FILTERS = new Set(['all', 'active', 'disabled']);
+// فلاتر الحالة التقليدية (is_active) + فلاتر التصنيف الجديد (النشاط)
+const ALLOWED_FILTERS = new Set(['all', 'active', 'disabled', ...Object.keys(ACTIVITY_FILTERS)]);
 
 /** دور المشرف الأكاديمي — مرجع واحد لكل ما يخصّه في اللوحة. */
 const SUPERVISOR_ROLE = 'supervisor';
@@ -388,7 +395,7 @@ router.get('/', requireAdminPermission('admin:panel'), (req, res) => {
   return renderPage(
     res,
     async () => {
-      const [counts, days, latestUsers, recent, typeShare, countryRaw] = await Promise.all([
+      const [counts, days, latestUsers, recent, typeShare, countryRaw, activity] = await Promise.all([
         pool.query(`SELECT
             (SELECT count(*) FROM users)::int AS users,
             (SELECT count(*) FROM users WHERE is_active)::int AS active_users,
@@ -436,7 +443,9 @@ router.get('/', requireAdminPermission('admin:panel'), (req, res) => {
            ORDER BY SUM(tokens_used) DESC`),
         // إحصائية الدول: من عمود wa_country، وسقوط آمن من مفتاح الرقم للملفات القديمة
         pool.query(`SELECT COALESCE(NULLIF(p.wa_country, ''), NULL) AS code, p.whatsapp_number AS wa
-            FROM profiles p`)
+            FROM profiles p`),
+        // تصنيف النشاط (نشط/غير نشط + أسباب) — من خدمة واحدة تُستخدم مع فلترة الباحثين
+        activityStats()
       ]);
 
       // تجميع الدول في الخادم: العمود أولاً، ثم استنتاج من المفتاح الدولي، ثم «غير محدد»
@@ -471,6 +480,7 @@ router.get('/', requireAdminPermission('admin:panel'), (req, res) => {
         recent: recent.rows,
         countryStats,
         unknownCountryUsers,
+        activity,
         filter,
         sent: Math.max(0, Number.parseInt(req.query.sent, 10) || 0),
         // تقرير وصول الإشعار للهاتف (يملؤه مسار الإرسال بعد كل بث)
@@ -490,7 +500,7 @@ router.get('/plans', requireAdminPermission('admin:plans'), (req, res) =>
     res,
     async () => {
       const { rows } = await pool.query(`SELECT p.code, p.title, p.tagline, p.price, p.tokens, p.storage_mb, p.period,
-            p.features, p.popular, p.is_active, p.created_at, p.role_code,
+            p.period_days, p.features, p.popular, p.is_active, p.created_at, p.role_code,
             (SELECT count(*) FROM users u WHERE u.plan_code = p.code)::int AS subscribers
           FROM plans p
           ORDER BY p.price ASC, p.title ASC`);
@@ -922,10 +932,12 @@ router.get('/users', requireAdminPermission('admin:users'), (req, res) => {
   const term = `%${search.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`;
 
   // شرط البحث والفلترة مشترك بين استعلام البيانات واستعلام العدد
+  // الفلاتر الجديدة (activity_*) تُضاف من خدمة التصنيف حتى يبقى المنطق في مكان واحد
   const where = `WHERE ($1 = '' OR u.email ILIKE $2 OR COALESCE(u.full_name, '') ILIKE $2
       OR COALESCE(p.university, '') ILIKE $2 OR COALESCE(p.research_field, '') ILIKE $2)
     AND NOT COALESCE(u.deleted, false)
-    AND ($3 = 'all' OR ($3 = 'active' AND u.is_active) OR ($3 = 'disabled' AND NOT u.is_active))`;
+    AND ($3 = 'all' OR ($3 = 'active' AND u.is_active) OR ($3 = 'disabled' AND NOT u.is_active)
+         OR ($3 LIKE 'activity\\_%' ${activityFilterWhere(filter)}))`;
 
   return renderPage(
     res,
@@ -934,6 +946,7 @@ router.get('/users', requireAdminPermission('admin:users'), (req, res) => {
         pool.query(
           `SELECT u.id, u.email, u.full_name, u.role, u.is_active, u.plan_code, u.tokens_balance, u.created_at,
               p.university, p.research_field, p.degree_level, p.whatsapp_number,
+              ${ACTIVITY_COLUMNS_SQL},
               COALESCE(SUM(l.tokens_used), 0)::int AS tokens_used
             FROM users u
             LEFT JOIN profiles p ON p.user_id = u.id
@@ -1448,6 +1461,7 @@ router.post('/plans/add', requireAdminPermission('admin:plans'), async (req, res
   const title = String(req.body?.title || '').trim().slice(0, 100);
   const tagline = String(req.body?.tagline || '').trim().slice(0, 160);
   const period = String(req.body?.period || '').trim().slice(0, 40) || 'شهرياً';
+  const periodDays = Math.min(Math.max(Number.parseInt(String(req.body?.period_days ?? ''), 10) || 0, 0), 3650);
   const price = Number.parseInt(String(req.body?.price ?? '0'), 10);
   const tokens = Number.parseInt(String(req.body?.tokens ?? ''), 10);
   const storageMb = readStorageMb(req.body);
@@ -1480,9 +1494,9 @@ router.post('/plans/add', requireAdminPermission('admin:plans'), async (req, res
     if (exists.rows.length) return fail('هذا الكود مستخدم لباقة أخرى — اختر كوداً مختلفاً.');
 
     await pool.query(
-      `INSERT INTO plans (code, title, tagline, period, price, tokens, storage_mb, features, popular, is_active, role_code, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
-      [code, title, tagline, period, price, tokens, storageMb, features, popular, isActive, roleCode || 'free']
+      `INSERT INTO plans (code, title, tagline, period, period_days, price, tokens, storage_mb, features, popular, is_active, role_code, created_at)
+       VALUES ($1, $2, $3, $4, $12, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+      [code, title, tagline, period, price, tokens, storageMb, features, popular, isActive, roleCode || 'free', periodDays]
     );
     clearAccessCache();
     res.redirect(302, back('/admin/plans', { saved: code }));
@@ -1498,6 +1512,7 @@ router.post('/plans/:code', requireAdminPermission('admin:plans'), async (req, r
   const title = String(req.body?.title || '').trim().slice(0, 100);
   const tagline = String(req.body?.tagline || '').trim().slice(0, 160);
   const period = String(req.body?.period || '').trim().slice(0, 40) || 'شهرياً';
+  const periodDays = Math.min(Math.max(Number.parseInt(String(req.body?.period_days ?? ''), 10) || 0, 0), 3650);
   const price = Number.parseInt(String(req.body?.price ?? ''), 10);
   const tokens = Number.parseInt(String(req.body?.tokens ?? ''), 10);
   const storageMb = readStorageMb(req.body);
@@ -1527,7 +1542,7 @@ router.post('/plans/:code', requireAdminPermission('admin:plans'), async (req, r
     const result = await pool.query(
       `UPDATE plans
           SET title = $2, tagline = $3, period = $4, price = $5, tokens = $6, storage_mb = $11,
-              features = $7, popular = $8, is_active = $9, role_code = $10
+              features = $7, popular = $8, is_active = $9, role_code = $10, period_days = $12
         WHERE code = $1`,
       [
         code,
@@ -1540,7 +1555,9 @@ router.post('/plans/:code', requireAdminPermission('admin:plans'), async (req, r
         popular,
         isActive,
         roleCode || null,
-        storageMb
+        storageMb,
+        // الباقة المجانية لا تنتهي أبداً — تبقى مدة صفر مهما أُرسل من النموذج
+        code === FREE_PLAN_CODE ? 0 : periodDays
       ]
     );
 

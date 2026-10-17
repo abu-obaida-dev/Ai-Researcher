@@ -285,8 +285,10 @@ export async function confirmPaymentRequest(requestId, { adminNote = '', by = ''
     if (!request) throw badInput('الطلب غير موجود.', 'NOT_FOUND');
     if (request.status !== 'pending') throw badInput('تمت معالجة هذا الطلب مسبقاً.', 'BAD_STATUS');
 
-    const plan = await client.query('SELECT code, tokens FROM plans WHERE code = $1', [request.plan_code]);
+    const plan = await client.query('SELECT code, tokens, period_days FROM plans WHERE code = $1', [request.plan_code]);
     const tokens = Number(plan.rows[0]?.tokens || 0);
+    // مدة الباقة بالأيام (NULL/صفر = لا تنتهي، مثل المجانية) — تُحسب من لحظة التأكيد
+    const periodDays = Number(plan.rows[0]?.period_days || 0);
 
     await client.query(
       `UPDATE payment_requests
@@ -300,9 +302,11 @@ export async function confirmPaymentRequest(requestId, { adminNote = '', by = ''
           SET plan_code = $2,
               tokens_balance = tokens_balance + $3,
               tokens_granted = tokens_granted + $3,
+              -- تجديد الباقة: يبدأ عدّاد الانتهاء من تاريخ التأكيد هذا
+              plan_expires_at = CASE WHEN $4::int > 0 THEN NOW() + ($4::int || ' days')::interval ELSE NULL END,
               updated_at = NOW()
         WHERE id = $1`,
-      [request.user_id, request.plan_code, tokens]
+      [request.user_id, request.plan_code, tokens, periodDays]
     );
 
     await client.query('INSERT INTO usage_logs (user_id, type, tokens_used, summary) VALUES ($1, $2, 0, $3)', [

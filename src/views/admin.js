@@ -208,6 +208,7 @@ export function renderAdminHome({
   recent = [],
   countryStats = [],
   unknownCountryUsers = 0,
+  activity = null,
   sent = 0,
   push = null,
   pushFailed = 0,
@@ -287,6 +288,41 @@ export function renderAdminHome({
     })}</div>
   </div>`;
 
+  // بطاقة تصنيف النشاط: نشط/غير نشط (مع الأسباب)/موقوف — كل رقم رابط لفلترة الباحثين
+  const activityCard = activity
+    ? (() => {
+        const pct = (value) =>
+          activity.total > 0 ? `${Math.round((Number(value) / activity.total) * 100)}٪` : '—';
+        const cell = (value, href, label, cls = '') => `
+    <td><a class="btn btn-sm${cls}" href="${href}">${escapeHtml(formatNumber(value))}</a></td>
+    <td>${escapeHtml(label)}</td>
+    <td>${pct(value)}</td>`;
+        return `
+  <div class="card mt-16">
+    <div class="card-head">
+      <h2>تصنيف نشاط الباحثين</h2>
+      <span class="muted">${escapeHtml(formatNumber(activity.total))} باحثاً (بلا المديرين)</span>
+    </div>
+    <p class="muted">
+      <b>نشط:</b> دخل خلال آخر ${escapeHtml(String(activity.rules.days))} أيام وباقته سارية
+      (فترة سماح ${escapeHtml(String(activity.rules.graceHours))} ساعة بعد الانتهاء).
+      <b>غير نشط:</b> خمول أو باقة منتهية. <b>موقوف:</b> خارج التصنيفين — للهدايا ومتابعة المشاكل.
+    </p>
+    <div class="table-scroll">${renderTable({
+      columns: ['العدد', 'الفئة', 'النسبة'],
+      rows: [
+        cell(activity.active, '/admin/users?filter=activity_active', 'نشط — للهدايا والمكافآت'),
+        cell(activity.inactive, '/admin/users?filter=activity_idle', 'غير نشط — إجمالي', ' btn-danger'),
+        cell(activity.idle, '/admin/users?filter=activity_idle', `منها: خمول (لا دخول ${escapeHtml(String(activity.rules.days))} أيام)`),
+        cell(activity.planExpired, '/admin/users?filter=activity_plan_expired', `منها: باقة منتهية (تجاوزت ${escapeHtml(String(activity.rules.graceHours))} ساعة سماح)`),
+        cell(activity.suspended, '/admin/users?filter=activity_suspended', 'موقوف — خارج التصنيف')
+      ],
+      emptyMessage: ''
+    })}</div>
+  </div>`;
+      })()
+    : '';
+
   const recentRows = recent.map(
     (item) => `
     <td>${escapeHtml(formatDateTime(item.created_at))}</td>
@@ -299,6 +335,7 @@ export function renderAdminHome({
   const body = `
   <div class="grid">${stats}</div>
   ${failedAlert}
+  ${activityCard}
   ${
     sent
       ? (() => {
@@ -513,7 +550,11 @@ export function renderAdminUsers({
   const filters = [
     ['all', 'الكل'],
     ['active', 'النشطة'],
-    ['disabled', 'الموقوفة']
+    ['disabled', 'الموقوفة'],
+    ['activity_active', '⭐ نشطون (هدايا)'],
+    ['activity_idle', 'غير نشط — خمول'],
+    ['activity_plan_expired', 'غير نشط — باقة منتهية'],
+    ['activity_suspended', 'موقوفون (تصنيف)']
   ];
 
   // (M2: الرمز لا يظهر في أي رابط — الدخول بالكوكي HttpOnly فقط).
@@ -538,6 +579,15 @@ export function renderAdminUsers({
       .join('')}
   </form>`;
 
+  // شارة تصنيف النشاط لكل باحث (تعمل مع فلتر القائمة المنسدلة في الاستعلام)
+  const activityBadges = {
+    active: '<span class="badge badge-active" title="دخل خلال آخر 7 أيام وباقته سارية">نشط</span>',
+    idle: '<span class="badge badge-off" title="لم يدخل منذ أكثر من 7 أيام">غير نشط: خمول</span>',
+    plan_expired: '<span class="badge badge-error" title="انتهت باقته وتجاوزت فترة السماح 48 ساعة">غير نشط: باقة منتهية</span>',
+    suspended: '<span class="badge badge-off">موقوف (الإدارة)</span>'
+  };
+  const activityBadge = (user) => activityBadges[user.activity_status] || '';
+
   const rows = users.map(
     (user) => `
     <td>
@@ -545,7 +595,7 @@ export function renderAdminUsers({
         user.role === 'admin' ? ' <span class="badge badge-admin">مدير</span>' : ''
       }</p>
       <p class="muted">${escapeHtml(user.email)}</p>
-      ${user.is_active ? '' : '<span class="badge badge-off">موقوف</span>'}
+      ${user.is_active ? '' : '<span class="badge badge-off">موقوف</span>'} ${activityBadge(user)}
     </td>
     <td>
       <p>${escapeHtml(user.university || '—')}</p>
@@ -558,7 +608,11 @@ export function renderAdminUsers({
       <p class="strong">${escapeHtml(formatNumber(user.tokens_balance))}</p>
       <p class="muted">استُهلك: ${escapeHtml(formatNumber(user.tokens_used))}</p>
     </td>
-    <td>${escapeHtml(formatDate(user.created_at))}</td>
+    <td>
+      <p>${escapeHtml(formatDate(user.created_at))}</p>
+      <p class="muted">آخر دخول: ${escapeHtml(formatDate(user.last_login_at))}</p>
+      ${user.plan_expires_at ? `<p class="muted">الباقة تنتهي: ${escapeHtml(formatDate(user.plan_expires_at))}</p>` : ''}
+    </td>
     <td class="row-actions">
       <a class="btn btn-sm" href="/admin/users/${user.id}${tokenQuery}">تفاصيل</a>
       ${
@@ -713,6 +767,12 @@ export function renderAdminPlans({
           <input type="text" id="period-${code}" name="period" maxlength="40" value="${escapeHtml(plan.period || 'شهرياً')}" />
         </div>
         <div class="field">
+          <label for="period-days-${code}">مدة الباقة (أيام)</label>
+          <input type="number" id="period-days-${code}" name="period_days" min="0" max="3650" step="1"
+            value="${escapeHtml(String(Number(plan.period_days) || 0))}" ${isFree ? 'readonly' : ''} />
+          <p class="form-hint">${isFree ? 'الباقة المجانية لا تنتهي (صفر).' : '0 = لا تنتهي. بها يُحسب انتهاء الباقة وفترة السماح 48 ساعة.'}</p>
+        </div>
+        <div class="field">
           <label for="price-${code}">السعر</label>
           <input type="number" id="price-${code}" name="price" min="0" max="10000000" step="1" required
             value="${escapeHtml(String(plan.price))}" ${isFree ? 'readonly' : ''} />
@@ -814,6 +874,11 @@ export function renderAdminPlans({
           <div class="field">
             <label for="new-period">الفترة</label>
             <input type="text" id="new-period" name="period" maxlength="40" value="شهرياً" />
+          </div>
+          <div class="field">
+            <label for="new-period-days">مدة الباقة (أيام)</label>
+            <input type="number" id="new-period-days" name="period_days" min="0" max="3650" step="1" value="30" />
+            <p class="form-hint">0 = لا تنتهي. بها يُحسب انتهاء الباقة وفترة السماح 48 ساعة.</p>
           </div>
           <div class="field">
             <label for="new-price">السعر</label>

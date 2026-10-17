@@ -36,6 +36,8 @@ const USERS_TABLE = `
     is_active BOOLEAN DEFAULT true,
     disabled BOOLEAN DEFAULT false,
     deleted BOOLEAN DEFAULT false,
+    last_login_at TIMESTAMPTZ,
+    plan_expires_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
   );
@@ -81,6 +83,7 @@ const PLANS_TABLE = `
     tokens INTEGER NOT NULL DEFAULT 0,
     storage_mb INTEGER NOT NULL DEFAULT 500,
     period VARCHAR(100) DEFAULT 'شهرياً',
+    period_days INTEGER,
     features TEXT,
     cta VARCHAR(100) DEFAULT 'اشترك الآن',
     popular BOOLEAN DEFAULT false,
@@ -621,6 +624,9 @@ const USERS_EXTRA_COLUMNS = `
   ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_granted INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_complete BOOLEAN DEFAULT false;
   ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted BOOLEAN DEFAULT false;
+  -- تصنيف النشاط: آخر دخول + انتهاء الباقة (يُضبطان تلقائياً مع الدخول وتأكيد الدفع)
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expires_at TIMESTAMPTZ;
 `;
 
 const USERS_GOOGLE_SUB_UNIQUE = `
@@ -642,6 +648,8 @@ const PLANS_EXTRA_COLUMNS = `
   ALTER TABLE plans ADD COLUMN IF NOT EXISTS display_order INTEGER DEFAULT 0;
   ALTER TABLE plans ADD COLUMN IF NOT EXISTS role_code VARCHAR(50);
   ALTER TABLE plans ADD COLUMN IF NOT EXISTS storage_mb INTEGER NOT NULL DEFAULT 500;
+  -- مدة الباقة بالأيام (يُحسب منها plan_expires_at عند تأكيد الدفع) — NULL = لا تنتهي (مجانية)
+  ALTER TABLE plans ADD COLUMN IF NOT EXISTS period_days INTEGER;
 `;
 
 /** ترحيل آمن لجدول طلبات الدفع: كود التفعيل الستة أرقام ورقم الواتساب وقت الطلب. */

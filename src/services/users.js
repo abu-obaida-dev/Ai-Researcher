@@ -105,14 +105,15 @@ export async function ensureUserFromGoogle({ googleSub, email, name, picture }) 
   try {
     const { rows } = await pool.query(
       `INSERT INTO users (email, full_name, photo_url, google_sub, role, plan_code,
-                          tokens_balance, tokens_granted, onboarding_complete, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, NOW(), NOW())
+                          tokens_balance, tokens_granted, onboarding_complete, last_login_at, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, NOW(), NOW(), NOW())
        ON CONFLICT (email) DO UPDATE SET
          full_name = COALESCE(NULLIF(users.full_name, ''), EXCLUDED.full_name),
          photo_url = COALESCE(NULLIF(EXCLUDED.photo_url, ''), users.photo_url),
          google_sub = COALESCE(EXCLUDED.google_sub, users.google_sub),
          role = EXCLUDED.role,
          onboarding_complete = users.onboarding_complete OR EXCLUDED.onboarding_complete,
+         last_login_at = NOW(),
          updated_at = NOW()
        RETURNING *, (xmax = 0) AS is_new`,
       [normalizedEmail, name || '', picture || '', sub, role, FREE_PLAN_CODE, freeTokens, onboardingComplete]
@@ -129,6 +130,7 @@ export async function ensureUserFromGoogle({ googleSub, email, name, picture }) 
                 photo_url = COALESCE(NULLIF($3, ''), photo_url),
                 role = $4,
                 onboarding_complete = onboarding_complete OR $5,
+                last_login_at = NOW(),
                 updated_at = NOW()
           WHERE google_sub = $6
           RETURNING *, false AS is_new`,

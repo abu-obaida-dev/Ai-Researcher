@@ -14,14 +14,15 @@ const { Pool } = pg;
  * لا نلمس is_active عند التحديث حتى لا نُلغي تعطيل المدير لأي باقة.
  */
 const PLANS_SEED = `
-  INSERT INTO plans (code, title, tagline, price, tokens, storage_mb, period, cta, popular, display_order, features, role_code, is_active)
-  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, true)
+  INSERT INTO plans (code, title, tagline, price, tokens, storage_mb, period, period_days, cta, popular, display_order, features, role_code, is_active)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $13, $8, $9, $10, $11, $12, true)
   ON CONFLICT (code) DO UPDATE SET
     title = EXCLUDED.title,
     tagline = EXCLUDED.tagline,
     price = EXCLUDED.price,
     tokens = EXCLUDED.tokens,
     period = EXCLUDED.period,
+    period_days = COALESCE(plans.period_days, EXCLUDED.period_days),
     cta = EXCLUDED.cta,
     popular = EXCLUDED.popular,
     display_order = EXCLUDED.display_order,
@@ -140,7 +141,8 @@ async function seedData() {
         plan.popular,
         plan.displayOrder,
         plan.features.join('\n'),
-        plan.roleCode || 'free'
+        plan.roleCode || 'free',
+        plan.periodDays ?? null
       ]);
     }
 
