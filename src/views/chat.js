@@ -68,8 +68,10 @@ function renderConversations(conversations, activeId) {
 }
 
 /**
- * إرفاق ملفات مع الرسالة: مربّعات اختيار **داخل نموذج الإرسال** (كانت خارج النموذج
- * فلا تصل المشرف ولا واحدة)، مع وسم «يُقرأ/غير مقروء» لكل صيغة.
+ * إرفاق ملفات مع الرسالة: قائمة منسدلة (details/summary بلا جافاسكربت) مطويّة
+ * فوق صندوق الكتابة — لا تلتهم مساحة الرسائل على الشاشات الصغيرة، وتظهر فقط
+ * عند وجود ملفات للباحث (بلا ملفات: لا يُرسم شيء أصلاً). المربّعات ما زالت داخل
+ * نموذج الإرسال (كانت خارجه فلا تصل المشرف ولا واحدة) مع وسم «يُقرأ/غير مقروء».
  */
 function renderAttachRow(files = []) {
   if (!files.length) return '';
@@ -85,11 +87,13 @@ function renderAttachRow(files = []) {
     })
     .join('\n  ');
 
-  return `<div class="chat-attach" id="chat-attach">
-  <span class="chat-attach-label">${icon('clipboard', 'icon-sm')} أرفق مع رسالتك:</span>
+  return `<details class="chat-attach" id="chat-attach">
+  <summary class="chat-attach-sum">${icon('paperclip', 'icon-sm')} أرفق ملفاً <span class="attach-total">${files.length}</span><span class="attach-picked">✓</span></summary>
+  <div class="chat-attach-panel">
   ${rows}
   <span class="chat-attach-hint">اختر ما تريد قراءته في هذه الرسالة · حتى ٣ ملفات · PDF و Word و txt و Excel (الصور لا تُقرأ نصياً)</span>
-</div>`;
+  </div>
+</details>`;
 }
 
 /**

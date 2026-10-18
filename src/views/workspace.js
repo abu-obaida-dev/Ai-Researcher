@@ -56,9 +56,9 @@ function renderReferenceRow(reference) {
 
   return `<tr>
   <td>
-    <b>${escapeHtml(reference.title)}</b>
+    <b class="ref-title" title="${escapeHtml(reference.title)}">${escapeHtml(reference.title)}</b>
     <p class="muted ref-citation">${escapeHtml(reference.citation)}</p>
-    ${reference.note ? `<p class="muted">${escapeHtml(reference.note)}</p>` : ''}
+    ${reference.note ? `<p class="muted ref-citation">${escapeHtml(reference.note)}</p>` : ''}
   </td>
   <td>${reference.year ? escapeHtml(String(reference.year)) : '—'}<br /><span class="muted">${escapeHtml(
     reference.source || '—'
@@ -433,18 +433,19 @@ function renderFileRow(file, stepTitles) {
 
   return `<tr>
   <td>
-    <b>${escapeHtml(file.title)}</b>
-    <p class="muted">${escapeHtml(file.fileName)}</p>
+    <div class="file-cell"><b class="file-name" title="${escapeHtml(file.title)}">${escapeHtml(file.title)}</b>
+    <p class="file-meta muted">${escapeHtml(file.fileName)}</p></div>
   </td>
   <td>${escapeHtml(file.kind)}<br /><span class="muted">${escapeHtml(formatFileSize(file.sizeBytes))}</span></td>
-  <td>${escapeHtml(stepTitles[file.stepKey] || (file.stepKey ? file.stepKey : '—'))}</td>
   <td>${escapeHtml(formatDate(file.createdAt))}</td>
   <td>
+    <div class="links row-actions">
     ${viewBtn}
     <a class="btn btn-sm btn-quiet" href="/files/${escapeHtml(file.id)}/raw">${icon('download', 'icon-sm')} تحميل</a>
     <form method="post" action="/files/${escapeHtml(file.id)}/delete" class="inline-form">
       <button class="btn btn-sm btn-danger" type="submit">${icon('trash', 'icon-sm')} حذف</button>
     </form>
+    </div>
   </td>
 </tr>`;
 }
@@ -625,18 +626,18 @@ export function renderFileViewerPage({
 /** صفحة الملفات: نموذج رفع (multipart) + جدول الملفات مع فلترة بخطوة. */
 export function renderFilesPage({ account, unread = 0, files = [], summary = { total: 0, bytes: 0, usedMb: 0, quotaMb: 0, remainingMb: 0, percent: 0, barWidth: 0, usedLabel: '0 بايت', quotaLabel: '500 MB', remainingLabel: '500 MB' }, references = [], refCounts = {}, stepKey = '', stepOptions = [], stepTitles = {}, maxMb = 100, allowedTypes = '', flash = null }) {
   const rows = files.length
-    ? `<table class="file-table">
-  <thead><tr><th>الملف</th><th>النوع والحجم</th><th>الخطوة</th><th>التاريخ</th><th>إجراءات</th></tr></thead>
+    ? `<div class="table-scroll"><table class="file-table">
+  <thead><tr><th>الملف</th><th>النوع والحجم</th><th>التاريخ</th><th>إجراءات</th></tr></thead>
   <tbody>${files.map((file) => renderFileRow(file, stepTitles)).join('')}</tbody>
-</table>`
+</table></div>`
     : '<div class="empty">لا ملفات بعد — ارفع أول مستند (PDF أو Word) ليعمل عليه المشرف الذكي.</div>';
 
   // قسم المراجع: ما أضافه الباحث من المكتبة (الخارجية أو مكتبة المنصة) — بلا إضافة يدوية.
   const refsHtml = references.length
-    ? `<table class="ref-table">
+    ? `<div class="table-scroll"><table class="ref-table">
   <thead><tr><th>المرجع</th><th>السنة والمصدر</th><th>الحالة</th><th>إجراءات</th></tr></thead>
   <tbody>${references.map((item) => renderReferenceRow(item)).join('')}</tbody>
-</table>`
+</table></div>`
     : '<div class="empty">لا مراجع بعد — أضفها من نتائج <a href="/library">المكتبة</a> بزر «أضف إلى مراجعي».</div>';
 
   const refsCard = `<section class="card">

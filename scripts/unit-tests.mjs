@@ -8,6 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 
 test('النظافة الأمنية (H4): لا تبعيات ميتة ولا تجاوز لفحص uuid', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -29,7 +30,7 @@ import {
   relevanceScore
 } from '../src/services/literature.js';
 import { LIBRARY_SOURCES, SOURCE_GROUPS, assertPublicUrl, normalizeYearRange, sourceGroup } from '../src/services/library-sources.js';
-import { saveSupportWhatsapp } from '../src/services/settings.js';
+import { loadSupportWhatsapp, saveSupportWhatsapp } from '../src/services/settings.js';
 import { assertContentMatchesExtension, contentMatchesExtension } from '../src/services/upload-guard.js';
 import { safeEqual } from '../src/middleware/security.js';
 import { needsOnboarding, requireCoreOnboarding } from '../src/middleware/auth.js';
@@ -48,6 +49,7 @@ import {
   isExplicitSearchRequest
 } from '../src/services/assistant-prompt.js';
 import { isUuid } from '../src/constants.js';
+import { SESSION_TTL_MS, createSessionCookie } from '../src/auth/google.js';
 
 /* ------------------------------- النقاط ------------------------------- */
 
@@ -172,10 +174,17 @@ test('relevanceScore: العنوان المطابق يتقدّم على غير �
 /* --------------------------- دعم واتساب --------------------------- */
 
 test('saveSupportWhatsapp: يقبل الصيغ ويصدّر الناقص', async () => {
-  assert.equal((await saveSupportWhatsapp('')).ok, true, 'فارغ = تعطيل الزر');
-  assert.equal((await saveSupportWhatsapp('0912')).ok, false, 'أقل من 8 أرقام مرفوض');
-  assert.equal((await saveSupportWhatsapp('09abc')).ok, false, 'حروف مرفوضة');
-  assert.equal((await saveSupportWhatsapp('1234567890123456789')).ok, false, 'أكثر من 15 رقماً مرفوض');
+  // هذه الاختبارات تكتب في settings الحقيقية محلياً — نحمي رقم الدعم المحفوظ
+  // ونعيده كما كان في finally حتى لا يضيع الرقم الحقيقي مع كل `npm test`.
+  const original = await loadSupportWhatsapp();
+  try {
+    assert.equal((await saveSupportWhatsapp('')).ok, true, 'فارغ = تعطيل الزر');
+    assert.equal((await saveSupportWhatsapp('0912')).ok, false, 'أقل من 8 أرقام مرفوض');
+    assert.equal((await saveSupportWhatsapp('09abc')).ok, false, 'حروف مرفوضة');
+    assert.equal((await saveSupportWhatsapp('1234567890123456789')).ok, false, 'أكثر من 15 رقماً مرفوض');
+  } finally {
+    await saveSupportWhatsapp(original || '');
+  }
 });
 
 /* ------------------ أمان: بصمة الملفات المرفوعة ------------------ */
@@ -866,5 +875,176 @@ test('الفصل السلوكي: استعلامات المشرف تستثني م
   const chatSrc = readFileSync(new URL('../src/services/chat.js', import.meta.url), 'utf8');
   assert.ok(ctxSrc.includes("mode <> 'defense'"), 'سياق المشرف يستثني جلسات المناقشة');
   assert.ok(chatSrc.includes("c.mode <> 'defense'"), 'تلخيص المشرف يستثني جلسات المناقشة');
+});
+
+/* --------------------- قوائم الجرس المنسدلة على شاشات الهاتف --------------------- */
+
+/**
+ * محاكاة DOM مبسّطة تكفي لتشغيل /js/app-shell.js الفعلي داخل vm:
+ * العنصر يحفظ style المرسل inline، وقياسه يطبّقها كما يفعل المتصفح
+ * (العرض/الارتفاع/الانزاحة) — لنقيس القائمة بعد فتحها ونتحقق من حدود الشاشة.
+ */
+function makeStubElement({ id = '', hidden = false, rect = { left: 0, top: 0, width: 0, height: 0 } } = {}) {
+  const listeners = {};
+  return {
+    id,
+    hidden,
+    style: {},
+    textContent: '',
+    innerHTML: '',
+    attrs: {},
+    classList: { add() {}, remove() {} },
+    setAttribute(name, value) { this.attrs[name] = value; },
+    getAttribute(name) {
+      return Object.prototype.hasOwnProperty.call(this.attrs, name) ? this.attrs[name] : null;
+    },
+    addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
+    remove() {},
+    appendChild() {},
+    closest() { return null; },
+    querySelector() { return null; },
+    fire(type, event) {
+      (listeners[type] || []).forEach((fn) => fn(event || { stopPropagation() {}, target: this }));
+    },
+    getBoundingClientRect() {
+      let { left, top, width, height } = rect;
+      if (this.style.width) width = parseFloat(this.style.width);
+      if (this.style.maxHeight) height = Math.min(height, parseFloat(this.style.maxHeight));
+      if (this.style.transform) left += parseFloat(this.style.transform.replace(/[^-\d.]/g, ''));
+      return { left, top, width, height, right: left + width, bottom: top + height };
+    }
+  };
+}
+
+/** يشغّل سكربت الجرس الفعلي بمقاس شاشة معيّن وموضع قياسي للقائمة، ويعيد عناصره. */
+function runAppShell({ vw, vh, bellRect, userRect = { left: 62, top: 70, width: 300, height: 260 } }) {
+  const source = readFileSync(new URL('../public/js/app-shell.js', import.meta.url), 'utf8');
+  const elements = new Map([
+    ['bell-toggle', makeStubElement({ id: 'bell-toggle' })],
+    ['bell-menu', makeStubElement({ id: 'bell-menu', hidden: true, rect: bellRect })],
+    ['bell-list', makeStubElement({ id: 'bell-list' })],
+    ['bell-badge', makeStubElement({ id: 'bell-badge', hidden: true })],
+    ['bell-empty', makeStubElement({ id: 'bell-empty' })],
+    ['bell-read-all', makeStubElement({ id: 'bell-read-all' })],
+    ['user-toggle', makeStubElement({ id: 'user-toggle' })],
+    ['user-menu', makeStubElement({ id: 'user-menu', hidden: true, rect: userRect })]
+  ]);
+
+  const sandbox = {
+    document: {
+      documentElement: { clientWidth: vw, clientHeight: vh },
+      getElementById: (id) => elements.get(id) || null,
+      addEventListener() {},
+      createElement: () => makeStubElement({})
+    },
+    window: { addEventListener() {}, visualViewport: { addEventListener() {} }, confirm: () => true },
+    fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [], unread: 0 }) })
+  };
+
+  vm.runInNewContext(source, sandbox, { filename: 'app-shell.js' });
+  return elements;
+}
+
+/** تفريغ الميكرومهام: جلب الشارة المسبق وأي رسم غير متزامن بعد النقر. */
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+test('جرس الهاتف 360px: القائمة تنزلق لتبقي كاملة داخل الشاشة بدل أن يقصّها overflow-x', async () => {
+  // ترويسة الموقع: الهامبرغر وصورة الحساب يسبقان الجرس (RTL) ⇒ حافتها اليسرى عند
+  // ~108px وعرضها 340px ⇒ كانت تتجاوز اليمين بـ ~96px ويختفي جزءها (بداية العناوين).
+  const shell = runAppShell({ vw: 360, vh: 740, bellRect: { left: 108, top: 70, width: 340, height: 520 } });
+  await flush();
+  shell.get('bell-toggle').fire('click');
+  await flush();
+
+  const menu = shell.get('bell-menu');
+  assert.equal(menu.hidden, false, 'القائمة مفتوحة بعد النقر');
+  const rect = menu.getBoundingClientRect();
+  assert.ok(rect.left >= 8, `الحافة اليسرى داخل الشاشة (left=${rect.left})`);
+  assert.ok(rect.right <= 360 - 8, `الحافة اليمنى داخل الشاشة (right=${rect.right})`);
+  assert.ok(rect.bottom <= 740 - 8, `الأسفل داخل الشاشة (bottom=${rect.bottom})`);
+  assert.ok(rect.width >= 300, `العرض يبقى كاملاً بعد الانزاحة (width=${rect.width}) — بلا قصّ`);
+});
+
+test('شريط لوحة الباحث 390px + شاشة قصيرة 360×640 بمحتوى طويل', async () => {
+  const app = runAppShell({ vw: 390, vh: 844, bellRect: { left: 60, top: 57, width: 370, height: 560 } });
+  await flush();
+  app.get('bell-toggle').fire('click');
+  await flush();
+  const appRect = app.get('bell-menu').getBoundingClientRect();
+  assert.ok(appRect.left >= 8 && appRect.right <= 390 - 8, `شريط اللوحة داخل الشاشة (right=${appRect.right})`);
+  assert.ok(appRect.bottom <= 844 - 8, `أسفل القائمة داخل الشاشة (bottom=${appRect.bottom})`);
+
+  // محتوى أطول من الشاشة: الارتفاع يُنقص بدل الخروج عن الأسفل، والقائمة تُمرَّر
+  const short = runAppShell({ vw: 360, vh: 640, bellRect: { left: 108, top: 70, width: 340, height: 1200 } });
+  await flush();
+  short.get('bell-toggle').fire('click');
+  await flush();
+  const shortRect = short.get('bell-menu').getBoundingClientRect();
+  assert.ok(shortRect.bottom <= 640 - 8, `المحتوى الطويل لا يتجاوز الأسفل (bottom=${shortRect.bottom})`);
+  assert.ok(shortRect.height >= 160, `مساحة تمرير مفيدة متبقية (height=${shortRect.height})`);
+});
+
+test('سطح المكتب بلا تغيير + قائمة الحساب على الهاتف تُصحَّح أيضاً', async () => {
+  const desktop = runAppShell({ vw: 1440, vh: 900, bellRect: { left: 108, top: 78, width: 370, height: 400 } });
+  await flush();
+  desktop.get('bell-toggle').fire('click');
+  await flush();
+  const menu = desktop.get('bell-menu');
+  assert.equal(menu.style.transform, '', 'بلا انزاحة على الشاشة الواسعة — السلوك الأصلي محفوظ');
+  assert.equal(menu.getBoundingClientRect().left, 108, 'القائمة ملتصقة بحافة الجرس كما كانت');
+
+  // قائمة الحساب بنفس العطب: حافتها اليسرى عند 62px وعرضها 300px على شاشة 360
+  const phone = runAppShell({ vw: 360, vh: 740, bellRect: { left: 108, top: 70, width: 340, height: 400 } });
+  await flush();
+  phone.get('user-toggle').fire('click');
+  await flush();
+  const userRect = phone.get('user-menu').getBoundingClientRect();
+  assert.ok(userRect.left >= 8 && userRect.right <= 360 - 8, `قائمة الحساب داخل الشاشة (right=${userRect.right})`);
+});
+
+test('جلسة الدخول يوم واحد فقط: exp في التوقيع وMax-Age الكوكي من مصدر واحد', () => {
+  assert.equal(SESSION_TTL_MS, 24 * 60 * 60 * 1000, 'SESSION_TTL_MS = 24 ساعة');
+
+  // الحمولة الموقعة تحمل exp — منها يرفض الخادم الطلب بعد اليوم (وليس من الكوكي وحده)
+  const cookie = createSessionCookie({ id: 'u1', email: 'reader@example.com', role: 'user' });
+  const payload = JSON.parse(Buffer.from(cookie.split('.')[0], 'base64url').toString('utf8'));
+  assert.equal(payload.exp - payload.iat, SESSION_TTL_MS, 'مدة exp داخل التوقيع = SESSION_TTL_MS');
+  assert.ok(Date.now() < payload.exp && payload.exp - Date.now() <= 24 * 60 * 60 * 1000, 'الجلسة الجديدة تنتهي خلال 24 ساعة');
+});
+
+test('firebase-admin v14: واجهة الإرسال في firebase.js تطابق المكتبة المثبّتة فعلاً', async () => {
+  const stripComments = (src) => String(src).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/gm, '$1');
+  const source = readFileSync(new URL('../src/services/firebase.js', import.meta.url), 'utf8');
+  const code = stripComments(source);
+
+  // النمط القديم (admin.apps/credential/messaging) أُزيل في v14 وكان يرمي TypeError
+  // فتحتجزه try/catch ويرجع null ⇒ الإرسال يفشل بصمتاً والإنذار وحده في السجل.
+  assert.ok(!code.includes('admin.apps'), 'لا استخدام للnamespace القديم admin.apps (محوّ في v14)');
+  assert.ok(!code.includes('admin.credential'), 'لا استخدام للnamespace القديم admin.credential');
+  assert.ok(code.includes('getMessaging('), 'التهيئة عبر getMessaging من firebase-admin/messaging');
+
+  const root = await import('firebase-admin');
+  const messaging = await import('firebase-admin/messaging');
+  assert.equal(typeof root.initializeApp, 'function', 'initializeApp يُصدَّر من جذر firebase-admin');
+  assert.equal(typeof root.cert, 'function', 'cert يُصدَّر من جذر firebase-admin');
+  assert.equal(typeof messaging.getMessaging, 'function', 'getMessaging من المسار الفرعي firebase-admin/messaging');
+});
+
+test('أرقام الواتساب: تُحمَّل الثلاثة عند إقلاع الخادم وتُعاد قراءتها في صفحة الإعدادات', () => {
+  // current* تقرأ كاش الذاكرة أولاً — بلا تحميل الإقلاع تبقى القيم فارغة بعد
+  // إعادة التشغيل وتبدو «ضائعة» رغم بقائها محفوظة في جدول settings.
+  // ملاحظة: ترتيب الإزالة مهم — تعليقات السطر أولاً (لأن `// ... /fonts/*` يحتوي
+  // `/*` زائفاً يخدع تجريد البلوك فيحذف الكود الحقيقي)، ثم تعليقات البلوك.
+  const stripComments = (src) => String(src).replace(/(^|\s)\/\/.*$/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
+  const serverSrc = stripComments(readFileSync(new URL('../server.js', import.meta.url), 'utf8'));
+  assert.ok(serverSrc.includes('loadSupportWhatsapp()'), 'رقم الدعم العام يُقرأ عند الإقلاع');
+  assert.ok(serverSrc.includes('loadVoiceWhatsappMale()'), 'رقم صوت الشباب يُقرأ عند الإقلاع');
+  assert.ok(serverSrc.includes('loadVoiceWhatsappFemale()'), 'رقم صوت البنات يُقرأ عند الإقلاع');
+
+  // صفحة الإعدادات تُعيد القراءة من القاعدة قبل العرض — استدعاء فعلي لا استيراد مهمل
+  const adminSrc = stripComments(readFileSync(new URL('../src/routes/admin.js', import.meta.url), 'utf8'));
+  assert.ok(adminSrc.includes('loadSupportWhatsapp()'), 'الإعدادات تقرأ رقم الدعم من settings قبل العرض');
+  assert.ok(adminSrc.includes('loadVoiceWhatsappMale()'), 'الإعدادات تقرأ رقم الشباب من settings قبل العرض');
+  assert.ok(adminSrc.includes('loadVoiceWhatsappFemale()'), 'الإعدادات تقرأ رقم البنات من settings قبل العرض');
 });
 

@@ -41,6 +41,15 @@ export function modelsFor(provider) {
 
 /** وصف عربي لخطأ المزوّد + هل هو دائم أم مؤقّت + مدة التهدئة. */
 function classifyFailure(status, message) {
+  const text = String(message || '');
+  // خطأ طول المدخلات (برومبت المشرف أثقل من المعلم بكثير): خاص بالطلب نفسه
+  // وليس بالمزوّد — لا يُخرج المزوّد من الدوران، فقط ننتقل للهدف التالي.
+  if (
+    status === 413 ||
+    /reduce the length|too long|too_large|maximum context|context_length|max_tokens/i.test(text)
+  ) {
+    return { kind: 'length', hard: false, reason: 'الحمولة أطول من حدّ النموذج', cooldownMs: 0 };
+  }
   if (status === 401) return { kind: 'auth', hard: true, reason: 'مفتاح غير صالح', cooldownMs: hardCooldownMs };
   if (status === 402) return { kind: 'credits', hard: true, reason: 'لا يوجد رصيد عند المزوّد', cooldownMs: hardCooldownMs };
   if (status === 403) return { kind: 'license', hard: true, reason: 'لا صلاحية/ترخيص على الحساب', cooldownMs: hardCooldownMs };
@@ -54,14 +63,19 @@ function classifyFailure(status, message) {
 
 /** يوقف المزوّد مؤقّتاً/دائماً بعد فشله. */
 function markUnhealthy(key, failure) {
+  const cooldownMs = Number.isFinite(failure.cooldownMs) ? failure.cooldownMs : hardCooldownMs;
+  if (cooldownMs <= 0) {
+    console.warn(`تخطي «${key}» دون اخراج من الدوران: ${failure.reason}`);
+    return;
+  }
   HEALTH.set(key, {
-    until: Date.now() + (Number.isFinite(failure.cooldownMs) ? failure.cooldownMs : hardCooldownMs),
+    until: Date.now() + cooldownMs,
     reason: failure.reason,
     kind: failure.kind,
     hard: Boolean(failure.hard),
     since: new Date()
   });
-  console.warn(`إخراج المزوّد «${key}» من الدوران ${Math.round(failure.cooldownMs / 60000)} دقيقة: ${failure.reason}`);
+  console.warn(`إخراج المزوّد «${key}» من الدوران ${Math.round(cooldownMs / 60000)} دقيقة: ${failure.reason}`);
 }
 
 /** هل هذا المزوّد خارج دورانه الآن؟ */
@@ -101,8 +115,10 @@ function keysOf(provider) {
  * والصحّة تُتابَع لكل هدف على حدة: مفتاح نُفد رصيده لا يُطعن في أخيه.
  */
 function activeTargets() {
+  const only = String(process.env.AI_ONLY_PROVIDER || '').trim().toLowerCase();
+  const list = only ? PROVIDERS.filter((provider) => provider.key === only) : PROVIDERS;
   const targets = [];
-  for (const provider of PROVIDERS) {
+  for (const provider of list) {
     keysOf(provider).forEach((apiKey, position) => {
       targets.push({ provider, apiKey, models: modelsFor(provider), id: `${provider.key}#${position + 1}`, position });
     });
@@ -243,7 +259,7 @@ async function geminiCall({ apiKey, models, system, messages, temperature, maxTo
       // usageMetadata توحيده في services/tokens.js (promptTokenCount/candidatesTokenCount/thoughtsTokenCount)
       return { text, model, usage: data?.usageMetadata || null };
     } catch (error) {
-      failures.push(`${model}: ${error.message.slice(0, 90)}`);
+      failures.push(`${model}: ${String(error?.message || error).slice(0, 90)}`);
       // مفتاح/رصيد/نموذج غير موجود = لا فائدة من تبديل الباقي
       if ([401, 402, 403, 404].includes(error.status)) break;
       if (signal?.aborted) break;
@@ -263,7 +279,7 @@ const PROVIDERS = [
     envKey: 'GROQ_API_KEY',
     // qwen3.8-27b سريع جداً (≈٦٦٠ms) وأفضله عربياً بين نماذج Groq؛ ثم بدائل.
     // نستبعد whisper (صوت) و llama-prompt-guard (تصنيف لا توليد).
-    models: modelList(process.env.AI_MODEL_GROQ, 'qwen/qwen3.8-27b,openai/gpt-oss-20b,allam-2-7b'),
+    models: modelList(process.env.AI_MODEL_GROQ, 'openai/gpt-oss-20b,qwen/qwen3.8-27b,allam-2-7b'),
     async call({ apiKey, models, system, messages, temperature, maxTokens = MAX_TOKENS, signal = null }) {
       const failures = [];
       for (const model of models) {
@@ -281,7 +297,7 @@ const PROVIDERS = [
           if (!text) throw new Error('ردّ فارغ');
           return { text, model: data?.model || model, usage: data?.usage || null };
         } catch (error) {
-          failures.push(`${model}: ${error.message.slice(0, 90)}`);
+          failures.push(`${model}: ${String(error?.message || error).slice(0, 90)}`);
           if ([401, 402, 403, 404, 422].includes(error.status) || signal?.aborted) break;
         }
       }
@@ -317,7 +333,7 @@ const PROVIDERS = [
           if (!text) throw new Error('ردّ فارغ');
           return { text, model: data?.model || model, usage: data?.usage || null };
         } catch (error) {
-          failures.push(`${model}: ${error.message.slice(0, 90)}`);
+          failures.push(`${model}: ${String(error?.message || error).slice(0, 90)}`);
           if ([401, 402, 403, 404].includes(error.status) || signal?.aborted) break;
         }
       }
@@ -412,7 +428,9 @@ export async function probeProvider(key, { timeoutMs = 30000, perKey = false } =
 
 /** المزوّدون المفعّلون فعلياً (تظهر أسماؤهم وعدد مفاتيحهم في صفحة الشات). */
 export function availableProviders() {
-  return PROVIDERS.filter((provider) => keysOf(provider).length).map((provider) => ({
+  const only = String(process.env.AI_ONLY_PROVIDER || '').trim().toLowerCase();
+  const list = only ? PROVIDERS.filter((provider) => provider.key === only) : PROVIDERS;
+  return list.filter((provider) => keysOf(provider).length).map((provider) => ({
     key: provider.key,
     models: modelsFor(provider),
     keyCount: keysOf(provider).length
@@ -462,6 +480,20 @@ export async function runSupervisor({ userId = null, messages, system, temperatu
     throw error;
   }
 
+  if (!targets.length) {
+    // كل الأهداف في تهدئة: لا نستسلم فورا — نحاول مرة واحدة متجاهلين التهدئة
+    // (قد تكون تهدئة قديمة من عملية سابقة أو عارض انتهى)، ثم نفشل بتفاصيل.
+    const retryAll = all.filter((t) => (t.apiKey || '').trim());
+    if (retryAll.length) {
+      console.warn(`كل الأهداف في تهدئة — محاولة أخيرة متجاهلة التهدئة: ${retryAll.map((t) => t.id).join('، ')}`);
+      for (const [key, entry] of [...HEALTH.entries()]) {
+        if (Date.now() >= (entry?.until || 0)) HEALTH.delete(key);
+      }
+      const stillCool = retryAll.filter((t) => !isUnhealthy(t.id));
+      if (stillCool.length) targets.push(...stillCool);
+      else { HEALTH.clear(); targets.push(...retryAll); }
+    }
+  }
   if (!targets.length) {
     const error = new Error(
       `كل المزوّدين متوقّفون الآن: ${all.map((t) => `${t.id} (${HEALTH.get(t.id)?.reason || '؟'})`).join(' · ')}`
@@ -526,7 +558,7 @@ export async function runSupervisor({ userId = null, messages, system, temperatu
 
       // الخروج من الدوران للمفتاح وحده: مفتاحٌ بلا رصيد لا يُطعن في أخيه.
       markUnhealthy(target.id, classifyFailure(error.status, error.message));
-      failures.push(`${target.id}: ${error.message}`);
+      failures.push(`${target.id}: ${String(error?.message || error).slice(0, 300)}`);
       await logRequest({ userId, provider: provider.key, model: (target.models || provider.models)[0], latencyMs: Date.now() - startedAt, status: 'error', error });
       console.warn(`فشل ${target.id}: ${String(error.message).slice(0, 120)}`);
 

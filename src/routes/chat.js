@@ -163,7 +163,7 @@ router.post('/chat', requireCoreOnboarding, rateLimitUser('chat_message', { limi
 
     res.redirect(303, `/chat?c=${result.conversationId}&step=${encodeURIComponent(stepKey)}&ok=sent`);
   } catch (error) {
-    console.warn(`فشل الشات (${error?.code || 'UNKNOWN'}): ${error?.message}`);
+    console.warn(`فشل الشات (${error?.code || 'UNKNOWN'}): ${error?.message || error}${error?.stack ? `\n${String(error.stack).split('\n').slice(0, 6).join('\n')}` : ''}`);
     // نقص الرصيد ورصيده وكم نحتاج: رسالة الكود أوضح من نص ثابت
     const message = error?.code === 'NO_TOKENS' ? error.message : '';
 

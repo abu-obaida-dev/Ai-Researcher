@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool, testDatabaseConnection } from './src/db/client.js';
-import { loadSupportWhatsapp } from './src/services/settings.js';
+import { loadSupportWhatsapp, loadVoiceWhatsappFemale, loadVoiceWhatsappMale } from './src/services/settings.js';
 import { hintForDatabaseError } from './src/db/errors.js';
 import { adminRouter } from './src/routes/admin.js';
 import { authRouter } from './src/routes/auth.js';
@@ -274,11 +274,25 @@ app.get(['/favicon.ico', '/favicon.svg'], (_req, res) => {
 // أمان عام: طلبات المواقع الأخرى تُرفض (CSRF) + ترويسات أمان إضافية
 app.use(securityHeaders);
 app.use(requireSameOrigin());
+// كل CSS للتطبيق مُضمَّن داخل HTML المُولَّد ديناميكياً (لا ملف styles خارجي)،
+// فمنع التخزين المؤقت يجعل أي تعديل تنسيقي يظهر فوراً على الهاتف بدل نسخة
+// قديمة مخزّنة عند متصفحه. الملفات الثابتة لا تمرّ من هنا أصلاً:
+// express.static يسبقه ويخزّنها 7 أيام، والملفات ذات اللاحقة (.pdf …)
+// تبقى بلا تغيير لأن شرطنا يخص المسارات بلا لاحقة (الصفحات).
+app.use((req, res, next) => {
+  // GET للتنقّل وHEAD لفحوصات الرؤوس — كلتاهما يعيد HTML الصفحات
+  if ((req.method === 'GET' || req.method === 'HEAD') && !path.extname(req.path)) {
+    res.set('Cache-Control', 'no-store');
+  }
+  next();
+});
 
 app.use(attachAccount);
 
-// رقم واتساب الدعم (يضبطه المدير من الإعدادات) — يُقرأ مرة عند الإقلاع
-loadSupportWhatsapp().catch(() => {});
+// أرقام الواتساب الثلاثة (الدعم + صوت الشباب + صوت البنات) تُقرأ من settings
+// عند الإقلاع إلى كاش الذاكرة: current* تقرأ الكاش أولاً، فمن دون هذا التحميل
+// تبقى القيم فارغة بعد كل إعادة تشغيل وتبدو «ضائعة» رغم بقائها محفوظة في القاعدة.
+Promise.all([loadSupportWhatsapp(), loadVoiceWhatsappMale(), loadVoiceWhatsappFemale()]).catch(() => {});
 
 
 app.get('/', async (req, res) => {
@@ -571,6 +585,29 @@ process.on('uncaughtException', (error) => {
 // أمّا على Vercel فيستورد `api/index.js` هذا الملف ويصدّر `app` وحده،
 // فلا يقلع الخادم هنا ولا يفتح منفذ (سلوك Functions).
 const isServerless = isServerlessPlatform();
+
+/**
+ * تنظيف ملفات الحسابات المتوقفة (30+ يوم غياب): سطور files فقط.
+ * يُشغَّل مرة عند الإقلاع ثم كل 24 ساعة. يفشل بصمت حتى لا يُسقط الخادم.
+ * (تُحذف سطور files فقط — بلا مساس بأي جدول آخر.)
+ */
+async function sweepStoppedUserFiles(reason) {
+  try {
+    const { purgeStoppedUserFiles } = await import('./src/services/activity.js');
+    const done = await purgeStoppedUserFiles();
+    if (done.users > 0 || reason === 'boot') {
+      console.log(`مسح ملفات المتوقفين (${reason}): ${done.users} حساب، ${done.files} ملف.`);
+    }
+  } catch (error) {
+    console.warn(`تعذّر مسح ملفات المتوقفين (${reason}): ${error?.code || error?.message}`);
+  }
+}
+
+if (!isServerless) {
+  sweepStoppedUserFiles('boot');
+  const sweepTimer = setInterval(() => sweepStoppedUserFiles('daily'), 24 * 3600 * 1000);
+  sweepTimer.unref?.();
+}
 
 // Vercel (ومنصّات Functions) تتطلّب **default export** لدالة أو خادم، لا
 // export مسمّى فقط. لذا نصدّر app بالشكلين: `default` ليعمل كدالة، والمسمّى

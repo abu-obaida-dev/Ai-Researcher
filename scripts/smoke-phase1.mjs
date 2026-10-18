@@ -959,6 +959,10 @@ async function testStorageLimits() {
   );
   check('1G لا زر واتساب في لوحة الإدارة', !waAdmin.text.includes('wa-float"'));
 
+  // نلتقط الرقم الأصلي من القاعدة قبل تعديله — الاختبار يعيده كما كان فعلاً
+  // (لا فراغاً دائماً: قد يكون المدير مضبوطاً على رقم حقيقي لا يجب فقده).
+  const waOriginal = await pool.query("SELECT value FROM settings WHERE key = 'support_whatsapp'");
+
   // المدير يضبط الرقم من الإعدادات: حفظٌ صحيح يظهر فوراً، والسقوط يبقى سليماً.
   const waSaveOk = await call('/admin/settings/support-whatsapp', {
     method: 'POST', form: { whatsapp: '0912345678' }, expect: [302]
@@ -976,8 +980,12 @@ async function testStorageLimits() {
   const waBadText = decodeURIComponent((waBad.location || '').replace(/\+/g, ' '));
   check('1G يرفض رقماً ناقصاً برسالة عربية', waBadText.includes('رقم غير صالح'), waBadText.slice(0, 70));
 
-  // نُعيد الرقم كما كان (فارغاً) حتى لا يتسرّب رقم اختبار
-  await call('/admin/settings/support-whatsapp', { method: 'POST', form: { whatsapp: '' }, expect: [302] });
+  // نُعيد الرقم كما كان فعلاً عبر المسار نفسه (فيتحدّث كاش الخادم لا القاعدة وحدها)
+  await call('/admin/settings/support-whatsapp', {
+    method: 'POST',
+    form: { whatsapp: waOriginal.rows[0]?.value || '' },
+    expect: [302]
+  });
   const notifApi = await call('/api/notifications', { cookie: waUser.cookie, expect: [200] });
   check(
     '1G واجهة الإشعارات ترجع JSON',

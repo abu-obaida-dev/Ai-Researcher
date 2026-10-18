@@ -22,7 +22,7 @@ import { detectStepCompletion } from './step-review.js';
  */
 
 const CHAT_COST = TOKEN_COSTS.find((item) => item.type === 'chat')?.tokens || 30;
-const HISTORY_LIMIT = 20;
+const HISTORY_LIMIT = 8;
 const PROMPT_LIMIT = 8000;
 const TITLE_LIMIT = 120;
 
@@ -88,7 +88,7 @@ export async function createConversation(userId, { title = '', stepKey = null, m
     [userId, String(title || 'محادثة جديدة').trim().slice(0, TITLE_LIMIT), stepKey || null, nextMode]
   );
 
-  return rows[0];
+  return { ...rows[0], messages: [] };
 }
 
 /** إضافة رسالة إلى محادثة (تحدّث updated_at لظهورها في الأعلى). */
@@ -216,7 +216,7 @@ export async function askSupervisor({
 
   const context = await buildSupervisorContext({ userId, profile, conversation, fileIds });
 
-  const history = conversation.messages
+  const history = (conversation.messages || [])
     .slice(-HISTORY_LIMIT)
     .map((message) => ({
       role: message.role === 'assistant' ? 'assistant' : 'user',
@@ -278,7 +278,7 @@ export async function askSupervisor({
     // عبر askedForReferenceTitle المشدّدة: لا يكفي ذكر (عنوان + مراجع + ؟) في أي
     // ردّ أكاديمي — وإلا انطبق سؤال المناقشة («…بعنوان… ومراجعات العدالة…؟»)
     // فتُعامَل إجابته كطلب مراجع لم يطلبه وتُستبدل رسالته بتعليمات الأداة.
-    const askedBefore = askedForReferenceTitle(conversation.messages);
+    const askedBefore = askedForReferenceTitle(conversation.messages || []);
 
     // بوابة مرحلة topic: لا أداة مراجع قبل اكتمال تعريف المشكلة وحدودها —
     // تسجيل موضوع عام وحده لا يكفي (المراجع تعود بعد اكتمال الخطوة).
@@ -479,8 +479,8 @@ export async function askSupervisor({
   }
 
   // ٧) بدء جلسة جديدة ⇒ تلخيص الجلسة السابقة (على حساب المنصة، لا الباحث)
-  if (previousId) {
-    const previous = await getConversation(userId, previousId);
+  if (conversationId) {
+    const previous = await getConversation(userId, conversationId);
     if (previous) {
       const memory = await summarizeConversation(userId, { messages: previous.messages, profile });
       if (memory) {
@@ -509,6 +509,8 @@ export async function askSupervisor({
   } catch (error) {
     console.warn(`تعذّر كشف اكتمال الخطوة: ${error?.code || error?.message}`);
   }
+
+  // ٨) بعد اكتمال الرد: لا نمس ذاكرة المشرف هنا — الملخص يبنى فقط عند بدء جلسة جديدة.
 
   return {
     conversationId: conversation.id,

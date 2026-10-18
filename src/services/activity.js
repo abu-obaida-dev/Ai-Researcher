@@ -1,13 +1,16 @@
 import { pool } from '../db/client.js';
 
 /**
- * تصنيف نشاط الباحثين (نشط / غير نشط + سبب) — أساس قرارات الهدايا ومتابعة المشاكل.
+ * تصنيف حالات الحسابات (تلقائي بالكامل — بلا تدخل من المدير).
  *
  * القواعد المتفق عليها:
- *   نشط   = دخل خلال آخر 7 أيام  AND  باقته سارية (بما فيها فترة سماح 48 ساعة بعد الانتهاء)
- *   غير نشط بسبب خمول      = لا دخول منذ أكثر من 7 أيام
- *   غير نشط بسبب انتهاء باقة = انتهت باقته ومرّت أكثر من 48 ساعة دون تجديد
- *   موقوف  = is_active = false (استثناء من التصنيفين — لا يُحسب هدية ولا متابعة)
+ *   نشط    = دخل خلال آخر 7 أيام  AND  باقته سارية (بما فيها فترة سماح 48 ساعة بعد الانتهاء)
+ *   خامل    = لم يدخل منذ أكثر من 7 أيام  AND  باقته سارية
+ *   منتهي   = دخل خلال آخر 7 أيام  AND  باقته منتهية (تجاوزت 48 ساعة سماح دون تجديد)
+ *   متوقف   = لم يدخل منذ أكثر من 30 يوماً (بغض النظر عن الباقة — غياب طويل)
+ *
+ * الأولوية: متوقف أولاً (30+ يوم غياب)، ثم نشط (شرطان معاً)، ثم منتهي
+ * (دخول حديث + باقة منتهية)، ثم خامل (الباقي).
  *
  * التواريخ تُملأ تلقائياً: last_login_at مع كل دخول بجوجل،
  * plan_expires_at عند تأكيد المدير لطلب دفع (مدة الباقة من plans.period_days).
@@ -22,12 +25,15 @@ export const INACTIVE_LOGIN_DAYS = 7;
 /** ساعات السماح بعد انتهاء الباقة: خلالها يبقى الباحث نشطاً لمنحه فرصة التجديد. */
 export const PLAN_GRACE_HOURS = 48;
 
+/** أيام الغياب الطويل: من لم يدخل منذ أكثر منها = متوقف. */
+export const STOPPED_LOGIN_DAYS = 30;
+
 /** فلتر صفحة الباحثين: قيم مسموحة مع تسمياتها العربية. */
 export const ACTIVITY_FILTERS = {
-  activity_active: 'النشطون',
-  activity_idle: 'غير نشط — خمول',
-  activity_plan_expired: 'غير نشط — باقة منتهية',
-  activity_suspended: 'موقوفون'
+  activity_active: 'نشط',
+  activity_idle: 'خامل',
+  activity_plan_expired: 'منتهي باقته',
+  activity_stopped: 'متوقف'
 };
 
 /**
@@ -39,22 +45,26 @@ const RECENT_LOGIN_SQL = `COALESCE(u.last_login_at, u.created_at) >= NOW() - mak
 /** شرط «باقته سارية الآن أو في فترة السماح»: لا باقة (NULL) = لا تنتهي = سارية. */
 const PLAN_VALID_SQL = `(u.plan_expires_at IS NULL OR u.plan_expires_at >= NOW() - make_interval(hours => ${PLAN_GRACE_HOURS}))`;
 
+/** شرط «غائب منذ أكثر من N أيام» (للمتوقف): لا دخول منذ 30+ يوماً بغض النظر عن الباقة. */
+const STOPPED_LOGIN_SQL = `COALESCE(u.last_login_at, u.created_at) < NOW() - make_interval(days => ${STOPPED_LOGIN_DAYS})`;
+
 /**
- * تعبير حالة النشاط في SQL — مصدر واحد يُستخدم في الفلترة والتجميع معاً
+ * تعبير حالة الحساب في SQL — مصدر واحد يُستخدم في الفلترة والتجميع معاً
  * فلا يمكن أن يختلف المعنى بين الاستعلامين.
  */
 const ACTIVITY_STATUS_SQL = `
   CASE
-    WHEN NOT COALESCE(u.is_active, true) THEN 'suspended'
+    WHEN ${STOPPED_LOGIN_SQL} THEN 'stopped'
     WHEN ${RECENT_LOGIN_SQL} AND ${PLAN_VALID_SQL} THEN 'active'
-    WHEN NOT ${RECENT_LOGIN_SQL} THEN 'idle'
-    ELSE 'plan_expired'
+    WHEN ${RECENT_LOGIN_SQL} AND NOT ${PLAN_VALID_SQL} THEN 'plan_expired'
+    ELSE 'idle'
   END`;
 
-/** مصفوفة أسباب عدم النشط مرتبة (لعرضها في لوحة الإدارة). */
+/** مصفوفة الحالات مرتبة (لعرضها في لوحة الإدارة). */
 export const INACTIVE_REASONS = [
-  { key: 'idle', label: 'خمول — لا دخول منذ أكثر من 7 أيام' },
-  { key: 'plan_expired', label: 'باقة منتهية — مرّت أكثر من 48 ساعة دون تجديد' }
+  { key: 'idle', label: 'خامل — لا دخول منذ أكثر من 7 أيام وباقته سارية' },
+  { key: 'plan_expired', label: 'منتهي باقته — دخل حديثاً لكن مرّت أكثر من 48 ساعة دون تجديد' },
+  { key: 'stopped', label: 'متوقف — لا دخول منذ أكثر من 30 يوماً' }
 ];
 
 /** يقرأ فلتر النشاط من قيمة ?filter= ويُبقي فقط ما هو مسموح (والافتراضي «الكل»). */
@@ -79,8 +89,8 @@ export function activityFilterWhere(filter) {
       return ` AND ${ACTIVITY_STATUS_SQL} = 'idle'`;
     case 'activity_plan_expired':
       return ` AND ${ACTIVITY_STATUS_SQL} = 'plan_expired'`;
-    case 'activity_suspended':
-      return ` AND ${ACTIVITY_STATUS_SQL} = 'suspended'`;
+    case 'activity_stopped':
+      return ` AND ${ACTIVITY_STATUS_SQL} = 'stopped'`;
     default:
       return '';
   }
@@ -93,10 +103,76 @@ export const ACTIVITY_COLUMNS_SQL = `
   u.plan_expires_at`;
 
 /**
- * إحصائية التصنيف للوحة الإدارة: الإجمالي + النشطون + كل سبب غير نشط + الموقوفون.
+ * إحصائية التصنيف للوحة الإدارة: الإجمالي + كل حالة.
  * استعلام واحد مجمّع (لا تحميل صفوف ثم عدّ في JS).
  * يستثني المديرين (role = 'admin') — تصنيف الباحثين يخصّ الباحثين فقط.
  */
+
+/** شرط «متوقف» مستقل (يُستخدم في تنظيف الملفات): نفس تعريف CASE أعلاه. */
+const STOPPED_WHERE_SQL = `NOT COALESCE(u.deleted, false)
+  AND COALESCE(u.role, 'user') <> 'admin'
+  AND COALESCE(u.last_login_at, u.created_at) < NOW() - make_interval(days => ${STOPPED_LOGIN_DAYS})`;
+
+/**
+ * مستخدمون متوقفون ما زالت لهم ملفات على المنصة (للتنظيف التلقائي/اليدوي).
+ * يعيد [{ id, email, fileCount, fileBytes }] — بلا بايتات، ميتاداتا فقط.
+ */
+export async function stoppedUsersWithFiles() {
+  const { rows } = await pool.query(
+    `SELECT u.id, u.email,
+            count(f.id)::int AS file_count,
+            COALESCE(sum(f.size_bytes), 0)::bigint AS file_bytes
+       FROM users u
+       JOIN files f ON f.user_id = u.id
+      WHERE ${STOPPED_WHERE_SQL}
+      GROUP BY u.id, u.email
+      ORDER BY file_bytes DESC`
+  );
+
+  return rows.map((row) => ({
+    id: row.id,
+    email: row.email,
+    fileCount: Number(row.file_count || 0),
+    fileBytes: Number(row.file_bytes || 0)
+  }));
+}
+
+/**
+ * حذف ملفات مستخدم واحد (سطور files فقط — بلا مساس بأي جدول آخر).
+ * يعيد { files, bytes } — عدد الملفات وحجمها المحذوف.
+ */
+export async function deleteUserFiles(userId) {
+  const { rows } = await pool.query(
+    'SELECT COALESCE(count(*), 0)::int AS n, COALESCE(sum(size_bytes), 0)::bigint AS bytes FROM files WHERE user_id = $1',
+    [userId]
+  );
+  await pool.query('DELETE FROM files WHERE user_id = $1', [userId]);
+
+  return { files: Number(rows[0]?.n || 0), bytes: Number(rows[0]?.bytes || 0) };
+}
+
+/**
+ * تنظيف ملفات كل الحسابات المتوقفة (30+ يوم غياب): سطور files فقط.
+ * تُستدعى دورياً من الخادم + يدوياً من لوحة الإدارة.
+ * تعيد { users, files, bytes }.
+ */
+export async function purgeStoppedUserFiles() {
+  const targets = await stoppedUsersWithFiles();
+  let files = 0;
+  let bytes = 0;
+
+  for (const target of targets) {
+    const done = await deleteUserFiles(target.id);
+    files += done.files;
+    bytes += done.bytes;
+  }
+
+  if (targets.length) {
+    console.log(`تنظيف المتوقفين: حُذفت ملفات ${targets.length} حساب (${files} ملف، ${bytes} بايت) — سطور files فقط.`);
+  }
+
+  return { users: targets.length, files, bytes };
+}
 export async function activityStats() {
   const empty = {
     total: 0,
@@ -104,18 +180,18 @@ export async function activityStats() {
     inactive: 0,
     idle: 0,
     planExpired: 0,
-    suspended: 0,
-    rules: { days: INACTIVE_LOGIN_DAYS, graceHours: PLAN_GRACE_HOURS }
+    stopped: 0,
+    rules: { days: INACTIVE_LOGIN_DAYS, graceHours: PLAN_GRACE_HOURS, stoppedDays: STOPPED_LOGIN_DAYS }
   };
 
   try {
     const { rows } = await pool.query(
       `SELECT count(*)::int AS total,
               count(*) FILTER (WHERE status = 'active')::int AS active,
-              count(*) FILTER (WHERE status IN ('idle', 'plan_expired'))::int AS inactive,
+              count(*) FILTER (WHERE status IN ('idle', 'plan_expired', 'stopped'))::int AS inactive,
               count(*) FILTER (WHERE status = 'idle')::int AS idle,
               count(*) FILTER (WHERE status = 'plan_expired')::int AS plan_expired,
-              count(*) FILTER (WHERE status = 'suspended')::int AS suspended
+              count(*) FILTER (WHERE status = 'stopped')::int AS stopped
          FROM (SELECT ${ACTIVITY_STATUS_SQL} AS status
                  FROM users u
                 WHERE NOT COALESCE(u.deleted, false)
@@ -129,8 +205,8 @@ export async function activityStats() {
       inactive: Number(row.inactive || 0),
       idle: Number(row.idle || 0),
       planExpired: Number(row.plan_expired || 0),
-      suspended: Number(row.suspended || 0),
-      rules: { days: INACTIVE_LOGIN_DAYS, graceHours: PLAN_GRACE_HOURS }
+      stopped: Number(row.stopped || 0),
+      rules: { days: INACTIVE_LOGIN_DAYS, graceHours: PLAN_GRACE_HOURS, stoppedDays: STOPPED_LOGIN_DAYS }
     };
   } catch (error) {
     console.warn(`تعذّرت إحصائية نشاط الباحثين: ${error.code || error.message}`);

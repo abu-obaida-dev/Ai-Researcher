@@ -7,7 +7,8 @@ import crypto from 'node:crypto';
 
 export const SESSION_COOKIE_NAME = 'ai_session';
 export const OAUTH_STATE_COOKIE = 'ai_oauth_state';
-export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** مدة الجلسة: يوم واحد (24 ساعة) — تُستخدم في حمولة التوقيع exp وفي Max-Age الكوكي معاً. */
+export const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';

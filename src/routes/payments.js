@@ -1,5 +1,6 @@
 import express from 'express';
 import { requireAccount } from '../middleware/auth.js';
+import { WHATSAPP_COUNTRIES } from '../constants.js';
 import { listPublicPlans } from '../services/plans.js';
 import { createPaymentRequest, listPaymentMethods, listUserPaymentRequests, siteCurrency } from '../services/payments.js';
 import { getProfile } from '../services/users.js';
@@ -23,6 +24,30 @@ const FLASH = {
   bad_whatsapp: { type: 'error', message: 'رقم الواتساب مطلوب (مثال: 0912345678).' },
   too_many: { type: 'error', message: 'لديك طلبات كثيرة قيد المراجعة — انتظر رد الإدارة.' }
 };
+
+/** يفصل رقم واتساب محفوظاً (بأي صيغة قديمة) إلى رمز الدولة والرقم المحلي. */
+function splitStoredWhatsapp(stored) {
+  const raw = String(stored || '').trim();
+  if (!raw) return { country: 'LY', number: '' };
+
+  let digits = raw.replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+
+  // نجرّب أطول مفتاح دولي أولاً حتى لا يخطئ رقم ليبي يبدأ بـ 91 مثلاً
+  const sorted = [...WHATSAPP_COUNTRIES].sort((a, b) => b.dial.length - a.dial.length);
+  for (const country of sorted) {
+    if (!digits.startsWith(country.dial)) continue;
+    const local = digits.slice(country.dial.length).replace(/^0+(?=\d)/, '');
+    if (country.lengths.includes(local.length)) return { country: country.code, number: local };
+  }
+
+  // صيغة محلية بدون مفتاح (مثل 0912345678) — ليبيا هي الدولة الافتراضية
+  const local = digits.replace(/^0+(?=\d)/, '');
+  const ly = WHATSAPP_COUNTRIES.find((country) => country.code === 'LY');
+  if (ly.lengths.includes(local.length)) return { country: 'LY', number: local };
+
+  return { country: 'LY', number: digits };
+}
 
 function flashFromQuery(query) {
   const base = FLASH[String(query.ok || query.err || '')];
@@ -56,7 +81,8 @@ router.get('/payments', requireAccount, async (req, res) => {
         methods,
         requests,
         currency,
-        whatsapp: String(profile?.whatsapp_number || ''),
+        whatsapp: splitStoredWhatsapp(profile?.whatsapp_number).number,
+        waCountryCode: splitStoredWhatsapp(profile?.whatsapp_number).country,
         selectedPlan: String(req.query.plan || '').slice(0, 100),
         flash: flashFromQuery(req.query)
       })
@@ -81,7 +107,8 @@ router.post('/payments', requireAccount, rateLimit('payments', { limit: 5, windo
     const request = await createPaymentRequest(req.account.id, {
       plan_code: body.plan_code,
       method_code: body.method_code,
-      whatsapp_number: body.whatsapp_number
+      whatsapp_number: body.whatsapp_number,
+      wa_country: body.wa_country
     });
     res.redirect(303, `/payments?ok=sent&ref=${encodeURIComponent(String(request.reference_code || '').slice(0, 6))}`);
   } catch (error) {

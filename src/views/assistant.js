@@ -57,7 +57,8 @@ function renderConversations(conversations, activeId) {
 </div>`;
 }
 
-/** إرفاق ملفات مع الرسالة (للترجمة) — نفس مربّعات الشات. */
+/** إرفاق ملفات مع الرسالة (للترجمة) — قائمة منسدلة مطويّة فوق صندوق الكتابة،
+ *  تظهر فقط عند وجود ملفات (نفس بنية الإرفاق في الشات). */
 function renderAttachRow(files = []) {
   if (!files.length) return '';
 
@@ -72,11 +73,13 @@ function renderAttachRow(files = []) {
     })
     .join('\n  ');
 
-  return `<div class="chat-attach" id="chat-attach">
-  <span class="chat-attach-label">${icon('clipboard', 'icon-sm')} أرفق ملفاً لترجمته:</span>
+  return `<details class="chat-attach" id="chat-attach">
+  <summary class="chat-attach-sum">${icon('paperclip', 'icon-sm')} أرفق ملفاً <span class="attach-total">${files.length}</span><span class="attach-picked">✓</span></summary>
+  <div class="chat-attach-panel">
   ${rows}
   <span class="chat-attach-hint">اختر الملف ثم اكتب «ترجم» · حتى ٣ ملفات · PDF و Word و txt و Excel (الصور لا تُقرأ نصياً)</span>
-</div>`;
+  </div>
+</details>`;
 }
 
 /** نتائج البحث — تظهر تحت آخر رد: بيانات المصدر ورابط فتحه/تحميله. */

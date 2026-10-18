@@ -1,6 +1,7 @@
 import { formatDateTime, formatMoney, formatNumber } from './format.js';
 import { icon } from './icons.js';
 import { escapeHtml, renderLayout } from './layout.js';
+import { WHATSAPP_COUNTRIES } from '../constants.js';
 
 /**
  * صفحة «الاشتراك والدفع» للباحث: الدفع يدوي خارج المنصة.
@@ -65,6 +66,7 @@ export function renderPaymentsPage({
   requests = [],
   currency = 'LYD',
   whatsapp = '',
+  waCountryCode = 'LY',
   selectedPlan = '',
   flash = null
 }) {
@@ -81,6 +83,16 @@ export function renderPaymentsPage({
     ? `<div class="${flash.type === 'error' ? 'alert' : 'notice'}">${escapeHtml(flash.message)}</div>`
     : '';
 
+  // الدولة الحالية لحقل الواتساب (نفس تصميم صفحة التسجيل: قائمة + مفتاح + رقم محلي)
+  const waCountry = WHATSAPP_COUNTRIES.find((country) => country.code === waCountryCode) || WHATSAPP_COUNTRIES[0];
+  const waLocalSample = waCountry.sample.replace(`+${waCountry.dial}`, '');
+  const waMaxLength = Math.max(...waCountry.lengths);
+  const countryOptions = WHATSAPP_COUNTRIES.map((country) => {
+    const selected = country.code === waCountry.code ? ' selected' : '';
+    const localSample = country.sample.replace(`+${country.dial}`, '');
+    return `<option value="${country.code}" data-dial="${country.dial}" data-lengths="${country.lengths.join(',')}" data-sample="${localSample}"${selected}>${escapeHtml(country.name)} (+${country.dial})</option>`;
+  }).join('');
+
   const form = methods.length
     ? `<form method="post" action="/payments" class="form-card">
       <div class="field">
@@ -93,8 +105,15 @@ export function renderPaymentsPage({
       </div>
       <div class="field">
         <label for="pay-whatsapp">رقم الواتساب للتواصل *</label>
-        <input type="tel" id="pay-whatsapp" name="whatsapp_number" required value="${escapeHtml(whatsapp)}" maxlength="25" placeholder="0912345678 أو +218912345678 أو 00218912345678" pattern="[0-9+]+" />
-        <span class="field-hint">تنسيقات مقبولة: 0912345678 أو +218912345678 أو 00218912345678. سيظهر لك كود تفعيل من 6 أرقام بعد الإرسال — أرسله عبر واتساب لخدمة العملاء.</span>
+        <div class="field wa-field">
+          <span class="wa-icon">${icon('whatsapp')}</span>
+          <label class="visually-hidden" for="pay-wa-country">دولة رقم الواتساب</label>
+          <select id="pay-wa-country" name="wa_country" class="wa-country" required>${countryOptions}</select>
+          <span class="wa-dial" id="pay-wa-dial" aria-hidden="true">+${waCountry.dial}</span>
+          <label class="visually-hidden" for="pay-whatsapp">رقم الواتساب</label>
+          <input type="tel" id="pay-whatsapp" name="whatsapp_number" required value="${escapeHtml(whatsapp)}" placeholder="${waLocalSample}" inputmode="numeric" autocomplete="tel-national" maxlength="${waMaxLength}" data-lengths="${waCountry.lengths.join(',')}" />
+        </div>
+        <p class="form-hint wa-hint" id="pay-wa-hint">الرقم المطلوب لدولة ${escapeHtml(waCountry.name)}: ${waCountry.lengths.join(' أو ')} أرقام بعد المفتاح +${waCountry.dial} (مثال: ${waLocalSample}). سيظهر لك كود تفعيل من 6 أرقام بعد الإرسال — أرسله عبر واتساب لخدمة العملاء.</p>
       </div>
       <div class="form-actions">
         <button class="btn btn-primary" type="submit">${icon('coins', 'icon-sm')} أرسل طلب الدفع</button>
@@ -133,7 +152,7 @@ export function renderPaymentsPage({
     activeKey: 'payments',
     account,
     unread,
-    scripts: ['/js/app-shell.js'],
+    scripts: ['/js/app-shell.js', '/js/payment-whatsapp.js'],
     body
   });
 }

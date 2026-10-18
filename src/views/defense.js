@@ -34,7 +34,9 @@ export function renderDefensePage({ account = null, unread = 0, conversation = n
   } else {
     composer = `<form class="chat-composer" method="post" action="/defense/${escapeHtml(conversation.id)}/answer"><div class="chat-composer-row"><textarea id="message" name="answer" rows="1" required maxlength="3000" placeholder="اكتب اجابتك…" aria-label="اجابتك"></textarea><button class="btn btn-primary chat-send" type="submit" title="ارسال" aria-label="ارسال">${icon('send')}</button></div></form>`;
   }
-  const body = `<section class="card chat-card">${flashHtml}${renderThesisBar(conversation, current)}<div class="chat-body" id="messages">${messagesHtml}</div>${conversation?.id ? renderThesisCard(conversation, current, files) : ''}${composer}</section>`;
+  // chat-card--defense: بطاقة المناقشة تتمدد بدل الارتفاع الثابت — نموذج تثبيت
+  // الملف أسفل الرسائل، والارتفاع المقصوص كان يدفع زر البدء تحت الطيّ على الهاتف.
+  const body = `<section class="card chat-card chat-card--defense">${flashHtml}${renderThesisBar(conversation, current)}<div class="chat-body" id="messages">${messagesHtml}</div>${conversation?.id ? renderThesisCard(conversation, current, files) : ''}${composer}</section>`;
   return renderLayout({
     title: 'مناقشة البحث',
     pageHead: false,

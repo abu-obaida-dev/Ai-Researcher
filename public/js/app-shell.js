@@ -20,6 +20,60 @@
     });
   }
 
+  /**
+   * إبقاء القائمة المنسدلة داخل حدود الشاشة — مرونتها على مقاسات الهاتف المختلفة:
+   * القائمة مرسومة من حافة زرّها للداخل عبر position:absolute وعرضها
+   * min(370px, 100vw - 20px)، ولا تعرف CSS كم يبعد الزر عن حافة الشاشة
+   * (يليه صورة الحساب والهامبرغر)؛ فعلى الهواتف تتجاوز الحافة اليمنى ويقصّها
+   * overflow-x على html/body فيختفي جزء منها (عناوين الإشعارات تحديداً).
+   * نقيس بعد كل فتح/رسم ونصحّح: انزاحة أفقية للبقاء بين هوامش الشاشة، وتقليص
+   * الارتفاع إن تجاوزت الأسفل — رأس القائمة ثابت وقائمتها تُمرَّر فلا يضيع محتوى.
+   */
+  var FIT_MARGIN = 8; // هوامش أمان (بكسل) بين القائمة وحافة الشاشة
+
+  function fitDropdown(entry) {
+    var el = entry && entry.menu;
+    if (!el || el.hidden) return;
+
+    // نبدأ من إعدادات CSS خالصة: الشاشة قد تغيّرت منذ آخر ضبط (تدوير/شريط عنوان)
+    el.style.width = '';
+    el.style.maxHeight = '';
+    el.style.transform = '';
+
+    var doc = document.documentElement;
+    var vw = doc.clientWidth; // العرض المرئي الحقيقي — 100vw تشمل شريط التمرير
+    var vh = doc.clientHeight;
+    if (vw < 2 || vh < 2) return;
+
+    var rect = el.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+
+    // عرض أوسع من الشاشة (شريط تمرير أو حواف ملء الشاشة): نقيّده داخل الهوامش
+    if (rect.width > vw - 2 * FIT_MARGIN) {
+      el.style.width = Math.floor(vw - 2 * FIT_MARGIN) + 'px';
+      rect = el.getBoundingClientRect();
+    }
+
+    var left = rect.left;
+    if (left + rect.width > vw - FIT_MARGIN) left = (vw - FIT_MARGIN) - rect.width;
+    if (left < FIT_MARGIN) left = FIT_MARGIN;
+    var dx = left - rect.left;
+    if (dx) el.style.transform = 'translateX(' + Math.round(dx) + 'px)';
+
+    // عمودياً: إن تجاوزت حافة الأسفل ننقص من ارتفاعها بدل النزول — يبقى الرأس
+    // ظاهراً وقائمة الإشعارات تُمرَّر تحته (كما تفعل أصلاً عند تجاوز السقف CSS).
+    rect = el.getBoundingClientRect();
+    var overflowBottom = rect.bottom - (vh - FIT_MARGIN);
+    if (overflowBottom > 0) {
+      el.style.maxHeight = Math.max(160, Math.round(rect.height - overflowBottom)) + 'px';
+    }
+  }
+
+  /** إعادة ضبط كل القوائم المفتوحة — تُستدعى مع أي تغيّر في أبعاد الشاشة أو المحتوى. */
+  function fitOpenDropdowns() {
+    dropdowns.forEach(fitDropdown);
+  }
+
   function wireDropdown(toggleId, menuId, options) {
     var toggle = document.getElementById(toggleId);
     var menu = document.getElementById(menuId);
@@ -34,6 +88,8 @@
         menu.hidden = false;
         toggle.setAttribute('aria-expanded', 'true');
         if (onOpen) onOpen();
+        // بعد الرسم الأول — القياس يجبر التخطيط فوراً فلا تُرى القائمة متجاوزة قبل التصحيح
+        fitDropdown(entry);
       },
       close: function () {
         menu.hidden = true;
@@ -64,6 +120,12 @@
   document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') closeAllDropdowns(null);
   });
+
+  // شاشات الهاتف تغيّر أبعادها باستمرار (شريط العنوان يظهر/يختفي، والتدوير،
+  // وفتح صفحات بعرض مختلف) — نعيد ضبط القوائم المفتوحة فتبقى كاملة داخل الرؤية.
+  window.addEventListener('resize', fitOpenDropdowns);
+  window.addEventListener('orientationchange', fitOpenDropdowns);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', fitOpenDropdowns);
 
   // قائمة صورة الحساب: تعمل دائماً (حتى بلا جرس) في الشريط العلوي والترويسة العامة
   wireDropdown('user-toggle', 'user-menu');
@@ -114,6 +176,7 @@
     if (!empty) return;
     empty.hidden = false;
     empty.textContent = message;
+    fitOpenDropdowns(); // ارتفاع القائمة تغيّر — أعد ضبطها داخل الشاشة
   }
 
   function countUnread() {
@@ -184,6 +247,7 @@
       li.appendChild(actions);
       list.appendChild(li);
     });
+    fitOpenDropdowns(); // المحتوى ازداد أو نقص — أعِد ضبط الموضع والارتفاع
   }
 
   /** طلب JSON بنفس نطاق الموقع مع ترجمة الأخطاء إلى رسالة عربية. */
@@ -230,6 +294,7 @@
           if (button && button.textContent === 'تعليم كمقروء') button.remove();
         }
         setBadge(typeof data.unread === 'number' ? data.unread : countUnread());
+        fitOpenDropdowns(); // زر «تعليم كمقروء» أُزيل ⇒ القائمة أقصر وتستحق سقفاً أكبر
       })
       .catch(function (error) {
         showEmpty(error.message);
@@ -245,6 +310,7 @@
         if (node) node.remove();
         setBadge(typeof data.unread === 'number' ? data.unread : countUnread());
         if (!items.length) showEmpty('لا توجد إشعارات بعد — نُرسل لك الجديد هنا فور حدوثه.');
+        fitOpenDropdowns(); // صفّا حُذف ⇒ أعد ضبط ارتفاع القائمة
       })
       .catch(function (error) {
         showEmpty(error.message);

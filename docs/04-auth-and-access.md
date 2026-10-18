@@ -18,7 +18,7 @@
 
 - الحمولة: `{ uid, email, role, iat, exp }` — مشفرة `base64url` + توقيع `HMAC-SHA256` بالسرّ.
 - التحقق `timingSafeEqual` — يمنع التزوير وقياس الزمن.
-- `Secure + HttpOnly + SameSite=Lax` في الإنتاج، وTTL ثلاثون يوماً.
+- `Secure + HttpOnly + SameSite=Lax` في الإنتاج، وTTL يوم واحد (24 ساعة) — ينتهي التوقيع و`Max-Age` الكوكي معاً فيخرج المستخدم تلقائياً.
 - **لماذا بلا Redis/جدول؟** البساطة: التحقق حسابي خالص، والإبطال يتم عبر `is_active/deleted` في `users`.
 
 ## 3. `attachAccount` — كل طلب يعرف صاحبه (`src/middleware/auth.js`)

@@ -10,6 +10,7 @@ import {
   currentSupportWhatsapp,
   currentVoiceWhatsappMale,
   currentVoiceWhatsappFemale,
+  loadSupportWhatsapp,
   loadVoiceWhatsappMale,
   loadVoiceWhatsappFemale,
   saveSupportWhatsapp,
@@ -68,8 +69,8 @@ import { downloadExternalFile, LIBRARY_SOURCES, searchExternalLibrary } from '..
 const router = express.Router();
 
 const PAGE_SIZE = 20;
-// فلاتر الحالة التقليدية (is_active) + فلاتر التصنيف الجديد (النشاط)
-const ALLOWED_FILTERS = new Set(['all', 'active', 'disabled', ...Object.keys(ACTIVITY_FILTERS)]);
+// فلاتر الحالات التلقائية (نشط/خامل/منتهي/متوقف) — بلا إيقاف يدوي
+const ALLOWED_FILTERS = new Set(['all', ...Object.keys(ACTIVITY_FILTERS)]);
 
 /** دور المشرف الأكاديمي — مرجع واحد لكل ما يخصّه في اللوحة. */
 const SUPERVISOR_ROLE = 'supervisor';
@@ -930,12 +931,13 @@ router.get('/users', requireAdminPermission('admin:users'), (req, res) => {
   const term = `%${search.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`;
 
   // شرط البحث والفلترة مشترك بين استعلام البيانات واستعلام العدد
-  // الفلاتر الجديدة (activity_*) تُضاف من خدمة التصنيف حتى يبقى المنطق في مكان واحد
+  // فلاتر الحالات (activity_*) تُضاف من خدمة التصنيف حتى يبقى المنطق في مكان واحد
+  // المديرون مستثنون من القائمة والإحصائيات: لا ينطبق عليهم نشط/خامل/منتهي/متوقف
   const where = `WHERE ($1 = '' OR u.email ILIKE $2 OR COALESCE(u.full_name, '') ILIKE $2
       OR COALESCE(p.university, '') ILIKE $2 OR COALESCE(p.research_field, '') ILIKE $2)
     AND NOT COALESCE(u.deleted, false)
-    AND ($3 = 'all' OR ($3 = 'active' AND u.is_active) OR ($3 = 'disabled' AND NOT u.is_active)
-         OR ($3 LIKE 'activity\\_%' ${activityFilterWhere(filter)}))`;
+    AND COALESCE(u.role, 'user') <> 'admin'
+    AND ($3 = 'all' OR ($3 LIKE 'activity\\_%' ${activityFilterWhere(filter)}))`;
 
   return renderPage(
     res,
@@ -997,6 +999,10 @@ router.get('/settings', requireAdminPermission('admin:settings'), (req, res) =>
         listSupervisors(),
         siteCurrency(),
       ]);
+
+      // قراءة طازجة من settings قبل العرض: تعرض الصفحة ما في القاعدة نفسها
+      // (ولو غيّره مخدّم/عملية أخرى) — للأرقام الثلاثة معاً.
+      await Promise.all([loadSupportWhatsapp(), loadVoiceWhatsappMale(), loadVoiceWhatsappFemale()]);
 
       return {
         usage: usage.rows[0],
@@ -1168,43 +1174,31 @@ router.get('/users/:id', requireAdminPermission('admin:users'), async (req, res)
 
 /** إيقاف/تفعيل حساب — يسري فوراً: الجلسة القادمة ترفض الموقوف. */
 /**
- * إيقاف/تفعيل حساب.
- *
- * حماية صارمة لحساب المدير: لا يُوقَف ولا يُحذف ولا يُعطَّل — من أي حساب،
- * بمن فيهم المدير نفسه ومشرف يحمل صلاحية admin:users. الحماية عند المصدر
- * (SQL) لا في الواجهة فقط، فحتى أي استعلام لاحق لا يستطيع إيقافه.
+ * مسار الإيقاف/التفعيل اليدوي — معطّل نهائياً بقرار المنصة.
+ * الحالات (نشط/خامل/منتهي/متوقف) تلقائية بالكامل من القواعد في services/activity.js،
+ * والنظام يحوّل الحساب بينها وحده بلا زر إيقاف. أي طلب قديم يُرفض برسالة واضحة.
  */
 router.post('/users/:id/status', requireAdminPermission('admin:users'), async (req, res) => {
-  const id = String(req.params.id);
   const back = tokenBack(req);
-  const active = req.body?.active !== '0';
+  res.redirect(302, back('/admin/users', { error: 'الإيقاف اليدوي معطّل — حالات الحسابات (نشط/خامل/منتهي/متوقف) تلقائية بالكامل من النظام.' }));
+});
 
-  if (!UUID_RE.test(id)) {
-    res.redirect(302, back('/admin/users', { error: 'معرّف باحث غير صالح.' }));
-    return;
-  }
-  if (req.account && req.account.id === id) {
-    res.redirect(302, back(`/admin/users/${id}`, { error: 'لا يمكنك إيقاف حسابك أنت — اطلب ذلك من مدير آخر.' }));
-    return;
-  }
+/**
+ * تنظيف يدوي لملفات الحسابات المتوقفة (30+ يوم غياب): سطور files فقط.
+ * (التنظيف التلقائي يعمل عند الإقلاع + كل 24 ساعة — هذا الزر للتشغيل الفوري.)
+ */
+router.post('/users/purge-stopped-files', requireAdminPermission('admin:users'), async (req, res) => {
+  const back = tokenBack(req);
 
   try {
-    // `role <> 'admin'` في الاستعلام نفسه: طبقة أمان ثانية في قاعدة البيانات
-    const result = await pool.query(
-      `UPDATE users SET is_active = $2, updated_at = NOW()
-        WHERE id = $1 AND COALESCE(role, 'user') <> 'admin'`,
-      [id, active]
+    const { purgeStoppedUserFiles } = await import('../services/activity.js');
+    const done = await purgeStoppedUserFiles();
+    res.redirect(
+      302,
+      back('/admin/users', { ok: 'purged', msg: `حُذفت ملفات ${done.users} حساب متوقف (${done.files} ملف) — سطور files فقط.` })
     );
-
-    if (!result.rowCount) {
-      res.redirect(302, back(`/admin/users/${id}`, { error: adminProtectedMessage(id) }));
-      return;
-    }
-
-    const target = req.body?.return === 'users' ? '/admin/users' : `/admin/users/${id}`;
-    res.redirect(302, back(target, { ok: active ? 'activated' : 'suspended' }));
   } catch (error) {
-    res.redirect(302, back(`/admin/users/${id}`, { error: hintForDatabaseError(error) }));
+    res.redirect(302, back('/admin/users', { error: `تعذّر التنظيف: ${error?.code || error?.message}` }));
   }
 });
 

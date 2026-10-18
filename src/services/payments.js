@@ -1,5 +1,5 @@
 import { pool } from '../db/client.js';
-import { DEFAULT_CURRENCY, DEFAULT_PAYMENT_METHODS, SITE_CURRENCIES, isUuid } from '../constants.js';
+import { DEFAULT_CURRENCY, DEFAULT_PAYMENT_METHODS, SITE_CURRENCIES, WHATSAPP_COUNTRIES, isUuid } from '../constants.js';
 
 /**
  * الدفع اليدوي خارج المنصة + إدارة الطلبات:
@@ -24,6 +24,26 @@ const WHATSAPP_REGEX = /^(00218|\+?218|0)?9[124]\d{7}$/;
 
 function isValidWhatsapp(value) {
   return WHATSAPP_REGEX.test(value);
+}
+
+/**
+ * تحويل أي صيغة مدخلة (محلية/دولية/00) إلى الصيغة الدولية الكاملة +218....
+ * يُستخدم مع دولة مختارة من القائمة (نفس منطق صفحة التسجيل).
+ */
+export function toInternationalWhatsapp(value, countryCode = 'LY') {
+  let digits = String(value ?? '').replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+
+  const country = WHATSAPP_COUNTRIES.find((item) => item.code === countryCode) || WHATSAPP_COUNTRIES[0];
+  if (country && digits.startsWith(country.dial)) {
+    const local = digits.slice(country.dial.length).replace(/^0+(?=\d)/, '');
+    if (country.lengths.includes(local.length)) digits = country.dial + local;
+  } else {
+    const local = digits.replace(/^0+(?=\d)/, '');
+    if (country.lengths.includes(local.length)) digits = country.dial + local;
+  }
+
+  return `+${digits}`;
 }
 
 /** كود تفعيل من 6 أرقام، فريد بين طلبات الدفع. */
@@ -152,7 +172,14 @@ export async function removePaymentMethod(code) {
 export async function createPaymentRequest(userId, input = {}) {
   const planCode = String(input.plan_code || '').trim().slice(0, 100);
   const methodCode = String(input.method_code || '').trim().toLowerCase().slice(0, 50);
-  const whatsappNumber = normalizeWhatsapp(input.whatsapp_number);
+  // الدولة من القائمة (نفس قائمة التسجيل) — تُستخدم لتطبيع الرقم للصيغة الدولية
+  const countryCode = WHATSAPP_COUNTRIES.some((item) => item.code === input.wa_country) ? input.wa_country : 'LY';
+  const country = WHATSAPP_COUNTRIES.find((item) => item.code === countryCode);
+  // الرقم بأي صيغة (محلي/دولي/00) — يُطبَّع دولياً قبل الحفظ والتحقق
+  const fullNumber = toInternationalWhatsapp(input.whatsapp_number, countryCode);
+  const digitsOnly = fullNumber.replace(/\D/g, '');
+  const localPart = digitsOnly.startsWith(country.dial) ? digitsOnly.slice(country.dial.length) : digitsOnly;
+  const whatsappNumber = fullNumber;
 
   const [{ rows: planRows }, methods] = await Promise.all([
     pool.query('SELECT code, title, price, tokens FROM plans WHERE code = $1 AND is_active = true', [planCode]),
@@ -164,8 +191,8 @@ export async function createPaymentRequest(userId, input = {}) {
   const method = methods.find((item) => item.code === methodCode);
   if (!method) throw badInput('طريقة الدفع غير متاحة — حدّث الصفحة.', 'BAD_METHOD');
   if (Number(plan.price) <= 0) throw badInput('هذه الباقة مجانية — لا تحتاج طلب دفع.', 'BAD_PLAN');
-  if (!whatsappNumber || !isValidWhatsapp(whatsappNumber)) {
-    throw badInput(`رقم الواتساب غير صالح: "${whatsappNumber}". الصيغ المقبولة: 0912345678 أو +218912345678 أو 00218912345678.`, 'BAD_WHATSAPP');
+  if (!whatsappNumber || (!isValidWhatsapp(whatsappNumber) && !country.lengths.includes(localPart.length))) {
+    throw badInput(`رقم واتساب ${country.name} يتكون من ${country.lengths.join(' أو ')} أرقام بعد مفتاح الدولة +${country.dial}.`, 'BAD_WHATSAPP');
   }
 
   const { rows: pending } = await pool.query(

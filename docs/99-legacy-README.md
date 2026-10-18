@@ -308,12 +308,17 @@ settings.site_currency -- عملة الموقع: LYD أو USD (تظهر في ك�
 
 | القطعة | التفاصيل |
 | --- | --- |
-| **مفتاح الإرسال (سرّي)** | يُقرأ من ملف حساب الخدمة `*firebase-adminsdk*.json` في جذر المشروع تلقائياً (`findServiceAccountFile`) — **لا يُنسخ إلى `.env`** ومستثنى من `.gitignore` |
+| **مفتاح الإرسال (سرّي)** | يُقرأ من ملف حساب خدمة خارج المشروع عبر `FIREBASE_SERVICE_ACCOUNT_FILE` (مثال: `~/.config/zena/…`) — وخط نجاة: البحث في الجذر بتحذير صريح. **لا يُنسخ إلى `.env`** ولا يُرفع إلى Git |
 | **مفاتيح الواجهة (عامة)** | في ملف البيئة `FIREBASE_*` مع بقية الإعدادات — تعديلها يكون في `.env` |
 | **مسار التفعيل** | **محذوف من الواجهة** بقرار المنصة — أُزيل زر «تفعيل إشعارات الهاتف» من قائمة الجرس. `public/js/push-notifications.js` لم يُحذف من القرص (يرجع فوراً بلا الزر). وهذا **لا يُلغي** ما هو مفعّل سلفاً (انظر الملاحظة) |
 | **المسارات** | `GET /api/firebase-config` · `POST /api/notifications/register` · `/unregister` |
 
 مسار التنبيه: `notifyUser()` ← حفظ في `notifications` ← `sendPushToUser()` ← FCM → التوكنات الميتة تُحذف تلقائياً.
+
+> **واجهة التهيئة (firebase-admin v14):** `initializeApp` + `cert` من جذر الحزمة و`getMessaging`
+> من `firebase-admin/messaging`. النمط القديم (`admin.apps` / `admin.credential` / `admin.messaging`)
+> أُزيل في v14 وكان يفشل بصمتاً عند الإرسال — أُصلح ومغطى باختبار حارس في `scripts/unit-tests.mjs`
+> (والتحقق الحيّ: `sendPushToTokens` بتوكن وهمي يعيد `failed:1` بلا `skipped`).
 
 > **الأجهزة المسجّلة سلفاً ما زالت تستقبل الإشعارات**: الـ Service Worker
 > (`public/firebase-messaging-sw.js`) والتوكنات في `device_tokens` والإرسال من الخادم

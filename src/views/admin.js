@@ -248,11 +248,6 @@ export function renderAdminHome({
     <td>${escapeHtml(formatDate(user.created_at))}</td>`
   );
 
-  const failedAlert =
-    Number(counts.ai_failed) > 0
-      ? `<div class="alert"><b>تنبيه:</b> ${escapeHtml(formatNumber(counts.ai_failed))} طلباً فشل عند مزوّدي الذكاء الاصطناعي. راجع <code>سجل الاستهلاك</code> عمود «الحالة»، أو شغّل <code>npm run doctor</code> لفحص المفاتيح من الخادم.</div>`
-      : '';
-
   // ملخص الأسبوع للمخطط الدائري + هل الفلتر مفعّل الآن؟
   const weekTokens = days.reduce((total, day) => total + (Number(day.tokens) || 0), 0);
   const weekEvents = days.reduce((total, day) => total + (Number(day.events) || 0), 0);
@@ -307,19 +302,30 @@ export function renderAdminHome({
     <p class="muted">
       <b>نشط:</b> دخل خلال آخر ${escapeHtml(String(activity.rules.days))} أيام وباقته سارية
       (فترة سماح ${escapeHtml(String(activity.rules.graceHours))} ساعة بعد الانتهاء).
-      <b>غير نشط:</b> خمول أو باقة منتهية. <b>موقوف:</b> خارج التصنيفين — للهدايا ومتابعة المشاكل.
+      <b>خامل:</b> لم يدخل منذ أكثر من ${escapeHtml(String(activity.rules.days))} أيام وباقته سارية.
+      <b>منتهي باقته:</b> دخل حديثاً لكن باقته انتهت وتجاوزت فترة السماح.
+      <b>متوقف:</b> لا دخول منذ أكثر من ${escapeHtml(String(activity.rules.stoppedDays || 30))} يوماً — بغض النظر عن الباقة.
+      الأولوية: متوقف أولاً، ثم نشط، ثم منتهي، ثم خامل.
     </p>
     <div class="table-scroll">${renderTable({
       columns: ['العدد', 'الفئة', 'النسبة'],
       rows: [
-        cell(activity.active, '/admin/users?filter=activity_active', 'نشط — للهدايا والمكافآت'),
-        cell(activity.inactive, '/admin/users?filter=activity_idle', 'غير نشط — إجمالي', ' btn-danger'),
-        cell(activity.idle, '/admin/users?filter=activity_idle', `منها: خمول (لا دخول ${escapeHtml(String(activity.rules.days))} أيام)`),
-        cell(activity.planExpired, '/admin/users?filter=activity_plan_expired', `منها: باقة منتهية (تجاوزت ${escapeHtml(String(activity.rules.graceHours))} ساعة سماح)`),
-        cell(activity.suspended, '/admin/users?filter=activity_suspended', 'موقوف — خارج التصنيف')
+        cell(activity.active, '/admin/users?filter=activity_active', 'نشط'),
+        `<td><span class="btn btn-sm btn-danger">${escapeHtml(formatNumber(activity.inactive))}</span></td>
+          <td>غير نشط — إجمالي (خامل + منتهي + متوقف)</td>
+          <td>${pct(activity.inactive)}</td>`,
+        cell(activity.idle, '/admin/users?filter=activity_idle', `منها: خامل (لا دخول ${escapeHtml(String(activity.rules.days))} أيام وباقته سارية)`),
+        cell(activity.planExpired, '/admin/users?filter=activity_plan_expired', `منها: منتهي باقته (دخول حديث + تجاوز ${escapeHtml(String(activity.rules.graceHours))} ساعة سماح)`),
+        cell(activity.stopped, '/admin/users?filter=activity_stopped', `منها: متوقف (لا دخول ${escapeHtml(String(activity.rules.stoppedDays || 30))} يوماً — بغض النظر عن الباقة)`)
       ],
       emptyMessage: ''
     })}</div>
+    <form method="post" action="/admin/users/purge-stopped-files" data-confirm="حذف ملفات كل الحسابات المتوقفة (30+ يوم غياب)؟ سطور files فقط — لا مساس بأي بيانات أخرى.">
+      <div class="form-actions" style="margin-top:10px">
+        <button class="btn btn-sm btn-danger" type="submit">حذف ملفات المتوقفين الآن (${escapeHtml(formatNumber(activity.stopped))})</button>
+        <span class="muted">تلقائي عند الإقلاع + كل 24 ساعة — هذا للتشغيل الفوري.</span>
+      </div>
+    </form>
   </div>`;
       })()
     : '';
@@ -335,7 +341,6 @@ export function renderAdminHome({
 
   const body = `
   <div class="grid">${stats}</div>
-  ${failedAlert}
   ${activityCard}
   ${
     sent
@@ -550,12 +555,10 @@ export function renderAdminUsers({
 
   const filters = [
     ['all', 'الكل'],
-    ['active', 'النشطة'],
-    ['disabled', 'الموقوفة'],
-    ['activity_active', '⭐ نشطون (هدايا)'],
-    ['activity_idle', 'غير نشط — خمول'],
-    ['activity_plan_expired', 'غير نشط — باقة منتهية'],
-    ['activity_suspended', 'موقوفون (تصنيف)']
+    ['activity_active', 'نشط'],
+    ['activity_idle', 'خامل'],
+    ['activity_plan_expired', 'منتهي باقته'],
+    ['activity_stopped', 'متوقف']
   ];
 
   // (M2: الرمز لا يظهر في أي رابط — الدخول بالكوكي HttpOnly فقط).
@@ -580,12 +583,12 @@ export function renderAdminUsers({
       .join('')}
   </form>`;
 
-  // شارة تصنيف النشاط لكل باحث (تعمل مع فلتر القائمة المنسدلة في الاستعلام)
+  // شارة حالة الحساب لكل باحث (تلقائي بالكامل — بلا تدخل من المدير)
   const activityBadges = {
     active: '<span class="badge badge-active" title="دخل خلال آخر 7 أيام وباقته سارية">نشط</span>',
-    idle: '<span class="badge badge-off" title="لم يدخل منذ أكثر من 7 أيام">غير نشط: خمول</span>',
-    plan_expired: '<span class="badge badge-error" title="انتهت باقته وتجاوزت فترة السماح 48 ساعة">غير نشط: باقة منتهية</span>',
-    suspended: '<span class="badge badge-off">موقوف (الإدارة)</span>'
+    idle: '<span class="badge badge-off" title="لم يدخل منذ أكثر من 7 أيام وباقته سارية">خامل</span>',
+    plan_expired: '<span class="badge badge-error" title="دخل حديثاً لكن انتهت باقته وتجاوزت فترة السماح 48 ساعة">منتهي باقته</span>',
+    stopped: '<span class="badge badge-off" title="لا دخول منذ أكثر من 30 يوماً">متوقف</span>'
   };
   const activityBadge = (user) => activityBadges[user.activity_status] || '';
 
@@ -617,15 +620,6 @@ export function renderAdminUsers({
     <td class="row-actions">
       <a class="btn btn-sm" href="/admin/users/${user.id}${tokenQuery}">تفاصيل</a>
       ${
-        user.role === 'admin'
-          ? '<span class="badge badge-admin">محمي</span>'
-          : `<form class="inline-form" method="post" action="/admin/users/${user.id}/status${tokenQuery}">
-        <input type="hidden" name="active" value="${user.is_active ? '0' : '1'}" />
-        <input type="hidden" name="return" value="users" />
-        <button class="btn btn-sm ${user.is_active ? 'btn-danger' : 'btn-quiet'}" type="submit">${user.is_active ? 'إيقاف' : 'تفعيل'}</button>
-      </form>`
-      }
-      ${
         user.role === 'admin' || (account && account.id === user.id)
           ? ''
           : `<form class="inline-form" method="post" action="/admin/users/${user.id}/delete${tokenQuery}"
@@ -653,6 +647,17 @@ export function renderAdminUsers({
   ${notice}${errorNotice}
   <div class="card">
     <h2>الباحثون (${escapeHtml(formatNumber(total))})</h2>
+    <p class="muted">حسابات المديرين مستثناة من القائمة والتصنيف — الحالات (نشط/خامل/منتهي/متوقف) للباحثين فقط.</p>
+    <details class="rules-note"${filter && filter !== 'all' ? '' : ' open'}>
+      <summary>قواعد حالات الحسابات — تصنيف تلقائي بالكامل</summary>
+      <div class="rules-note-body">
+        <p><b>نشط:</b> دخل خلال آخر 7 أيام <b>و</b> باقته سارية (تشمل فترة سماح 48 ساعة بعد انتهاء الباقة).</p>
+        <p><b>خامل:</b> لم يدخل منذ أكثر من 7 أيام <b>و</b> باقته سارية.</p>
+        <p><b>منتهي باقته:</b> دخل خلال آخر 7 أيام لكن باقته انتهت ومرّت أكثر من 48 ساعة سماح دون تجديد — الحساب بلا باقة (NULL) يُعامل كسارية لا منتهية.</p>
+        <p><b>متوقف:</b> لم يدخل منذ أكثر من 30 يوماً — بغض النظر عن الباقة (غياب طويل). تُحذف ملفاته المرفوعة على المنصة فوراً (سطور files فقط).</p>
+        <p class="muted">الأولوية: متوقف أولاً، ثم نشط (شرطان معاً)، ثم منتهي (دخول حديث + باقة منتهية)، ثم خامل (الباقي). النظام يحوّل الحساب بين الحالات وحده — بلا زر إيقاف. المديرون مستثنون من الإحصائيات.</p>
+      </div>
+    </details>
     ${toolbar}
     ${renderTable({
       columns: ['الباحث', 'الجامعة / المجال', 'الباقة', 'النقاط', 'التسجيل', 'الإجراءات'],
@@ -1217,7 +1222,6 @@ export function renderAdminUserDetail({
 
   const badges = [
     user.role === 'admin' ? '<span class="badge badge-admin">مدير</span>' : '',
-    user.is_active ? '<span class="badge badge-active">نشط</span>' : '<span class="badge badge-off">موقوف</span>',
     user.deleted ? '<span class="badge badge-error">محذوف</span>' : '',
     `<span class="badge badge-plan">${escapeHtml(user.plan_code || 'بدون باقة')}</span>`
   ].join(' ');
@@ -1310,13 +1314,10 @@ export function renderAdminUserDetail({
         isSelf || user.role === 'admin'
           ? `<p class="muted">${
               user.role === 'admin'
-                ? 'حساب المدير محمي: لا يمكن إيقافه أو حذفه — يغيّر بريده فقط من الإعدادات.'
-                : 'هذا حسابك أنت — الإيقاف والحذف معطّلان لحمايتك من قفل اللوحة على نفسك.'
+                ? 'حساب المدير محمي: لا يمكن حذفه — يغيّر بريده فقط من الإعدادات.'
+                : 'هذا حسابك أنت — الحذف معطّل لحمايتك من قفل اللوحة على نفسك.'
             }</p>`
-          : `<form class="inline-form" method="post" action="${base}/status${token}">
-        <input type="hidden" name="active" value="${user.is_active ? '0' : '1'}" />
-        <button class="btn ${user.is_active ? 'btn-danger' : 'btn-quiet'}" type="submit">${user.is_active ? 'إيقاف الحساب' : 'تفعيل الحساب'}</button>
-      </form>`
+          : ''
       }
       <a class="btn btn-quiet" href="/admin/users${token}">عودة لقائمة الباحثين</a>
     </div>

@@ -122,6 +122,23 @@ function parseJsonLoose(text) {
   }
 }
 
+/** تحديث حالة المشرف (ذاكرة/مهمة/تنبيه) بعد أكتمال الرد.
+ *  الجدول `supervisor_memory` لا يملك عمود `status`، لذا تعمل الدالة على
+ *  حقول مقبولة: memory (1500 حرف)، open_task (300 حرف)، strikes. */
+export async function updateSupervisorState(userId, { memory = '', openTask = '', strikes = 0 } = {}) {
+  const safeStrikes = Number.isFinite(strikes) ? Math.max(0, Math.floor(strikes)) : 0;
+  await pool.query(
+    `INSERT INTO supervisor_memory (user_id, memory, open_task, strikes, updated_at)
+     VALUES ($1, $2, $3, $4, NOW())
+     ON CONFLICT (user_id) DO UPDATE
+       SET memory = EXCLUDED.memory,
+           open_task = EXCLUDED.open_task,
+           strikes = EXCLUDED.strikes,
+           updated_at = NOW()`,
+    [userId, String(memory || '').slice(0, 1500), String(openTask || '').slice(0, 300), safeStrikes]
+  );
+}
+
 /**
  * تلخيص جلسة منتهية: يستدعي نموذجاً رخيصاً ويعيد { memory, openTask } أو null.
  * يفشل بصمت (null) حتى لا يُفشل ختام الجلسة ولا يُكلّف الباحث شيئاً.

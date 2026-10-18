@@ -132,20 +132,25 @@ export function isFcmServerConfigured() {
 
 let adminMessagingPromise = null;
 
-/** تهيئة Firebase Admin كسولاً (dynamic import حتى لا ينهار الخادم بدون الاعتماد). */
+/**
+ * تهيئة Firebase Admin كسولاً (dynamic import حتى لا ينهار الخادم بدون الاعتماد).
+ *
+ * firebase-admin v14: الـ namespace القديم (`admin.apps` / `admin.credential` /
+ * `admin.messaging`) لم يعد موجوداً — استخدامه كان يرمي TypeError فتحتجزه try/catch
+ * ويرجع null ⇒ الإرسال يفشل بصمتاً (الإشعار يُحفظ داخل الموقع فقط). التصديرات الآن:
+ * `initializeApp/getApps/cert` من الجذر، و`getMessaging` من مسار `firebase-admin/messaging`.
+ */
 async function adminMessaging() {
   if (!isFcmServerConfigured()) return null;
   if (!adminMessagingPromise) {
     adminMessagingPromise = (async () => {
       try {
-        const admin = (await import('firebase-admin')).default;
+        const { initializeApp, getApps, cert } = await import('firebase-admin');
+        const { getMessaging } = await import('firebase-admin/messaging');
         const { projectId, clientEmail, privateKey } = fcmServerConfig();
-        if (admin.apps.length === 0) {
-          admin.initializeApp({
-            credential: admin.credential.cert({ projectId, clientEmail, privateKey })
-          });
-        }
-        return admin.messaging();
+        const existing = getApps().find((app) => app.name === '[DEFAULT]');
+        const app = existing || initializeApp({ credential: cert({ projectId, clientEmail, privateKey }) });
+        return getMessaging(app);
       } catch (error) {
         console.warn(`تعذّرت تهيئة Firebase Admin للإشعارات: ${error.message}`);
         return null;
