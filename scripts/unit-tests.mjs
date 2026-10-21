@@ -1356,6 +1356,18 @@ test('maxQuestionsFor: سقف محسوب من الأجزاء (لا صفر ولا
   assert.equal(maxQuestionsFor(planParts(THESIS_SAMPLE)), total, 'السقف ثابت لنفس الخطة');
 });
 
+test('maxQuestionsFor: بحث طويل (عدة أجزاء/فصول) ⇒ سقف طويل يتناسب مع الحجم', () => {
+  // ٢٥ فصلاً، كل فصل ≈ ١٥٠٠ حرف ⇒ ٢٥ جزءاً × سؤال ≈ ٢٥ سؤالاً
+  const long = Array.from({ length: 25 }, (_, i) =>
+    `الفصل ${i + 1}: العنوان ${i + 1}\n${'y'.repeat(1500)}\n`
+  ).join('');
+  const parts = planParts(long);
+  const total = maxQuestionsFor(parts);
+  assert.ok(parts.length >= 20, 'البحث الطويل ينقسم إلى أجزاء متعددة');
+  assert.ok(total > 14, 'بحث طويل ⇒ سقف أكبر من ١٤ سؤالاً');
+  assert.ok(total <= 36, 'سقف طويل ضمن الحد الأعلى ٣٦');
+});
+
 test('applyQuestionToState: كل سؤال يزيد العدّاد ويحفظ نصّه والجزء', () => {
   const parts = planParts(THESIS_SAMPLE);
   let state = { asked: 0, coveredParts: [], askedQuestions: [], parts };
@@ -1367,12 +1379,12 @@ test('applyQuestionToState: كل سؤال يزيد العدّاد ويحفظ ن�
 
   state = applyQuestionToState(state, { question: 'ما منهجك؟', partKey: 'method' });
   assert.equal(state.asked, 2, 'العدّاد يزيد مرة أخرى');
-  assert.deepEqual(state.coveredParts, ['intro', 'method'], 'الجزآن مغطّيان');
+  assert.deepEqual(state.coveredParts, ['intro'], 'المقدمة covered فقط؛ المنهجية حصّتها سؤالان');
 
-  // تكرار نفس الجزء ⇒ لا يتضاعف في coveredParts (بل يُعدّ في counter)
+  // السؤال الثاني في 'method' يستنفد حصّته (سؤالان) ⇒ الجزء يُغطّى الآن
   state = applyQuestionToState(state, { question: 'سؤال آخر في المنهجية؟', partKey: 'method' });
   assert.equal(state.asked, 3, 'كل سؤال يُحتسب');
-  assert.deepEqual(state.coveredParts, ['intro', 'method'], 'الجزء المغطّى لا يتكرر في القائمة');
+  assert.deepEqual(state.coveredParts, ['intro', 'method'], 'الجزآن مغطّيان بعد استنفاد حصّة المنهجية');
 });
 
 test('applyQuestionToState: لا يُكسر العدّاد ولا يفسد الحالة القديمة', () => {
@@ -1395,7 +1407,15 @@ test('nextPendingPart: يختار أول جزء غير مغطّى ثم ينته�
   for (const part of parts) {
     state = applyQuestionToState(state, { question: 'س؟', partKey: part.key });
   }
-  assert.equal(nextPendingPart(state), null, 'بعد تغطية كل الأجزاء ⇒ لا جزء متبقٍ (⇒ تقييم نهائي)');
+  // 'method' و'results' حصّتهما سؤالان (كثافة) ⇒ dopo سؤال واحد لكل منهما ما تزال مفتوحة
+  const stillOpen = nextPendingPart(state);
+  assert.ok(stillOpen && (stillOpen.key === 'method' || stillOpen.key === 'results'),
+    'جزء ذي حصّة غير مستنفدة يبقى مطلوباً (got: ' + (stillOpen?.key ?? '-') + ')');
+  // استنفاد حصّة 'method' ثم 'results' ⇒ يغطّيان تباعاً
+  state = applyQuestionToState(state, { question: 'س؟', partKey: 'method' });
+  assert.equal(nextPendingPart(state)?.key, 'results', 'الجزء التالي ذي حصّة غير مستنفدة');
+  state = applyQuestionToState(state, { question: 'س؟', partKey: 'results' });
+  assert.equal(nextPendingPart(state), null, 'بعد استنفاد كل الحصص ⇒ لا جزء متبقٍ (⇒ تقييم نهائي)');
 });
 
 test('extractQuestionFromReply: يستخرج السؤال ولا يعدّ الردود بلا استفهام', () => {

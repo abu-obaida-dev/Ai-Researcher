@@ -47,28 +47,89 @@ const SECTION_PATTERNS = [
   { key: 'references', label: 'المراجع وقائمة المصادر', re: /مراجع|قائمة المصادر/i }
 ];
 
-/** حصّة الأسئلة لكل جزء حسب كثافة محتواه وعلمهيته. */
-const QUESTIONS_PER_PART = {
-  intro: 1,
-  problem: 2,
-  method: 3,
-  results: 3,
-  discussion: 2,
-  references: 1
-};
-
 /** الحد الأدنى لعدد الأسئلة في الجلسة كلها (حتى لو كان الملف صغيراً). */
 const MIN_QUESTIONS = 6;
 
-/** لا يوجد سقف أعلى كلي ثابت: العدد يُحدَّد من خطة الأقسام (لا يُغلِق عند 9 أو 15). */
-const MAX_QUESTIONS = Infinity;
+/** سقف أعلى للجلسة كلها: مناقشة حقيقية، لا استجواب لا ينتهي. */
+const MAX_QUESTIONS = 36;
 
-/** ترتيب العرض: الترتيب المنطقي للبحث لا ترتيب ظهوره في الملف. */
-const PART_ORDER = ['intro', 'problem', 'method', 'results', 'discussion', 'references'];
+/**
+ * كل هذا العدد من أحرف الجزء ≈ سؤال واحد فيه (≈ ٣ صفحات: كل صفحة ~٩٠٠ حرف
+ * في estimatePages). هذا هو **مقياس عدد الأسئلة**: بحث من ١٠٠ صفحة ⇒ ~٣٠ سؤالاً،
+ * وبحث من ٢٠ صفحة ⇒ ~٧ أسئلة. (كان قبل ذلك ٦ أسئلة ثابتة لكل بحث.)
+ */
+const CHARS_PER_QUESTION = 2800;
+
+/** أقصى حصّة للجزء الواحد: كتلة ضخمة لا تبتلع المناقشة كلها. */
+const MAX_QUOTA_PER_PART = 5;
+
+/** أقصى عدد أجزاء في الخطة (حماية من فهرس/عناوين متكرّرة في ملف ضخم). */
+const MAX_PLAN_PARTS = 60;
+
+/** حجم الجزء الاحتياطي حين لا تُوجد عناوين في النص المستخرج. */
+const FALLBACK_CHUNK_CHARS = CHARS_PER_QUESTION * 2;
+
+/** كلمات بداية عناوين الفصول/المقاطع في الرسائل العربية. */
+const CHAPTER_WORDS = [
+  'الفصل ',
+  'الباب ',
+  'المبحث ',
+  'المطلب ',
+  'الجزء ',
+  'المحور ',
+  'الملحق ',
+  'فصل ',
+  'باب '
+];
+
+/**
+ * ترقيم القسم: «١.٢ منهجية» أو «2) …» أو «3: …» — **بلا شُرَطة** لأن
+ * «3- …» في الرسائل عنصر قائمة لا عنواناً.
+ */
+const NUMBERED_HEADING_RE = /^(?:[\(\[]?\s*[\d٠-٩]{1,3}\s*[\)\].:]\s*\S|[\d٠-٩]{1,3}(?:\.[\d٠-٩]{1,3})+\s+\S)/u;
+
+/** سطر فهرس المحتويات: نقاط قائدة («المقدمة ...... ٥») أو رقم صفحة في آخره. */
+function looksLikeToc(line) {
+  const l = String(line || '');
+  return /\.{3,}|…/.test(l) || /\s[\d٠-٩]{1,4}\s*$/u.test(l.trim());
+}
 
 function isChapterLine(line) {
   const l = String(line || '').trim();
-  return l.startsWith('الفصل ') || l.startsWith('الباب ') || l.startsWith('المبحث ') || l.startsWith('الجزء ');
+  return CHAPTER_WORDS.some((word) => l.startsWith(word));
+}
+
+/**
+ * هل السطر عنوان قسم فعلي؟ (لا سطر فهرس ولا سطر بيانات ولا جملة عادية)
+ * السطر الطويل جملة عادية بالضرورة ⇒ ليس عنواناً.
+ */
+function isHeadingLine(line) {
+  const l = String(line || '').trim();
+  if (!l || l.length > 120) return false;
+  if (isChapterLine(l)) return true; // عناوين الفصول أولوية على قاعدة "ينتهي برقم"
+  if (looksLikeToc(l)) return false; // فهرس المحتويات («… ..... ٥») ليس قسمًا
+  if (!NUMBERED_HEADING_RE.test(l)) return false;
+
+  const body = l.replace(NUMBERED_HEADING_RE, '').trim();
+  if (body.length < 3) return false;
+  const separators = (l.match(/[,،|؛]/gu) || []).length;
+  if (separators >= 3) return false; // سطر جدول بيانات لا عنوان
+  if (/^[\d٠-٩\s.\-–↑%]+$/u.test(body)) return false; // أرقام فقط
+  return true;
+}
+
+/** مفتاح فريد للجزء: نسمح بتكرار المفتاح المنطقي («intro#2») للفصول المكرّرة. */
+function uniqueKey(base, taken) {
+  const key = String(base || 'part').trim() || 'part';
+  if (!taken.has(key)) {
+    taken.add(key);
+    return key;
+  }
+  let n = 2;
+  while (taken.has(`${key}#${n}`)) n += 1;
+  const out = `${key}#${n}`;
+  taken.add(out);
+  return out;
 }
 
 function keyOf(title, body) {
@@ -84,9 +145,17 @@ function keyOf(title, body) {
 }
 
 /**
- * يقسّم نص البحث إلى أجزاء منطقية (مقدمة، مشكلة، منهج، نتائج، مناقشة، مراجع)
- * استناداً إلى عناوين الفصول/المقاطع، مع اعتبار على الكلمات الدالة في المتن إذا لم توجد عناوين.
- * يعيد الأجزاء حسب الترتيب المنطقي PART_ORDER، كل جزء له key و label.
+ * يقسّم نص البحث إلى أجزائه الفعلية كما وردت في الملف (فصول/مقاطع/عناوين
+ * مرقّمة)، كل جزء بمفتاحه وعنوانه وحجم متنه ووزنه العلمي.
+ *
+ * التغيير الجوهري (٢١ أكتوبر ٢٠٢٦): كان التقسيم يعطي **٦ أجزاء كحدّ أقصى
+ * دائماً** (المفاتيح من أنماط الأقسام الستة وحدها) ⇒ سقف الأسئلة = ٦ لكل بحث
+ * مهما كان حجمه (١٠٠ صفحة = ٢٠ صفحة). الآن:
+ *   - كل عنوان فعلي في الملف = جزء مستقل (بحدّ ٦٠ جزءاً).
+ *   - تُهمَل أسطر فهرس المحتويات وعناوين الجداول وعناصر القوائم («٣- …»).
+ *   - إن لم توجد عناوين في النص المستخرج: يُقسَّم المتن بالحجم (chunkBySize)
+ *     فلا يسقط بحث ضخم إلى عدد أسئلة صغير.
+ *   - الترتيب = ترتيب البحث نفسه (كما يمشي المناقِش في الورقة).
  */
 export function planParts(text) {
   const raw = String(text || '');
@@ -94,43 +163,102 @@ export function planParts(text) {
 
   const lines = raw.split('\n');
   const blocks = [];
-  let current = null;
+  let current = { title: '', body: '' };
   for (const line of lines) {
-    if (isChapterLine(line)) {
-      if (current) blocks.push(current);
+    if (isHeadingLine(line)) {
+      if (current.title || current.body.trim()) blocks.push(current);
       current = { title: line.trim(), body: '' };
-    } else if (current) {
+    } else {
       current.body += (current.body ? '\n' : '') + line;
     }
   }
-  if (current) blocks.push(current);
+  if (current.title || current.body.trim()) blocks.push(current);
 
-  const seen = new Set();
+  const taken = new Set();
   const parts = [];
-  for (const b of blocks) {
-    const key = keyOf(b.title, b.body);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    const def = SECTION_PATTERNS.find((p) => p.key === key);
-    parts.push({ key, label: b.title || def?.label || key, text: b.body });
+  for (const block of blocks) {
+    const title = String(block.title || '').replace(/\s+/g, ' ').trim();
+    const body = String(block.body || '').trim();
+    const canonical = keyOf(title, body);
+    // كتلة بلا متن وبلا عنوان معروف (عنوان شارد/سطر فهرس) ليست جزءاً.
+    if (!body && !canonical) continue;
+
+    const label = (
+      title ||
+      SECTION_PATTERNS.find((pattern) => pattern.key === canonical)?.label ||
+      `الجزء ${parts.length + 1}`
+    ).slice(0, 90);
+
+    // العنوان نفسه مرّتين (فهرس ثم فصل حقيقي): نُبقي الجزء الأكبر متناً.
+    const twin = parts.findIndex((part) => part.label === label);
+    if (twin !== -1) {
+      if (body.length > parts[twin].chars) {
+        parts[twin].chars = body.length;
+        parts[twin].weight = partWeight(label, body);
+      }
+      continue;
+    }
+
+    if (parts.length >= MAX_PLAN_PARTS) break;
+    parts.push({
+      key: uniqueKey(canonical || `part${parts.length + 1}`, taken),
+      label,
+      chars: body.length,
+      weight: partWeight(label, body)
+    });
   }
 
-  if (parts.length) {
-    return PART_ORDER.filter((k) => parts.some((p) => p.key === k)).map((k) => parts.find((p) => p.key === k));
-  }
+  if (parts.length) return parts;
 
-  const bodyKeys = PART_ORDER.filter((k) => SECTION_PATTERNS.find((p) => p.key === k)?.re.test(raw));
-  return bodyKeys.map((k) => ({ key: k, label: SECTION_PATTERNS.find((p) => p.key === k)?.label || k }));
+  // بلا عناوين: تقسيم بالحجم ⇒ الأسئلة تظل متناسبة مع حجم البحث.
+  return chunkBySize(raw);
 }
 
 /**
+ * تقسيم احتياطي بالحجم: كل FALLBACK_CHUNK_CHARS حرفاً جزءاً، ويأخذ كل جزء
+ * مفتاحه المنطقي من كلماته إن أمكن (منهج/نتائج…) وإلا «partN».
+ */
+function chunkBySize(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return [];
 
-/** يقدّر كثافة محتوى الجزء: يزيد «وزن» السؤال إذا وُجدت في العنوان أو النص
- *  كلمات تشير إلى منهج، نتائج، إحصاء، نموذج، فرضية، أو عينة. */
+  const chunks = [];
+  for (let start = 0; start < raw.length && chunks.length < MAX_PLAN_PARTS; start += FALLBACK_CHUNK_CHARS) {
+    chunks.push(raw.slice(start, start + FALLBACK_CHUNK_CHARS));
+  }
+
+  const taken = new Set();
+  return chunks.map((slice, index) => {
+    const canonical = keyOf('', slice);
+    const label = (
+      SECTION_PATTERNS.find((pattern) => pattern.key === canonical)?.label || `الجزء ${index + 1}`
+    ).slice(0, 90);
+    return {
+      key: uniqueKey(canonical || `part${index + 1}`, taken),
+      label,
+      chars: slice.length,
+      weight: partWeight(label, slice)
+    };
+  });
+}
+
+/**
+ * خطة الجلسة من نصّ البحث: الأجزاء + تقدير عدد الصفحات (لإعلام المناقِش والواجهة
+ * بأصل العدد المحسوب: «بحثك ≈ ١٢٠ صفحة ⇒ خطة ٣٠ سؤالاً»).
+ */
+export function buildDefensePlan(text) {
+  const raw = String(text || '');
+  const parts = planParts(raw);
+  return { parts, pages: raw.trim() ? estimatePages(raw) : 0 };
+}
+
+
+/** يقدّر كثافة محتوى الجزء: يزيد «وزن» الجزء إذا وُجدت في عنوانه أو نصّه
+ *  كلمات تشير إلى منهج أو نتائج أو إحصاء أو نموذج أو فرضية أو عينة. */
 function partWeight(label, text) {
   const t = String(label || '') + ' ' + String(text || '');
   let w = 0;
-  const words = ['منهج','طرائق','إجراءات','أسلوب البحث','عينة','مجتمع','إحصاء','تحليل','نتائج','جداول','معاملات','بيانات','فرضية','فرضيات','تساؤل','غرض','نتيجة','أهمية البحث','نموذج'];
+  const words = ['منهج','طرائق','إجراءات','أسلوب البحث','عينة','مجتمع','إحصاء','تحليل','نتائج','جداول','معاملات','بيانات','فرضية','فرضيات','تساؤل','غرض','نتيجة','أهمية البحث','نموذج','مناقش','توصيات'];
   for (const w_ of words) {
     if (new RegExp(w_, 'i').test(t)) w++;
   }
@@ -138,32 +266,97 @@ function partWeight(label, text) {
 }
 
 /**
- * يقدّر عدد الصفحات من محتوى النص: كل 900 حرف ≈ صفحة واحدة، ويُكثر من التقدير
- * إذا لم تظهر علامات الصفحة (هذا يدل على أن الملف «طويل» حتى لو لم تُرقَم). */
+ * حصّة الأسئلة في الجزء: مشتقّة من **حجم متنه** (سؤال لكل ~٢٨٠٠ حرف ≈ ٣ صفحات)،
+ * ويُضاف سؤال إذا كان الجزء علمياً كثيفاً (منهج/نتائج/إحصاء/مناقشة).
+ *
+ * هذه هي وحدة الحساب الوحيدة لعدد الأسئلة: مجموع حصص الأجزاء = سقف الجلسة
+ * (انظر maxQuestionsFor) — فلا يوجد رقم ثابت يخالف حجم البحث.
+ */
+export function quotaForPart(part = {}) {
+  if (!part || typeof part !== 'object') return 1;
+  const chars = Math.max(0, Number(part.chars) || 0);
+  const weight = Math.max(0, Number(part.weight) || 0);
+  const bySize = Math.ceil(chars / CHARS_PER_QUESTION);
+  const byWeight = weight >= 4 ? 1 : 0;
+  return Math.max(1, Math.min(MAX_QUOTA_PER_PART, bySize + byWeight));
+}
+
+/** عدّاد الأسئلة لكل جزء من الحالة ({} إن لم تكن مُهيّأة). */
+function askedCounts(state = {}) {
+  const raw = state && typeof state === 'object' ? state : {};
+  const byPart = raw.askedByPart && typeof raw.askedByPart === 'object' ? raw.askedByPart : {};
+  const counts = {};
+  for (const [key, value] of Object.entries(byPart)) counts[key] = Math.max(0, Number(value) || 0);
+  return counts;
+}
+
+/** هل استُنفدت حصّة الجزء؟ (يُحترم التتبّع القديم القائم على coveredParts) */
+export function partCovered(state = {}, part = {}) {
+  const raw = state && typeof state === 'object' ? state : {};
+  const key = String(part?.key || '');
+  if (!key) return false;
+
+  if (!raw.askedByPart || typeof raw.askedByPart !== 'object') {
+    return (Array.isArray(raw.coveredParts) ? raw.coveredParts : []).includes(key);
+  }
+  return (askedCounts(raw)[key] || 0) >= quotaForPart(part);
+}
+
+/** الأجزاء المغطّاة فعلاً (حصّتها مستنفدة) — بمفاتيح الخطة. */
+function coveredPartsOf(state = {}) {
+  const raw = state && typeof state === 'object' ? state : {};
+  if (!raw.askedByPart || typeof raw.askedByPart !== 'object') {
+    return Array.isArray(raw.coveredParts) ? [...raw.coveredParts] : [];
+  }
+  const plan = Array.isArray(raw.parts) ? raw.parts : [];
+  const counts = askedCounts(raw);
+  const covered = plan.filter((part) => (counts[part?.key] || 0) >= quotaForPart(part)).map((part) => part.key);
+  const planKeys = new Set(plan.map((part) => part?.key));
+  for (const key of Object.keys(counts)) {
+    if (!planKeys.has(key) && counts[key] > 0) covered.push(key);
+  }
+  return covered;
+}
+
+/** الجزء المطلوب الآن: أول جزء لم تُستنفد حصّته من الأسئلة. */
 export function nextPendingPart(state = {}) {
   const raw = state && typeof state === 'object' ? state : {};
   const plan = Array.isArray(raw.parts) ? raw.parts : [];
   if (!plan.length) return null;
-  const covered = new Set(Array.isArray(raw.coveredParts) ? raw.coveredParts : []);
-  return plan.find((part) => !covered.has(part.key)) || null;
+  return plan.find((part) => !partCovered(raw, part)) || null;
 }
 
 /**
- * يسجّل سؤالاً جديداً في حالة المناقشة: يزيد العدّاد، يحفظ نصّ السؤال،
- * وعلام الجزء الذي غطّاه. يعيد الحالة الجديدة (لا يكتب في القاعدة).
+ * يسجّل سؤالاً جديداً في حالة المناقشة: يزيد العدّاد العام، يحفظ نصّ السؤال،
+ * ويزيد عدّاد الجزء الذي جاء منه السؤال.
+ *
+ * الجزء يُغلق عند **استنفاد حصّته** لا بعد سؤال واحد (جزء المنهجية مثلاً قد
+ * يستحق سؤالين) — هذا ما يجعل المناقشة «جزءاً جزءاً» بمعناها الحقيقي.
  */
 export function applyQuestionToState(state = {}, { question = '', partKey = '' } = {}) {
   const raw = state && typeof state === 'object' ? state : {};
   const asked = Number(raw.asked) || 0;
   const askedQuestions = Array.isArray(raw.askedQuestions) ? [...raw.askedQuestions] : [];
-  const coveredParts = Array.isArray(raw.coveredParts) ? [...raw.coveredParts] : [];
+  const plan = Array.isArray(raw.parts) ? raw.parts : [];
 
   const text = String(question || '').trim();
   if (text) askedQuestions.push(text.slice(0, 400));
-  if (partKey && !coveredParts.includes(partKey)) coveredParts.push(partKey);
 
-  return { ...raw, asked: asked + 1, askedQuestions, coveredParts };
+  const askedByPart = askedCounts(raw);
+  // ترحيل جلسة قديمة: `coveredParts` كانت تعني «سؤال واحد فيه» ⇒ نعتبر حصّته مستنفدة.
+  if (!raw.askedByPart && Array.isArray(raw.coveredParts)) {
+    for (const key of raw.coveredParts) {
+      const part = plan.find((item) => item?.key === key);
+      askedByPart[key] = Math.max(askedByPart[key] || 0, quotaForPart(part || {}));
+    }
+  }
+  if (partKey) askedByPart[partKey] = Math.max(0, Number(askedByPart[partKey]) || 0) + 1;
+
+  const next = { ...raw, asked: asked + 1, askedQuestions, askedByPart };
+  next.coveredParts = coveredPartsOf(next);
+  return next;
 }
+
 
 /**
  * يستخرج كل أسئلة المناقِش من رسائل الجلسة (كل استفهام في ردّ assistant).
@@ -197,24 +390,34 @@ export function extractQuestionsFromMessages(messages = []) {
 }
 
 /**
- * يستنتج الأجزاء المغطّاة من عدد الأسئلة والخطة: نملأ كل جزء حصّته بالترتيب
- * حتى ينتهي العدد. تقدير معقول لجلسات قديمة لا تحمل `coveredParts`.
+ * يستنتج عدّاد الأسئلة لكل جزء من عدد الأسئلة الكلي والخطة: نملأ حصّة كل جزء
+ * بالترتيب حتى ينتهي العدد. تقدير معقول لجلسة لا تحمل `askedByPart`.
+ */
+export function inferAskedByPart(plan = [], questionCount = 0) {
+  const list = Array.isArray(plan) ? plan : [];
+  let remaining = Math.max(0, Number(questionCount) || 0);
+  const counts = {};
+  for (const part of list) {
+    if (remaining <= 0) break;
+    const take = Math.min(quotaForPart(part), remaining);
+    counts[part.key] = take;
+    remaining -= take;
+  }
+  return counts;
+}
+
+/**
+ * يستنتج الأجزاء المغطّاة من عدد الأسئلة والخطة (حصّة كل جزء = quotaForPart).
  */
 export function inferCoveredParts(plan = [], questionCount = 0) {
   const list = Array.isArray(plan) ? plan : [];
-  let remaining = Math.max(0, Number(questionCount) || 0);
-  const covered = [];
-  for (const part of list) {
-    if (remaining <= 0) break;
-    covered.push(part.key);
-    remaining -= QUESTIONS_PER_PART[part.key] || 1;
-  }
-  return covered;
+  const counts = inferAskedByPart(list, questionCount);
+  return list.filter((part) => (counts[part.key] || 0) >= quotaForPart(part)).map((part) => part.key);
 }
 
 /**
  * يوفّق حالة المناقشة مع ما يُوجد فعلاً في الرسائل: إن كانت الجلسة قد سُئلت
- * قبل وجود التتبّع (العدّاد صفر) نرحّل العدّاد والأسئلة والأجزاء المغطّاة.
+ * قبل وجود التتبّع (العدّاد صفر) نرحّل العدّاد والأسئلة وأجزاء التغطية.
  *
  * يعيد الحالة الجديدة أو null إن لم تكن هناك فجوة تستوجب التحديث.
  */
@@ -231,11 +434,13 @@ export function reconcileDefenseState(state = {}, messages = []) {
   }
 
   const plan = Array.isArray(raw.parts) ? raw.parts : [];
-  const covered = Array.isArray(raw.coveredParts) && raw.coveredParts.length
-    ? raw.coveredParts
-    : inferCoveredParts(plan, questions.length);
+  const askedByPart = raw.askedByPart && typeof raw.askedByPart === 'object'
+    ? raw.askedByPart
+    : inferAskedByPart(plan, questions.length);
+  const next = { ...raw, asked: questions.length, askedQuestions: merged, askedByPart };
+  next.coveredParts = coveredPartsOf(next);
 
-  return { ...raw, asked: questions.length, askedQuestions: merged, coveredParts: covered };
+  return next;
 }
 
 /** بدء جلسة مناقشة مستقلة جديدة (mode='defense' + ملف بحث ثابت اختياري). */
@@ -245,7 +450,9 @@ export async function startDefense({ userId, title = 'محاكاة مناقشة'
     thesisFileId: thesisFileId || null,
     coveredParts: [],
     askedQuestions: [],
-    parts: []
+    askedByPart: {},
+    parts: [],
+    pages: 0
   };
   const { rows } = await pool.query(
     `INSERT INTO conversations (user_id, title, mode, defense_state)
@@ -257,7 +464,7 @@ export async function startDefense({ userId, title = 'محاكاة مناقشة'
   return rows[0];
 }
 
-/** تثبيت/تبديل ملف البحث للجلسة (يبقى ثابتاً طوال المناقشة). */
+/** تثبيت ملف البحث للجلسة (يبقى ثابتاً طوال المناقشة) — يبنِ الخطة دفعة واحدة. */
 export async function setDefenseThesisFile(conversationId, fileId) {
   const { rows } = await pool.query('SELECT defense_state FROM conversations WHERE id = $1', [conversationId]);
   if (!rows.length) return false;
@@ -272,20 +479,59 @@ export async function setDefenseThesisFile(conversationId, fileId) {
 }
 
 /**
+ * صورة المناقشة كما يحتاجها **موجّه المناقِش**: الخطة (لكل جزء حصّته وعدّاده
+ * وهل غُطّي)، السقف الإجمالي، ما طُرح، الجزء المطلوب الآن، وأسئلته السابقة.
+ *
+ * كانت هذه الصورة **غير موجودة**: `defensePlanSection` في supervisor-prompt.js
+ * يقرأ `c.defenseParts/defenseTotal/defenseAsked…` ولم يضبطها أي كود ⇒ قسم
+ * «خطة المناقشة» لم يُحقن أبداً ⇒ المناقِش لا يعرف سقفاً ولا خطة فيسأل بلا
+ * حساب (وهو سبب «٦ أسئلة ثم يكمل ٧ و ٨»). الآن تُحقن في buildSupervisorContext.
+ */
+export function defenseStateView(state = {}) {
+  const raw = state && typeof state === 'object' ? state : {};
+  const plan = Array.isArray(raw.parts) ? raw.parts : [];
+  const asked = Number(raw.asked) || 0;
+  const counts = askedCounts(raw);
+
+  return {
+    parts: plan.map((part) => ({
+      ...part,
+      quota: quotaForPart(part),
+      asked: Math.max(0, Number(counts[part?.key]) || 0),
+      covered: partCovered(raw, part)
+    })),
+    total: maxQuestionsFor(plan, asked),
+    asked,
+    covered: coveredPartsOf(raw),
+    current: nextPendingPart(raw),
+    askedQuestions: Array.isArray(raw.askedQuestions) ? raw.askedQuestions : [],
+    pages: Math.max(0, Number(raw.pages) || 0)
+  };
+}
+
+/**
  * صورة الجلسة: عدد الأسئلة + السقف + الأجزاء المغطاة + هل انتهت.
  *
- * total = سقف أسئلة الجلسة المحسوب من خطة الأجزاء (وليس null كما كان) ⇒
- * الواجهة تعرض «سؤال ٣ من ٨» بدل «٠ سؤالا».
+ * total = سقف أسئلة الجلسة المحسوب من **حجم البحث وأجزائه** (حصة كل جزء من
+ * متنه) ⇒ بحث من ١٠٠ صفحة يعرض «سؤال ٣ من ٣٠» لا «من ٦».
  */
 export function defenseProgress(state = {}) {
   const raw = state && typeof state === 'object' ? state : {};
   const asked = Number(raw.asked) || 0;
   const coveredParts = Array.isArray(raw.coveredParts) ? raw.coveredParts : [];
-  const parts = Array.isArray(raw.parts) ? raw.parts : [];
+  const plan = Array.isArray(raw.parts) ? raw.parts : [];
+  const counts = askedCounts(raw);
+  // نُثري الأجزاء بحصّتها وعدّادها لعرضها في الواجهة (وأصل الحجم chars/weight يبقى).
+  const parts = plan.map((part) => ({
+    ...part,
+    quota: quotaForPart(part),
+    asked: Math.max(0, Number(counts[part?.key]) || 0),
+    covered: partCovered(raw, part)
+  }));
   const done = Boolean(raw.done);
-  // لا تعرض عدداً لانهائياً: إذا لم توجد خطة، فإن العدد الإجمالي غير معروف بعد.
-  const total = Number.isFinite(maxQuestionsFor(parts, asked)) ? maxQuestionsFor(parts, asked) : 0;
+  const total = maxQuestionsFor(plan, asked);
   const remaining = Math.max(0, total - asked);
+  const scope = parts.length ? `موزّعة على ${parts.length} جزءاً من بحثك` : 'على أجزاء بحثك';
 
   return {
     asked,
@@ -301,26 +547,29 @@ export function defenseProgress(state = {}) {
       ? 'انتهت المناقشة — اقرأ التقييم النهائي.'
       : raw.thesisFileId
         ? remaining > 0
-          ? `المناقِش يناقشك جزءاً جزءاً — سؤال أو سؤالان في كل جزء (باقي ${remaining} من ${total}).`
+          ? `المناقِش يناقشك جزءاً جزءاً — ${total} سؤالاً ${scope} (باقي ${remaining}).`
           : 'انتهت حصة الأسئلة — اطلب التقييم النهائي أو أنهِ المناقشة.'
         : 'ارفع ملف البحث (PDF أو Word) ليبدأ المناقِش قراءته ومناقشتك فيه.',
     stageQuestions: total,
     coveredParts,
     thesisFileId: raw.thesisFileId || null,
+    pages: Math.max(0, Number(raw.pages) || 0),
     stages: []
   };
 }
 
 /**
- * يحفظ خطة الأجزاء في حالة المناقشة (عند تثبيت ملف البحث).
- * تُستدعى مرة واحدة: عند تثبيت الملف ⇒ نبني الخطة من نصّه ونحدّد السقف.
+ * يحفظ خطة الأجزاء (وتقدير الصفحات) في حالة المناقشة عند تثبيت ملف البحث.
+ * تُستدعى مرة واحدة: الخطة تُبنى من نصّ البحث وتُخزَّن ليقرأها المناقِش في
+ * كل ردّ (عبر defenseStateView) ولا يحتاج إعادة حساب.
  */
-export async function setDefensePlan(conversationId, parts = []) {
+export async function setDefensePlan(conversationId, parts = [], pages = 0) {
   const { rows } = await pool.query('SELECT defense_state FROM conversations WHERE id = $1', [conversationId]);
   if (!rows.length) return false;
   const raw = rows[0].defense_state;
   const state = raw && typeof raw === 'object' ? raw : {};
   state.parts = Array.isArray(parts) ? parts : [];
+  state.pages = Math.max(0, Number(pages) || 0);
   await pool.query('UPDATE conversations SET defense_state = $2 WHERE id = $1', [
     conversationId,
     JSON.stringify(state)
@@ -399,7 +648,7 @@ export function defenseChecklist(progress) {
 /**
  * يقدّر عدد الصفحات من محتوى النص: كل 900 حرف ≈ صفحة واحدة، ويُكثر من التقدير
  * إذا لم تظهر علامات الصفحة (هذا يدل على أن الملف «طويل» حتى لو لم تُرقَم). */
-function estimatePages(text) {
+export function estimatePages(text) {
   const raw = String(text || '');
   if (!raw.trim()) return 1;
   const chars = raw.length;
@@ -421,8 +670,8 @@ export function maxQuestionsFor(parts = [], actualAsked = 0) {
   const asked = Math.max(0, Number(actualAsked) || 0);
   if (!list.length) return Math.max(5, asked);
 
-  // ميزانية الأسئلة تتناسب مع عدد الأجزاء في الخطة (لا سقف كلي ثابت).
-  const planned = Math.max(MIN_QUESTIONS, list.length);
-  // لا نصغر إلى 15/14: إذا كان الملف خائماً أو غنياً سؤالاً أكثر، نُعطيه.
-  return Math.max(planned, asked);
+  // السقف = مجموع حصص الأجزاء الحقيقية (كل جزء ≈ متنه/٢٨٠٠ سؤال + كثافة علمية)،
+  // مقيداً بالحد الأدنى ٦ والأعلى ٣٦ — بحث ١٠٠ صفحة ⇒ ~٣٠ سؤالاً، لا ٦ ثابتة.
+  const planned = list.reduce((sum, part) => sum + quotaForPart(part || {}), 0);
+  return Math.min(MAX_QUESTIONS, Math.max(MIN_QUESTIONS, planned, asked));
 }

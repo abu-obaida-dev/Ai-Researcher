@@ -4,7 +4,7 @@ import { getJourney } from './journey.js';
 import { getStrikes } from './supervisor-memory.js';
 import { readOwnedFile } from './files.js';
 import { extractFileText } from './documents.js';
-import { estimatePages } from './defense.js';
+import { estimatePages, defenseStateView } from './defense.js';
 
 /**
  * سياق المشرف الذكي — كل متغيّرات {{…}} في موجّه النظام.
@@ -226,6 +226,11 @@ export async function buildSupervisorContext({ userId, profile = {}, conversatio
     researchGoal,
     researchGoalKey,
     progressLevel,
+    // صورة المناقشة للحالة = defense: تُحقن في موجّه المناقِش (defensePlanSection)
+    // عبر القِيم defenceParts/defenseTotal/defenseAsked/defenseCovered/defenseCurrentPart/defenseAskedQuestions/defensePages.
+    defenseState: isDefense
+      ? defenseStateView(conversation?.defense_state || {})
+      : null,
     university: orDash([profile.university, profile.faculty].filter(Boolean).join(' — ')),
     language,
     citationStyle,
@@ -248,6 +253,13 @@ export async function buildSupervisorContext({ userId, profile = {}, conversatio
     files: files.block,
     fileNames: files.names,
     filesUnreadable: files.unreadable || [],
-    replyCap: isDefense ? CHAT_REPLY_CAPS.defense : CHAT_REPLY_CAPS.normal
+    replyCap: isDefense ? CHAT_REPLY_CAPS.defense : CHAT_REPLY_CAPS.normal,
+    defenseParts: defenseState?.parts ?? [],
+    defenseTotal: defenseState?.total ?? 0,
+    defenseAsked: defenseState?.asked ?? 0,
+    defenseCovered: defenseState?.covered ?? [],
+    defenseCurrentPart: defenseState?.current ?? null,
+    defenseAskedQuestions: defenseState?.askedQuestions ?? [],
+    defensePages: defenseState?.pages ?? 0
   };
 }

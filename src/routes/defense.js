@@ -4,12 +4,12 @@ import { requireCoreOnboarding, requireService } from '../middleware/auth.js';
 import { concurrencyLimit, rateLimitUser } from '../middleware/security.js';
 import { deleteConversation, getConversation, askSupervisor, appendMessage } from '../services/chat.js';
 import {
+  buildDefensePlan,
   defenseChecklist,
   defenseProgress,
   extractQuestionFromReply,
   listDefenses,
   nextPendingPart,
-  planParts,
   recordDefenseQuestion,
   setDefensePlan,
   setDefenseThesisFile,
@@ -87,9 +87,9 @@ async function buildDefensePlanForFile(userId, conversationId, fileId) {
     const found = await readOwnedFile(userId, fileId);
     if (!found || !found.buffer) return false;
     const { text } = await extractFileText(found.buffer, found.row?.file_name || '');
-    const parts = planParts(text);
+    const { parts, pages } = buildDefensePlan(text);
     if (!parts.length) return false;
-    return await setDefensePlan(conversationId, parts);
+    return await setDefensePlan(conversationId, parts, pages);
   } catch (error) {
     console.warn(`تعذّر بناء خطة المناقشة: ${error?.code || error?.message}`);
     return false;

@@ -491,8 +491,8 @@ function defensePlanSection(c) {
   const planLine = parts
     .map((part) => {
       const mark = covered.includes(part?.key) ? '✓' : '○';
-      const quota = QUESTIONS_PER_PART_LABEL[part?.key] || 1;
-      return `  ${mark} ${part?.label || part?.key} (${quota} سؤال)`;
+      const quota = Number(part?.quota) || QUESTIONS_PER_PART_LABEL[part?.key] || 1;
+      return `  ${mark} ${part?.label || part?.key} (${quota} سؤال${part?.asked ? ` — طرحت ${part.asked}` : ''})`;
     })
     .join('\n');
   const coveredNames = covered.map(labelOf).join('، ');
@@ -501,7 +501,7 @@ function defensePlanSection(c) {
   return [
     '',
     '# خطة المناقشة (يحقنها النظام — خطّطت بحثك إلى أجزاء وعدّدت أسئلتك)',
-    `سقف أسئلة هذه المناقشة: ${total} ${total === 1 ? 'سؤال' : total === 2 ? 'سؤالان' : 'أسئلة'}. عدد ما طرحته حتى الآن: ${asked}.`,
+    `سقف أسئلة هذه المناقشة: ${total} ${total === 1 ? 'سؤال' : total === 2 ? 'سؤالان' : 'أسئلة'}. عدد ما طرحته حتى الآن: ${asked}.${Number(c?.defensePages) ? ` بحثك ≈ ${c.defensePages} صفحة.` : ''}`,
     planLine,
     '',
     coveredNames
