@@ -13,6 +13,8 @@
  * المفعّلة وعدد مفاتيحها فقط.
  */
 
+import { budgetForModel, trimPayloadToBudget } from './payload-budget.js';
+
 const TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 60000);
 // حدّ طول الردّ المطلوب: يقلّل استهلاك رصيد المزوّد ويجنّب خطأ «requires more credits».
 const MAX_TOKENS = Number(process.env.AI_MAX_TOKENS || 4000);
@@ -29,7 +31,9 @@ const HARD_COOLDOWN_MIN = Number(process.env.AI_HARD_COOLDOWN_MIN || 10);
 const hardCooldownMs = HARD_COOLDOWN_MIN * 60000;
 
 // أخطاء دائمة: المفتاح أو الرصيد أو النموذج نفسه خطأ — إعادة المحاولة لا تنفع.
-const HARD_STATUS = new Set([400, 401, 402, 403, 404, 422]);
+// 413 (الحمولة أطول من حدّ النموذج) خطأ دائم *لهذه الحمولة*: لا فائدة من
+// تكرارها كما هي — يجب تقصيرها. فنتركه يمرّ فوراً إلى منطق التقصير.
+const HARD_STATUS = new Set([400, 401, 402, 403, 404, 413, 422]);
 
 /** حالة المزوّدين في هذه العملية: من هو خارج الدوران الآن ولماذا. */
 const HEALTH = new Map();
@@ -40,16 +44,18 @@ export function modelsFor(provider) {
 }
 
 /** وصف عربي لخطأ المزوّد + هل هو دائم أم مؤقّت + مدة التهدئة. */
-function classifyFailure(status, message) {
-  const text = String(message || '');
-  // خطأ طول المدخلات (برومبت المشرف أثقل من المعلم بكثير): خاص بالطلب نفسه
-  // وليس بالمزوّد — لا يُخرج المزوّد من الدوران، فقط ننتقل للهدف التالي.
-  if (
-    status === 413 ||
-    /reduce the length|too long|too_large|maximum context|context_length|max_tokens/i.test(text)
-  ) {
-    return { kind: 'length', hard: false, reason: 'الحمولة أطول من حدّ النموذج', cooldownMs: 0 };
-  }
+/**
+ * يصنّف فشل المزوّد: دائم أم مؤقّت، ولماذا.
+ * مُصدَّرة للاختبار — منطقها حسّاس ويقود قرارات التهدئة وإعادة المحاولة.
+ *
+ * `body` هو نصّ الرد الكامل (قد يكون أطول من الرسالة المختصرة) — نحتاجه لأن
+ * كلمات مثل «ITPM» قد تقع بعد حدّ الاقتطاع فيظهر الخطأ خطأ طول.
+ */
+export function classifyFailure(status, message, body = '') {
+  const text = `${String(message || '')} ${String(body || '')}`;
+  // رموز الحالة الصريحة تُقدَّم على التخمين النصّي: رسالة «mixed» (503) قد
+  // تحتوي كلمات الطول داخل تفاصيل الفشل، وتُصنَّف خطأ طول ⇒ تهدئة صفرية
+  // أي: لا تهدئة أصلاً. نبدأ من الرمز ثم نلجأ للنصّ عند الغموض.
   if (status === 401) return { kind: 'auth', hard: true, reason: 'مفتاح غير صالح', cooldownMs: hardCooldownMs };
   if (status === 402) return { kind: 'credits', hard: true, reason: 'لا يوجد رصيد عند المزوّد', cooldownMs: hardCooldownMs };
   if (status === 403) return { kind: 'license', hard: true, reason: 'لا صلاحية/ترخيص على الحساب', cooldownMs: hardCooldownMs };
@@ -57,6 +63,19 @@ function classifyFailure(status, message) {
   if (status === 429) return { kind: 'quota', reason: 'تجاوز الحصة أو حدّ المعدّل', cooldownMs: COOLDOWN_MIN * 60000 };
   if (status === 503 || status === 502 || status === 500) {
     return { kind: 'busy', reason: 'المزوّد مزدحم حالياً', cooldownMs: Math.max(30000, (COOLDOWN_MIN * 60000) / 6) };
+  }
+  // 413 عند Groq قد يكون خطأ **معدّل** (ITPM/TPM) لا خطأ طول: النصّ كان ضمن
+  // الحدّ لكن رصيد الدقيقة نفد. لا فائدة من تضييق الحمولة — يُصنَّف كـ quota.
+  if (status === 413 && /rate_limit|tokens per minute|ITPM|TPM|too many requests/i.test(text)) {
+    return { kind: 'quota', reason: 'تجاوز حدّ المعدّل عند المزوّد (413/ITPM)', cooldownMs: COOLDOWN_MIN * 60000 };
+  }
+  // خطأ طول المدخلات (برومبت المشرف أثقل من المعلم بكثير): خاص بالطلب نفسه
+  // وليس بالمزوّد — لا يُخرج المزوّد من الدوران، فقط ننتقل للهدف التالي.
+  if (
+    status === 413 ||
+    /reduce the length|too long|too_large|maximum context|context_length|max_tokens/i.test(text)
+  ) {
+    return { kind: 'length', hard: false, reason: 'الحمولة أطول من حدّ النموذج', cooldownMs: 0 };
   }
   return { kind: 'other', reason: String(message || '').slice(0, 120), cooldownMs: COOLDOWN_MIN * 60000 };
 }
@@ -172,6 +191,9 @@ async function fetchWithRetry(url, options, providerLabel = '', signal = null) {
       if (response.ok || HARD_STATUS.has(response.status)) return response;
 
       lastError = new Error(`HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
+      // نحفظ رمز الحالة على الخطأ: نحتاجه للتصنيف (413 = حمولة أطول من الحدّ)
+      // ولإعادة المحاولة بحمولة مختصرة.
+      lastError.status = response.status;
     } catch (error) {
       lastError = error;
     }
@@ -188,8 +210,19 @@ async function fetchWithRetry(url, options, providerLabel = '', signal = null) {
 
 /** خطأ مزوّد يحمل رمز الحالة ليصنّفه runSupervisor (دائم/مؤقّت). */
 function providerError(label, status, body) {
-  const error = new Error(`${label} ${status}: ${String(body || '').slice(0, 200)}`);
+  const raw = String(body || '');
+  const error = new Error(`${label} ${status}: ${raw.slice(0, 200)}`);
   error.status = status;
+  // نصّ الرد الكامل (قبل الاقتطاع) — نحتاجه للتمييز بين 413-طول و413-معدّل.
+  error.body = raw.slice(0, 4000);
+  // 413 عند Groq قد يكون خطأ **معدّل** (ITPM/TPM) لا خطأ طول. نميّزه هنا
+  // حيث النصّ كامل، لا في مواضع أخرى حيث يكون مبتوراً.
+  if (
+    status === 413 &&
+    /rate_limit|tokens per minute|ITPM|TPM|too many requests/i.test(error.body)
+  ) {
+    error.rateLimited = true;
+  }
   return error;
 }
 
@@ -272,8 +305,12 @@ async function geminiCall({ apiKey, models, system, messages, temperature, maxTo
   throw error;
 }
 
-/** المزوّدون بالترتيب مع دالة نداء لكل واحد. كل مزوّد يحمل قائمة نماذج. */
-const PROVIDERS = [
+/**
+ * المزوّدون بالترتيب مع دالة نداء لكل واحد. كل مزوّد يحمل قائمة نماذج.
+ * مُصدَّر للاختبار: نتحقّق من منطق التقصير وإعادة المحاولة على خطأ الطول
+ * بلا أي طلبات شبكة (استبدال fetch عالمياً).
+ */
+export const PROVIDERS = [
   {
     key: 'groq',
     envKey: 'GROQ_API_KEY',
@@ -281,29 +318,76 @@ const PROVIDERS = [
     // نستبعد whisper (صوت) و llama-prompt-guard (تصنيف لا توليد).
     models: modelList(process.env.AI_MODEL_GROQ, 'openai/gpt-oss-20b,qwen/qwen3.8-27b,allam-2-7b'),
     async call({ apiKey, models, system, messages, temperature, maxTokens = MAX_TOKENS, signal = null }) {
+      // ميزانية Groq المدخلة: نقصّ الحمولة قبل الإرسال حتى لا نُنفق محاولة
+      // على خطأ 413/400-length. لكل نموذج حدّه الخاص (أضيق = أأمن)، وعند
+      // فشل الطول نُشدّد الميزانية ونُعيد المحاولة بالنموذج نفسه.
       const failures = [];
+      // نوع كل فشل: 'length' | 'rate_limit' | 'other' — لتصنيف الإجمالي بدقة.
+      const failureKinds = [];
       for (const model of models) {
-        try {
-          const data = await callOnce({
-            label: 'Groq',
-            url: 'https://api.groq.com/openai/v1/chat/completions',
-            headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
-            body: { model, messages: [{ role: 'system', content: system }, ...messages], temperature, max_tokens: maxTokens },
-            model,
-            signal
-          });
+        const modelBudget = budgetForModel(model, 'groq');
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const currentBudget = Math.max(1800, Math.floor(modelBudget * Math.pow(0.6, attempt)));
+          const payload = trimPayloadToBudget(system, messages, currentBudget);
+          try {
+            const data = await callOnce({
+              label: 'Groq',
+              url: 'https://api.groq.com/openai/v1/chat/completions',
+              headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+              body: { model, messages: [{ role: 'system', content: payload.system }, ...payload.messages], temperature, max_tokens: maxTokens },
+              model,
+              signal
+            });
 
-          const text = data?.choices?.[0]?.message?.content;
-          if (!text) throw new Error('ردّ فارغ');
-          return { text, model: data?.model || model, usage: data?.usage || null };
-        } catch (error) {
-          failures.push(`${model}: ${String(error?.message || error).slice(0, 90)}`);
-          if ([401, 402, 403, 404, 422].includes(error.status) || signal?.aborted) break;
+            const text = data?.choices?.[0]?.message?.content;
+            if (!text) throw new Error('ردّ فارغ');
+            return { text, model: data?.model || model, usage: data?.usage || null };
+          } catch (error) {
+            // خطأ الطول: نُعيد المحاولة بحمولة أقصر.
+            const isLength =
+              error?.status === 413 ||
+              /reduce the length|too long|maximum context|context_length|\b413\b/i.test(String(error?.message || ''));
+            // 413 عند Groq = خطأ **معدّل** (ITPM/TPM) لا خطأ طول: نصّ الطلب
+            // كان ضمن الحدّ لكن رصيد الدقيقة نفد. تضييق الميزانية لا يُصلحه
+            // (بل يستهلك رصيداً أكثر!) — فنتركه يُصنَّف كخطأ مزوّد مؤقّت.
+            const isRateLimit = Boolean(error?.rateLimited);
+            // نسجّل نوع كل فشل لنصنّف الإجمالي في النهاية بدقة.
+            failures.push(`${model}: ${String(error?.message || error).slice(0, 90)}`);
+            failureKinds.push(isRateLimit ? 'rate_limit' : isLength ? 'length' : 'other');
+            if (isLength && !isRateLimit && attempt < 2) {
+              // شدّد الميزانية للنموذج نفسه: نحتفظ بالسؤال وبتعليمات المشرف،
+              // ونقصّ نصّ الملف — بدل الانتقال لنموذج آخر بنفس الحجم.
+              console.warn(`Groq/${model}: الحمولة أطول من الحدّ — إعادة محاولة بميزانية ${currentBudget} token`);
+              continue;
+            }
+            if ([401, 402, 403, 404, 422].includes(error.status) || signal?.aborted) break;
+            break;
+          }
         }
       }
       const last = failures.at(-1) || 'بلا تفاصيل';
       const error = new Error(`Groq فشل على ${models.length} نموذج — ${last}`);
       error.status = /402|403|401/.test(last) ? 402 : 503;
+      // تصنيف دقيق حسب أنواع الفشل (لا بالاعتماد على مطابقة النصّ):
+      //  - كلّها معدّل ⇒ 429 (مؤقّت يُعاد بعد قليل).
+      //  - كلّها طول   ⇒ 413 (الحمولة تحتاج تقصيراً ⇒ دائمة لهذه الحمولة).
+      //  - مزيج        ⇒ 503 مؤقّت + تفاصيل تشخيصية (لا دائمة، لا تضيع المعلومات).
+      const kinds = new Set(failureKinds);
+      if (kinds.size && !kinds.has('other')) {
+        if (kinds.has('rate_limit') && kinds.has('length')) {
+          error.status = 503;
+          error.reason = 'mixed';
+          error.message = `Groq فشل على ${models.length} نموذج (طول + حدّ معدّل) — ${last}`;
+        } else if (kinds.has('rate_limit')) {
+          error.status = 429;
+          error.reason = 'rate_limit';
+          error.message = `Groq تجاوز حدّ المعدّل (ITPM) على ${models.length} نموذج — ${last}`;
+        } else {
+          error.status = 413;
+          error.reason = 'length';
+          error.message = `Groq: الحمولة أطول من حدّ النموذج — ${last}`;
+        }
+      }
       throw error;
     }
   },
@@ -396,7 +480,7 @@ export async function probeProvider(key, { timeoutMs = 30000, perKey = false } =
           return { key, ok: true, status: 200, reason: 'يعمل', ms: Date.now() - startedAt, text: firstText, keys: keyReports };
         }
       } catch (error) {
-        const failure = classifyFailure(error.status, error.message);
+        const failure = classifyFailure(error.status, error.message, error.body);
         const detail = String(error.message || '').replace(/\s+/g, ' ').slice(0, 150);
         keyReports.push({ position: position + 1, ok: false, status: error.status || 0, reason: `${failure.reason}${detail ? ` — ${detail}` : ''}` });
         if (perKey) continue;
@@ -557,7 +641,7 @@ export async function runSupervisor({ userId = null, messages, system, temperatu
       if (settled) return; // أُلغي لأن هدفاً آخر سبقنا
 
       // الخروج من الدوران للمفتاح وحده: مفتاحٌ بلا رصيد لا يُطعن في أخيه.
-      markUnhealthy(target.id, classifyFailure(error.status, error.message));
+      markUnhealthy(target.id, classifyFailure(error.status, error.message, error.body));
       failures.push(`${target.id}: ${String(error?.message || error).slice(0, 300)}`);
       await logRequest({ userId, provider: provider.key, model: (target.models || provider.models)[0], latencyMs: Date.now() - startedAt, status: 'error', error });
       console.warn(`فشل ${target.id}: ${String(error.message).slice(0, 120)}`);

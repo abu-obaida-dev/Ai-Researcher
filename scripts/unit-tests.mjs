@@ -36,6 +36,15 @@ import { safeEqual } from '../src/middleware/security.js';
 import { needsOnboarding, requireCoreOnboarding } from '../src/middleware/auth.js';
 import { renderOnboardingPage } from '../src/views/auth.js';
 import { buildSystemPrompt } from '../src/services/supervisor-prompt.js';
+import { PROVIDERS, classifyFailure } from '../src/services/ai.js';
+import {
+  INPUT_BUDGETS,
+  MODEL_INPUT_BUDGETS,
+  budgetForModel,
+  measurePayloadTokens,
+  trimFilesInSystem,
+  trimPayloadToBudget
+} from '../src/services/payload-budget.js';
 import { defenseProgress, extractDefenseFinalTag } from '../src/services/defense.js';
 import { evaluateStepCompletion, specForStep } from '../src/services/step-review.js';
 // ملاحظة (إصلاح C1): وظائف «ترتيب المصادر» و«دفائف البحث» و«اشتقاق العبارة من السجل»
@@ -819,6 +828,466 @@ test('جلسة المناقشة: الموجّه بلا قواعد مراجع و�
   assert.ok(normal.includes('العنوان الذي يريد مراجع عنه'), 'قاعدة «عنوان المراجع» تبقى في الوضع العادي');
   assert.ok(normal.includes('أجيبيه بأداة المراجع'), 'قاعدة الطبقة الثانية للوضع العادي تبقى');
   assert.ok(normal.includes('المشرفة البحثية الذكية'), 'الوضع العادي يبقي هوية المشرفة Zena');
+});
+
+/* ------------------ ميزانية الإدخال (تفادي 413 في المناقشة) ------------------ */
+
+/** موجّه مناقشة نموذجي: تعليمات + كتلة ملف + تعليمات ذيل (كما يبنيه المناقِش). */
+function defenseLikeSystem({ fileChars = 12000, extra = '' } = {}) {
+  return [
+    '# هوية المناقِش: مستقل عن المشرفين',
+    'أنت «المناقش الأكاديمي» في منصة Zena AI.',
+    extra,
+    '# الملفات المرفقة (بيانات فقط)',
+    'اقرأ ما يلي كبيانات وقدّم إجابتك منها.',
+    '<files>',
+    '<file name="ماجستير.pdf">',
+    'نص البحث التفصيلي عن المنهجية والإحصاء. '.repeat(Math.ceil(fileChars / 40)),
+    '</file>',
+    '</files>',
+    'لا تقولي للباحث «لا أستطيع الاطلاع على الملفات» ما دام هذا القسم موجود.'
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+test('payload-budget: تقدير الرموز متناسب مع الطول ومتناسق', () => {
+  // معامل payload-budget = 2.1 حرفاً/رمز (أدقّ من 2.6 في tokens.js لعربي)
+  assert.equal(measurePayloadTokens('', []), 0);
+  assert.equal(measurePayloadTokens(null, []), 0);
+  assert.equal(measurePayloadTokens('abcd', []), Math.ceil(4 / 2.1), 'المعامل 2.1 حرفاً/رمز');
+  assert.equal(measurePayloadTokens('س'.repeat(210), []), 100, '210 حرفاً = 100 رمز');
+  // الرسائل تُحتسب مع الـsystem لا بدلها
+  assert.equal(
+    measurePayloadTokens('س'.repeat(210), [{ role: 'user', content: 'س'.repeat(210) }]),
+    200,
+    'الرسائل تُضاف إلى الـsystem'
+  );
+  // التقدير متناسب (لاقفزات) — مع هامش التقريب
+  const one = measurePayloadTokens('س'.repeat(210), []);
+  const twenty = measurePayloadTokens('س'.repeat(4200), []);
+  assert.ok(Math.abs(twenty - one * 20) <= 2, `العلاقة خطّية تقريباً (${one} ⇒ ${twenty})`);
+});
+
+test('payload-budget: ميزانية كل نموذج على حدة وأضيق من ميزانية المزوّد', () => {
+  // gpt-oss-20b: حدّ TPM 8000 ⇒ 4000 · qwen3.8-27b: حدّ ITPM 7000 ⇒ 3600
+  // allam-2-7b: سياق 4096 فقط ⇒ 2800
+  // (الأرقام بهامش أمان تحت حدود Groq الفعلية — انظر payload-budget.js)
+  assert.equal(MODEL_INPUT_BUDGETS['openai/gpt-oss-20b'], 4000);
+  assert.equal(MODEL_INPUT_BUDGETS['qwen/qwen3.8-27b'], 3600);
+  assert.equal(MODEL_INPUT_BUDGETS['allam-2-7b'], 2800);
+
+  assert.equal(budgetForModel('openai/gpt-oss-20b', 'groq'), 4000);
+  assert.equal(budgetForModel('qwen/qwen3.8-27b', 'groq'), 3600);
+  assert.equal(budgetForModel('allam-2-7b', 'groq'), 2800);
+
+  // نموذج مجهول: نأخذ أضيق ميزانية معروفة (أأمن) لا أعرضها
+  const unknown = budgetForModel('some/new-model', 'groq');
+  assert.ok(unknown <= INPUT_BUDGETS.groq, 'النموذج المجهول لا يتجاوز ميزانية المزوّد');
+  assert.ok(unknown >= 2000, 'ميزانية النموذج المجهول ليست بلا فائدة');
+
+  // ميزانية كل نموذج على حدة ولا تتجاوز ميزانية المزوّد العام
+  for (const [model, budget] of Object.entries(MODEL_INPUT_BUDGETS)) {
+    assert.ok(budget <= INPUT_BUDGETS.groq, `${model} لا يتجاوز ميزانية Groq العامة`);
+  }
+  // ولكل نموذج حدّه الخاص (أضيق أو مساوٍ)
+  assert.ok(
+    MODEL_INPUT_BUDGETS['qwen/qwen3.8-27b'] <= MODEL_INPUT_BUDGETS['openai/gpt-oss-20b'],
+    'qwen3.8 أضيق من gpt-oss-20b'
+  );
+  assert.ok(
+    MODEL_INPUT_BUDGETS['allam-2-7b'] < MODEL_INPUT_BUDGETS['qwen/qwen3.8-27b'],
+    'allam-2-7b أضيق من qwen3.8'
+  );
+});
+
+test('payload-budget: برومبت المناقشة الضخم يُقصّ إلى الميزانية (تفادي 413)', () => {
+  const system = defenseLikeSystem({ fileChars: 12000 });
+  const messages = [
+    { role: 'user', content: 'سؤال سابق ' + 'ط'.repeat(800) },
+    { role: 'assistant', content: 'رد سابق ' + 'ر'.repeat(800) },
+    { role: 'user', content: 'السؤال الأخير: ما المنهجية المستخدمة في اختبار الفرضية؟' }
+  ];
+
+  const before = measurePayloadTokens(system, messages);
+  assert.ok(before > 3000, 'البرومبت الأصلي يتجاوز الميزانية (شرط الاختبار)');
+
+  const result = trimPayloadToBudget(system, messages, 3000);
+  assert.ok(result.trimmed, 'وُسم أن القَصّ جرى');
+  assert.ok(result.tokens <= 3000, `الحمولة بعد القصّ ${result.tokens} ≤ 3000`);
+  assert.ok(result.tokens <= before, 'القصّ لم يزيد الحجم');
+  assert.ok(result.fileChars > 0, 'بقي جزء من نصّ الملف — لم نُفرغه كاملاً');
+});
+
+test('payload-budget: الملف يُقصّ قبل الرسائل (مصدر الحقيقة أولاً)', () => {
+  const system = defenseLikeSystem({ fileChars: 12000 });
+  const messages = [
+    { role: 'user', content: 'سؤال قديم ' + 'ط'.repeat(2000) },
+    { role: 'user', content: 'السؤال الأخير: ما المنهجية؟' }
+  ];
+
+  const result = trimPayloadToBudget(system, messages, 2500);
+  assert.ok(result.tokens <= 2500, 'ضمن الميزانية');
+  assert.ok(result.fileChars > 0, 'نصّ الملف باقٍ بعد القصّ');
+  assert.ok(
+    result.messages[0].content.length < 2000 || result.messages.length === 1,
+    'الرسالة الأقدم قُصّت أولاً'
+  );
+  assert.equal(
+    result.messages.at(-1).content,
+    'السؤال الأخير: ما المنهجية؟',
+    'آخر رسالة (سؤال الباحث) لم تُمسّ'
+  );
+});
+
+test('payload-budget: تعليمات المشرف (الرأس والذيل) محفوظة رغم القصّ', () => {
+  const system = defenseLikeSystem({ fileChars: 12000 });
+  const messages = [{ role: 'user', content: 'السؤال الأخير: ما المنهجية؟' }];
+
+  for (const budget of [800, 1200, 2000, 3000, 5000]) {
+    const result = trimPayloadToBudget(system, messages, budget);
+    assert.ok(result.tokens <= budget, `ميزانية ${budget}: الحمولة ضمن الحدّ`);
+    assert.ok(
+      result.system.includes('# هوية المناقِش: مستقل عن المشرفين'),
+      `ميزانية ${budget}: هوية المناقِش (رأس الموجّه) محفوظة`
+    );
+    assert.ok(
+      result.system.includes('لا تقولي للباحث «لا أستطيع الاطلاع على الملفات»'),
+      `ميزانية ${budget}: تعليمة الذيل محفوظة`
+    );
+  }
+});
+
+test('payload-budget: وسوم <file> تبقى سليمة (لا <file> بلا </file>)', () => {
+  const system = defenseLikeSystem({ fileChars: 20000 });
+  const messages = [{ role: 'user', content: 'سؤال؟' }];
+
+  for (const budget of [600, 900, 1500, 2500, 4000]) {
+    const result = trimPayloadToBudget(system, messages, budget);
+    const open = (result.system.match(/<file name=/g) || []).length;
+    const close = (result.system.match(/<\/file>/g) || []).length;
+    assert.equal(open, close, `ميزانية ${budget}: عدد وسوم الفتح = الإغلاق`);
+    assert.ok(
+      result.system.includes('<files>') && result.system.includes('</files>'),
+      `ميزانية ${budget}: كتلة الملفات سليمة`
+    );
+  }
+});
+
+test('payload-budget: حدود الميزانية — الحمولة ضمن الحدّ تُترك بلا قصّ', () => {
+  const system = defenseLikeSystem({ fileChars: 100 });
+  const messages = [{ role: 'user', content: 'سؤال قصير' }];
+
+  const fits = trimPayloadToBudget(system, messages, 100000);
+  assert.equal(fits.trimmed, false, 'حمولة ضمن الميزانية: لا قصّ');
+  assert.equal(fits.system, system, 'الـsystem لم يتغيّر');
+  assert.equal(fits.messages, messages, 'الرسائل لم تتغيّر (نفس المرجع)');
+
+  // ميزانية متطرفة ⇒ لا انهيار (يُرفع الحدّ الأدنى إلى 500 رمز).
+  // الحمولة هنا أصغر من 500 رمز ⇒ لا قصّ (وهو السلوك الصحيح).
+  const tiny = trimPayloadToBudget(system, messages, 0);
+  assert.ok(tiny.tokens >= 0, 'ميزانية صفرية لا ترمي استثناءً');
+  assert.ok(tiny.tokens <= 500, `ميزانية صفرية تُرفع إلى الحدّ الأدنى (${tiny.tokens} ≤ 500)`);
+
+  // وبحمولة أكبر من الحدّ الأدنى ⇒ يجب أن تُقصّ فعلاً
+  const big = defenseLikeSystem({ fileChars: 12000 });
+  const tinyBig = trimPayloadToBudget(big, messages, 0);
+  assert.ok(tinyBig.trimmed, 'حمولة كبيرة مع ميزانية صفرية ⇒ قصّ');
+  assert.ok(tinyBig.tokens <= 500, `النتيجة ≤ الحدّ الأدنى (${tinyBig.tokens} ≤ 500)`);
+  assert.ok(tinyBig.system.length < big.length, 'تم القصّ على أي حال');
+});
+
+test('trimFilesInSystem: يوزّع الحصّة على الملفات ويقصّ داخل الملف فقط', () => {
+  const system = [
+    'تعليمات',
+    '<files>',
+    '<file name="أ.pdf">',
+    'ا'.repeat(3000),
+    '</file>',
+    '<file name="ب.pdf">',
+    'ب'.repeat(3000),
+    '</file>',
+    '</files>',
+    'خاتمة'
+  ].join('\n');
+
+  const result = trimFilesInSystem(system, 2000);
+  assert.equal((result.system.match(/<file name=/g) || []).length, 2, 'ملفا');
+  assert.equal((result.system.match(/<\/file>/g) || []).length, 2, 'الوسوم سليمة');
+  assert.ok(result.system.includes('تعليمات') && result.system.includes('خاتمة'), 'ما حول الملفات محفوظ');
+  // لكل ملف نحو نصف الحصّة ⇒ ~1000 حرف
+  assert.ok(result.system.includes('ا'.repeat(900)), 'نصّ الملف الأول باقٍ');
+  assert.ok(!result.system.includes('ا'.repeat(1100)), 'نصّ الملف الأول مقصوص');
+  assert.ok(result.system.includes('ب'.repeat(900)), 'نصّ الملف الثاني باقٍ');
+});
+
+test('ai (Groq): خطأ الطول (413) يُعيد المحاولة بحمولة أقصر ثم ينجح', async () => {
+  const groq = PROVIDERS.find((provider) => provider.key === 'groq');
+  assert.ok(groq, 'مزوّد Groq موجود');
+
+  const originalFetch = globalThis.fetch;
+  const sent = [];
+  let call = 0;
+
+  globalThis.fetch = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    sent.push(body);
+    call += 1;
+    // أول محاولة: ترفض بـ 413 (حمولة أطول من الحدّ)، ثم تنجح
+    if (call === 1) {
+      return new Response(JSON.stringify({ error: { message: 'Please reduce the length of the messages' } }), {
+        status: 413,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
+    return new Response(
+      JSON.stringify({
+        model: body.model,
+        choices: [{ message: { content: 'ردّ ناجح بعد التقصير' } }],
+        usage: { prompt_tokens: 100, completion_tokens: 10 }
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  };
+
+  try {
+    const system = defenseLikeSystem({ fileChars: 20000 });
+    const messages = [{ role: 'user', content: 'السؤال الأخير: ما المنهجية؟' }];
+
+    const result = await groq.call({
+      apiKey: 'test-key',
+      models: ['openai/gpt-oss-20b'],
+      system,
+      messages,
+      temperature: 0.4,
+      maxTokens: 500
+    });
+
+    assert.equal(result.text, 'ردّ ناجح بعد التقصير', 'نجح بعد إعادة المحاولة');
+    assert.equal(sent.length, 2, 'أُعيدت المحاولة مرة واحدة بعد 413');
+
+    const first = sent[0].messages[0].content.length;
+    const second = sent[1].messages[0].content.length;
+    assert.ok(second < first, `الحمولة الثانية أقصر (${second} < ${first})`);
+
+    // الحمولة المُعاد إرسالها ضمن ميزانية النموذج
+    const budget = budgetForModel('openai/gpt-oss-20b', 'groq');
+    const systemPart = sent[1].messages[0].content;
+    const rest = sent[1].messages.slice(1);
+    assert.ok(
+      measurePayloadTokens(systemPart, rest) <= budget,
+      `الحمولة المعاد إرسالها ≤ ميزانية النموذج (${budget})`
+    );
+    // التعليمات المحورية باقية بعد التقصير
+    assert.ok(systemPart.includes('# هوية المناقِش'), 'هوية المناقِش محفوظة في الحمولة المعاد إرسالها');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('ai (Groq): 413 المعدّل (ITPM) لا يُعيد المحاولة بحمولة أضيق', async () => {
+  const groq = PROVIDERS.find((provider) => provider.key === 'groq');
+  assert.ok(groq, 'مزوّد Groq موجود');
+
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(
+      JSON.stringify({
+        error: {
+          message:
+            'Request too large for model `qwen/qwen3.8-27b` in organization `org_x` service tier `on_demand` on input tokens per minute (ITPM): Limit 7000, Requested 9000, please reduce your message size and try again.',
+          type: 'rate_limit_exceeded'
+        }
+      }),
+      { status: 413, headers: { 'content-type': 'application/json' } }
+    );
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        groq.call({
+          apiKey: 'test-key',
+          models: ['qwen/qwen3.8-27b'],
+          system: defenseLikeSystem({ fileChars: 20000 }),
+          messages: [{ role: 'user', content: 'السؤال الأخير: ما المنهجية؟' }],
+          temperature: 0.4,
+          maxTokens: 500
+        }),
+      (error) => {
+        // خطأ معدّل = مؤقّت (يُعاد لاحقاً)، لا خطأ طول دائم
+        assert.equal(error.status, 429, `خطأ معدّل مؤقّت (${error.status})`);
+        assert.equal(error.reason, 'rate_limit', 'السبب مُعلَن: حدّ معدّل');
+        assert.notEqual(error.reason, 'length', 'ليس خطأ طول');
+        return true;
+      }
+    );
+    // لم نُعد المحاولة بحمولة أضيق: تضييق الميزانية لا يُصلح خطأ المعدّل
+    assert.equal(calls, 1, `لا إعادة محاولة على خطأ معدّل (${calls})`);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('ai (Groq): خطأ طول فقط يُصنَّف 413 (مع reason=length)', async () => {
+  const groq = PROVIDERS.find((provider) => provider.key === 'groq');
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ error: { message: 'Please reduce the length of the messages' } }), {
+      status: 413,
+      headers: { 'content-type': 'application/json' }
+    });
+
+  try {
+    await assert.rejects(
+      () =>
+        groq.call({
+          apiKey: 'test-key',
+          models: ['openai/gpt-oss-20b'],
+          system: defenseLikeSystem({ fileChars: 20000 }),
+          messages: [{ role: 'user', content: 'السؤال الأخير: ما المنهجية؟' }],
+          temperature: 0.4,
+          maxTokens: 500
+        }),
+      (error) => {
+        assert.equal(error.status, 413, `خطأ طول = 413 (${error.status})`);
+        assert.equal(error.reason, 'length', 'السبب: طول');
+        return true;
+      }
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('ai: تصنيف الفشل يفرّق بين 413-طول و413-معدّل', () => {
+  // 413 طول: خاص بالطلب ⇒ لا يخرج المزوّد من الدوران (cooldown = 0)
+  const length = classifyFailure(413, 'Groq 413: Please reduce the length of the messages');
+  assert.equal(length.kind, 'length', '413 بلا ذكر معدّل = خطأ طول');
+  assert.equal(length.cooldownMs, 0, 'خطأ الطول لا يخرج المزوّد من الدوران');
+
+  // 413 معدّل: رصيد الدقيقة نفد ⇒ تهدئة مؤقّتة كـ 429
+  const quota = classifyFailure(
+    413,
+    'Groq 413: Rate limit reached on input tokens per minute (ITPM): Limit 7000, Requested 9000'
+  );
+  assert.equal(quota.kind, 'quota', '413 مع ذكر ITPM = خطأ معدّل');
+  assert.ok(quota.cooldownMs > 0, 'خطأ المعدّل يهدّئ المزوّد مؤقّتاً');
+
+  // 429 العادي يبقى كما هو
+  assert.equal(classifyFailure(429, 'rate limit').kind, 'quota', '429 يبقى quota');
+
+  // 401 يبقى دائماً
+  const auth = classifyFailure(401, 'Invalid API Key');
+  assert.equal(auth.kind, 'auth', '401 يبقى auth');
+  assert.equal(auth.hard, true, '401 خطأ دائم');
+
+  // الكلمات الدالّة قد تقع خارج حدود الرسالة المختصرة ⇒ نمرّر body كاملاً
+  const truncated = classifyFailure(
+    413,
+    'Groq 413: ' + 'x'.repeat(300),
+    'input tokens per minute (ITPM): Limit 7000, Requested 9000'
+  );
+  assert.equal(truncated.kind, 'quota', 'ITPM خارج حدّ الاقتطاع يبقى معدّلاً');
+
+  // 503 (مزيج/ازدحام) لا ينزلق إلى «length» لمجرّد أن رسالته تذكر الطول:
+  // خطأ الطول ⇒ تهدئة 0 (المزوّد يبقى في الدوران) ⇒ نُخسر التهدئة.
+  const mixed = classifyFailure(503, 'Groq فشل (طول + حدّ معدّل) — Please reduce the length of the messages');
+  assert.equal(mixed.kind, 'busy', '503 يبقى busy رغم ذكر الطول في الرسالة');
+  assert.ok(mixed.cooldownMs > 0, '503 يهدّئ مؤقّتاً');
+});
+
+test('ai (Groq): مزيج خطأ طول + خطأ معدّل يبقى مؤقّتاً (لا طول دائم)', async () => {
+  const groq = PROVIDERS.find((provider) => provider.key === 'groq');
+  assert.ok(groq, 'مزوّد Groq موجود');
+
+  const originalFetch = globalThis.fetch;
+  let call = 0;
+
+  globalThis.fetch = async () => {
+    call += 1;
+    // النموذج الأول: خطأ طول حقيقي ⇒ يُعاد بميزانية أضيق.
+    // النموذج الثاني: خطأ معدّل ⇒ يجب ألّا يُصنَّف خطأ طول دائم.
+    if (call <= 2) {
+      return new Response(JSON.stringify({ error: { message: 'Please reduce the length of the messages' } }), {
+        status: 413,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
+    return new Response(
+      JSON.stringify({
+        error: {
+          message: 'Rate limit reached for model `allam-2-7b`. Please try again later.',
+          type: 'rate_limit_exceeded'
+        }
+      }),
+      { status: 413, headers: { 'content-type': 'application/json' } }
+    );
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        groq.call({
+          apiKey: 'test-key',
+          models: ['openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'allam-2-7b'],
+          system: defenseLikeSystem({ fileChars: 20000 }),
+          messages: [{ role: 'user', content: 'السؤال الأخير: ما المنهجية؟' }],
+          temperature: 0.4,
+          maxTokens: 500
+        }),
+      (error) => {
+        // مزج: جزء طول وجزء معدّل ⇒ نختار حالة مؤقّتة (503) لا 413 دائم
+        assert.equal(error.status, 503, `المزج مؤقّت (${error.status})`);
+        assert.equal(error.reason, 'mixed', 'السبب مُعلَن: مزيج');
+        assert.notEqual(error.reason, 'length', 'المزج لا يُصنَّف خطأ طول');
+        // التفاصيل التشخيصية محفوظة
+        assert.ok(/ITPM|rate limit|Reduce the length|reduce the length/i.test(error.message), 'تفاصيل الفشل محفوظة');
+        return true;
+      }
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('ai (Groq): خطأ غير متعلق بالطول (401) لا يُعيد المحاولة', async () => {
+  const groq = PROVIDERS.find((provider) => provider.key === 'groq');
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ error: { message: 'Invalid API Key' } }), {
+      status: 401,
+      headers: { 'content-type': 'application/json' }
+    });
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        groq.call({
+          apiKey: 'bad-key',
+          models: ['openai/gpt-oss-20b'],
+          system: 'تعليمات',
+          messages: [{ role: 'user', content: 'سؤال' }],
+          temperature: 0.4,
+          maxTokens: 300
+        }),
+      (error) => {
+        assert.equal(error.status, 402, 'خطأ المصادقة يُصنَّف 402 (رصيد/مفتاح)');
+        return true;
+      }
+    );
+    assert.equal(calls, 1, 'لا إعادة محاولة على خطأ مصادقة');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('extractDefenseFinalTag: وسم التقييم النهائي يُحذف ويغلق الجلسة', () => {

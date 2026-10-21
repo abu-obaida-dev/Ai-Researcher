@@ -24,6 +24,15 @@ const MAX_ATTACHED_FILES = 3;
 const MAX_FILE_CHARS = 12000;
 const MAX_FILES_BLOCK_CHARS = 40000;
 
+/**
+ * سقف نصّ الملف في وضع المناقشة (defense): أصغر من الوضع الإرشادي.
+ *
+ * السبب: في defense يُحقن نصّ الملف في موجّه المناقِش (15.4 ألف حرف) ومعه
+ * 12 ألف حرف من الملف ⇒ ~8.1 ألف token ⇒ Groq يرفض بـ 413/400-length.
+ * للمناقشة (المناقش يقرأ ما فيه) وتُبقي الحمولة دون حدّ النموذج.
+ */
+const MAX_FILE_CHARS_DEFENSE = 6000;
+
 /** تقدير «أيام منذ آخر نشاط» من أعلى طابع زمني بين الأنشطة — محادثات
  * المناقشة (defense) مستثناة: للمشرف ذاكرته من إرشاده وحده (لكل شخصية ذاكرتها). */
 async function daysSinceLastActivity(userId) {
@@ -86,7 +95,8 @@ function extractAboutPart(about, key) {
  * يعتمد على services/documents.js — الذي يقرأ PDF و DOCX؛ فكان سابقاً يفشل
  * معهما فيخرج «تعذّر استخراج نصّ» فلا يعرف المشرف شيئاً عمّا أرفقه الباحث.
  */
-async function buildFilesBlock(userId, fileIds = []) {
+async function buildFilesBlock(userId, fileIds = [], options = {}) {
+  const maxFileChars = Number(options.maxFileChars) > 0 ? Number(options.maxFileChars) : MAX_FILE_CHARS;
   const ids = [
     ...new Set(
       (Array.isArray(fileIds) ? fileIds : String(fileIds || '').split(','))
@@ -121,13 +131,24 @@ async function buildFilesBlock(userId, fileIds = []) {
     }
 
     names.push(name);
-    parts.push(`<file name="${name}">\n${text.slice(0, MAX_FILE_CHARS)}\n</file>`);
+    parts.push(`<file name="${name}">\n${text.slice(0, maxFileChars)}\n</file>`);
   }
 
   if (!parts.length) return { block: '', names: [], unreadable };
 
+  // لا نقطع الكتلة في منتصف وسم <file> (كان يُنتج <file> بلا </file> فيُفقد
+  // محتوى الملف ويُربك محلّل التقصير). نُسقط الملفات الزائدة بدل بتر النص.
+  const kept = [];
+  let used = 0;
+  for (const part of parts) {
+    const cost = part.length + 1;
+    if (used + cost > MAX_FILES_BLOCK_CHARS && kept.length) break;
+    kept.push(part);
+    used += cost;
+  }
+
   return {
-    block: `<files>\n${parts.join('\n').slice(0, MAX_FILES_BLOCK_CHARS)}\n</files>`,
+    block: `<files>\n${kept.join('\n')}\n</files>`,
     names,
     unreadable
   };
@@ -160,7 +181,9 @@ export async function buildSupervisorContext({ userId, profile = {}, conversatio
           .query('SELECT memory, open_task FROM supervisor_memory WHERE user_id = $1', [userId])
           .then(({ rows }) => rows[0] || {})
           .catch(() => ({})),
-    buildFilesBlock(userId, effectiveFileIds)
+    buildFilesBlock(userId, effectiveFileIds, {
+      maxFileChars: isDefenseConversation ? MAX_FILE_CHARS_DEFENSE : MAX_FILE_CHARS
+    })
   ]);
 
   const [firstEver, idleDays] = await Promise.all([
