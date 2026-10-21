@@ -200,6 +200,7 @@ function defenseSection() {
     '- إن لم تجد نص البحث مرفقاً في قسم الملفات: اطلب منه رفع ملف البحث (PDF أو Word) أولاً بلطف، واشرح أنك ستقرأه كاملاً ثم تناقشه فيه جزءاً جزءاً. لا تطرح أي سؤال علمي قبل وصول نص البحث.',
     '- بعد وصول نص البحث: اقرأه وافهمه جيداً، وقسّمه أنت ذهنياً إلى أجزائه الطبيعية كما وردت فيه فعلاً (المقدمة والمشكلة، الأهداف، المنهج، النتائج، المناقشة والتوصيات... حسب ما تجد في النص لا قالباً جاهزاً).',
     '- ناقشه جزءاً جزءاً بالترتيب: سؤال أو سؤالان فقط في كل جزء حسب أهمية محتواه وكثافته، ثم انتقل للجزء التالي. لا تسأل عن جزء لم تصله بعد، ولا تعد لسؤال سألته من قبل بأي صياغة.',
+    '- اتبع «خطة المناقشة» المحقونة أدناه: هي خطّة النظام لأجزاء بحثك وحصّة كل جزء وسقف أسئلة الجلسة. ابدأ من «الجزء التالي المطلوب الآن»، ولا تعُد إلى جزء مغطّى، ولا تتجاوز السقف.',
     '- كل أسئلتك من قلب نص بحثه وحده: اقتبس منه أو أشر إلى موضعه (الفصل/الصفحة التقريبية) عند السؤال. ممنوع الأسئلة العامة التي تصلح لأي بحث، وممنوع تكرار السؤال بصيغة أخرى.',
     '- في كل رد: سؤال واحد فقط. قيّم إجابته السابقة بعدل دون تمجيد (ما أصاب فيه، وما نقصه، وكيف يحسّنها) ثم اطرح سؤالك الجديد — ولا تعطه الإجابة النموذجية قبل أن يحاول هو أولاً، ولا تقولي «إجابة ممتازة» لإجابة ضعيفة.',
     '- لا تكتبي له أي جزء من البحث، ولا تلخصي له البحث كاملاً بدلاً عنه. دورك أن تمتحنيه لا أن تجيبي عنه.',
@@ -461,13 +462,78 @@ function filesSection(c) {
   ];
 }
 
+/** حصّة الأسئلة لكل جزء — نفس مفاتيح services/defense.js. */
+const QUESTIONS_PER_PART_LABEL = {
+  intro: 1,
+  problem: 2,
+  method: 2,
+  results: 2,
+  discussion: 1,
+  references: 1
+};
+
+/**
+ * خطة المناقشة وكمّيتها — تُحقن في موجّه المناقِش فقط.
+ *
+ * بدون هذه كان المناقِش يسأل بلا نهاية ويعود من الأول (لا عدّاد في الواجهة ولا
+ * تذكير له بما غطّاه). الآن يعرف: خطة الأجزاء، ما غطّاه، كم طرح وكم بقي.
+ */
+function defensePlanSection(c) {
+  const parts = Array.isArray(c?.defenseParts) ? c.defenseParts : [];
+  const total = Number(c?.defenseTotal) || 0;
+  const asked = Number(c?.defenseAsked) || 0;
+  const covered = Array.isArray(c?.defenseCovered) ? c.defenseCovered : [];
+  const current = c?.defenseCurrentPart || null;
+
+  if (!parts.length || !total) return [];
+
+  const labelOf = (key) => parts.find((part) => part?.key === key)?.label || key;
+  const planLine = parts
+    .map((part) => {
+      const mark = covered.includes(part?.key) ? '✓' : '○';
+      const quota = QUESTIONS_PER_PART_LABEL[part?.key] || 1;
+      return `  ${mark} ${part?.label || part?.key} (${quota} سؤال)`;
+    })
+    .join('\n');
+  const coveredNames = covered.map(labelOf).join('، ');
+  const previous = Array.isArray(c?.defenseAskedQuestions) ? c.defenseAskedQuestions : [];
+
+  return [
+    '',
+    '# خطة المناقشة (يحقنها النظام — خطّطت بحثك إلى أجزاء وعدّدت أسئلتك)',
+    `سقف أسئلة هذه المناقشة: ${total} ${total === 1 ? 'سؤال' : total === 2 ? 'سؤالان' : 'أسئلة'}. عدد ما طرحته حتى الآن: ${asked}.`,
+    planLine,
+    '',
+    coveredNames
+      ? `غطّيتَ بالفعل هذه الأجزاء: ${coveredNames}. لا تعُد إليها ولا تكرّر سؤالاً عنها — انتقل إلى الجزء التالي.`
+      : 'لم تبدأ بعد — ابدأ بالجزء الأول في الخطة.',
+    current
+      ? `الجزء التالي المطلوب الآن: «${current.label}». اجعل سؤالك من هذا الجزء تحديداً (سؤال واحد، من قلب نصّه).`
+      : 'غطّيتَ كل أجزاء الخطة. في هذه الرسالة أعطِ التقييم النهائي (نقاط القوة، نقاط الضعف، والتوصيات) ولا تطرح أي سؤال جديد.',
+    previous.length
+      ? [
+          '',
+          'أسئلتك السابقة (لا تكرّرها بصيغة أخرى):',
+          ...previous.map((question, index) => `  ${index + 1}. ${question}`)
+        ].join('\n')
+      : '',
+    `قاعدة صريحة: لا تطرح أكثر من سؤال واحد في الرد، ولا تتجاوز سقف ${total} أسئلة، ولا تكرّر سؤالاً طرحته سابقاً ولو بصيغة مختلفة.`
+  ].filter(Boolean);
+}
+
 /**
  * موجّه المناقِش المستقل (defense): لا هوية مشرفة ولا ترحيبها ولا متابعة مهامها
  * ولا تنبيهات ولا ذاكرة ولا رحلة — كل ما يعرفه المناقِش: أساسيات ملف الباحث،
  * ونص البحث المرفق، ورسائل هذه الجلسة وحدها.
  */
 export function buildDefensePrompt(c) {
-  const sections = [...defenseIdentitySection(), ...defenseSection(), ...defenseContextSection(c), ...filesSection(c)];
+  const sections = [
+    ...defenseIdentitySection(),
+    ...defenseSection(),
+    ...defensePlanSection(c),
+    ...defenseContextSection(c),
+    ...filesSection(c)
+  ];
   return sections.filter(Boolean).join('\n');
 }
 

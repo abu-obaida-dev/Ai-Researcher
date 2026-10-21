@@ -3,8 +3,21 @@ import { Readable } from 'node:stream';
 import { requireCoreOnboarding, requireService } from '../middleware/auth.js';
 import { concurrencyLimit, rateLimitUser } from '../middleware/security.js';
 import { deleteConversation, getConversation, askSupervisor, appendMessage } from '../services/chat.js';
-import { defenseChecklist, defenseProgress, listDefenses, setDefenseThesisFile, startDefense } from '../services/defense.js';
-import { getFileRow, listFiles, saveUpload, userFileMaxBytes } from '../services/files.js';
+import {
+  defenseChecklist,
+  defenseProgress,
+  extractQuestionFromReply,
+  listDefenses,
+  nextPendingPart,
+  planParts,
+  recordDefenseQuestion,
+  setDefensePlan,
+  setDefenseThesisFile,
+  startDefense,
+  syncDefenseState
+} from '../services/defense.js';
+import { extractFileText } from '../services/documents.js';
+import { getFileRow, listFiles, readOwnedFile, saveUpload, userFileMaxBytes } from '../services/files.js';
 import { unreadCount } from '../services/notifications.js';
 import { getProfile } from '../services/users.js';
 import { renderNotice } from '../views/layout.js';
@@ -38,6 +51,51 @@ const FLASH = {
   file_bad: { type: 'error', message: 'تعذّر رفع الملف — تحقق من النوع والحجم.' }
 };
 
+/**
+ * يسجّل سؤال المناقِش بعد كل ردّ: يزيد العدّاد، يحفظ نصّ السؤال، ويحدّد
+ * الجزء الذي غطّاه (الجزء التالي في الخطة وقت السؤال).
+ *
+ * إن لم يكن في الردّ استفهام (تقييم فقط) فلا يُسجَّل شيء — العدّاد يعدّ
+ * الأسئلة فعلاً لا الردود.
+ */
+async function recordReplyQuestion(conversationId, replyText) {
+  try {
+    const question = extractQuestionFromReply(replyText);
+    if (!question) return null;
+    const { pool: dbPool } = await import('../db/client.js');
+    const { rows } = await dbPool.query('SELECT defense_state FROM conversations WHERE id = $1', [conversationId]);
+    const raw = rows[0]?.defense_state && typeof rows[0].defense_state === 'object' ? rows[0].defense_state : {};
+    const current = nextPendingPart(raw);
+    return await recordDefenseQuestion(conversationId, {
+      question,
+      partKey: current?.key || ''
+    });
+  } catch (error) {
+    console.warn(`تعذّر تسجيل سؤال المناقشة: ${error?.code || error?.message}`);
+    return null;
+  }
+}
+
+/**
+ * يبني خطة المناقشة من نصّ ملف البحث: يقسمه إلى أجزاء ويحدّد سقف الأسئلة.
+ *
+ * تُستدعى مرة واحدة عند تثبيت الملف. الفشل لا يُسقط المناقشة: خطة فارغة
+ * تعني «سقف افتراضي» والمناقِش يقرأ البحث بنفسه كالسابق.
+ */
+async function buildDefensePlanForFile(userId, conversationId, fileId) {
+  try {
+    const found = await readOwnedFile(userId, fileId);
+    if (!found || !found.buffer) return false;
+    const { text } = await extractFileText(found.buffer, found.row?.file_name || '');
+    const parts = planParts(text);
+    if (!parts.length) return false;
+    return await setDefensePlan(conversationId, parts);
+  } catch (error) {
+    console.warn(`تعذّر بناء خطة المناقشة: ${error?.code || error?.message}`);
+    return false;
+  }
+}
+
 /** كود خطأ من askSupervisor → مفتاح رسالة FLASH. */
 function flashKeyForError(error) {
   return (
@@ -61,6 +119,17 @@ router.get('/defense', requireService('defense'), async (req, res) => {
       requested ? getConversation(userId, requested) : Promise.resolve(null),
       listFiles(userId, {})
     ]);
+
+    // توفّق حالة المناقشة مع ما سُئل فعلاً (ترحيل الجلسات القديمة التي سُئلت
+    // قبل وجود العدّاد) — فيعرض العدّاد الحقيقي بدل صفر.
+    if (conversation?.mode === 'defense') {
+      try {
+        const synced = await syncDefenseState(conversation.id, conversation.messages || []);
+        if (synced) conversation.defense_state = synced;
+      } catch (error) {
+        console.warn(`تعذّر توفّق حالة المناقشة: ${error?.code || error?.message}`);
+      }
+    }
 
     const flash = FLASH[String(req.query.ok || req.query.err || '')];
     res.type('html').send(
@@ -186,6 +255,10 @@ router.post(
 
       await setDefenseThesisFile(conversationId, fileId);
 
+      // خطة المناقشة: نقسم نصّ البحث إلى أجزاء ونحدّد سقف الأسئلة — قبل أول
+      // سؤال، حتى يعرف المناقِش خطّته وكم-question له. تُبنى مرة واحدة هنا.
+      await buildDefensePlanForFile(req.account.id, conversationId, fileId);
+
       // رسالة نظام مرئية تفصل بين «اطلب التثبيت» و«قرأتُ بحثك»: بدونها يبدو ردّ
       // المناقِش تناقضاً (طلب رفعاً ثم أعلن قراءته فوراً). دور='system' فلا تُعدّ
       // رسالة باحث في isFirstMessageEver ولا في عدّادات المحادثات.
@@ -201,7 +274,7 @@ router.post(
       // لأن النص الكامل يُحقن أصلاً من defense_state عبر buildSupervisorContext —
       // إقحامه هنا يضاعف السياق فيفشل Groq بحد الطول، ويفشل OpenRouter بنفاد الرصيد.
       try {
-        await askSupervisor({
+        const opening = await askSupervisor({
           userId: req.account.id,
           prompt: '[ملف البحث مثبّت أعلاه — اقرأه كاملاً] اكتب للباحث أنك قرأت بحثه وفهمته، ثم ابدأ مناقشته من أول جزء بسؤال واحد فقط من قلب النص مع الإشارة لموضعه.',
           conversationId,
@@ -209,6 +282,8 @@ router.post(
           mode: 'defense',
           internal: true
         });
+        // أول سؤال من المناقِش يُحتسب في العدّاد (كغيره).
+        await recordReplyQuestion(conversationId, opening?.answer);
       } catch (aiError) {
         console.warn(`فشل بدء المناقشة من البحث (الملف مثبّت): ${aiError?.code || aiError?.message}`);
         res.redirect(303, back(`err=${flashKeyForError(aiError)}`));
@@ -259,6 +334,10 @@ router.post('/defense/:id/answer', requireService('defense'), requireCoreOnboard
       profile: (await getProfile(req.account.id)) || {},
       mode: 'defense'
     });
+
+    // عدّاد المناقشة: نسجّل سؤال المناقِش (نصّه + الجزء الذي غطّاه) ⇒ يعرف
+    // المناقِش كم طرح وكم بقي، فلا يكرّر ولا يتجاوز السقف.
+    await recordReplyQuestion(conversationId, result.answer);
 
     res.redirect(303, `/defense?d=${encodeURIComponent(result.conversationId)}&ok=answered`);
   } catch (error) {

@@ -4,6 +4,7 @@ import { getJourney } from './journey.js';
 import { getStrikes } from './supervisor-memory.js';
 import { readOwnedFile } from './files.js';
 import { extractFileText } from './documents.js';
+import { estimatePages } from './defense.js';
 
 /**
  * سياق المشرف الذكي — كل متغيّرات {{…}} في موجّه النظام.
@@ -31,7 +32,7 @@ const MAX_FILES_BLOCK_CHARS = 40000;
  * 12 ألف حرف من الملف ⇒ ~8.1 ألف token ⇒ Groq يرفض بـ 413/400-length.
  * للمناقشة (المناقش يقرأ ما فيه) وتُبقي الحمولة دون حدّ النموذج.
  */
-const MAX_FILE_CHARS_DEFENSE = 6000;
+const MAX_FILE_CHARS_DEFENSE = 8000;
 
 /** تقدير «أيام منذ آخر نشاط» من أعلى طابع زمني بين الأنشطة — محادثات
  * المناقشة (defense) مستثناة: للمشرف ذاكرته من إرشاده وحده (لكل شخصية ذاكرتها). */

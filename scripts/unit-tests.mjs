@@ -45,7 +45,15 @@ import {
   trimFilesInSystem,
   trimPayloadToBudget
 } from '../src/services/payload-budget.js';
-import { defenseProgress, extractDefenseFinalTag } from '../src/services/defense.js';
+import {
+  applyQuestionToState,
+  defenseProgress,
+  extractDefenseFinalTag,
+  extractQuestionFromReply,
+  maxQuestionsFor,
+  nextPendingPart,
+  planParts
+} from '../src/services/defense.js';
 import { evaluateStepCompletion, specForStep } from '../src/services/step-review.js';
 // ملاحظة (إصلاح C1): وظائف «ترتيب المصادر» و«دفائف البحث» و«اشتقاق العبارة من السجل»
 // أُزيلت عمداً من assistant.js في commit 54d0d51 — المعلم لم يعد يبحث في المكتبة
@@ -1306,6 +1314,144 @@ test('defenseProgress: مراحل الجلسة تتبع التثبيت والإ�
   assert.equal(defenseProgress({ thesisFileId: 'x' }).stageLabel, 'المناقشة جارية', 'ملف مثبّت = المناقشة جارية');
   assert.equal(defenseProgress({ thesisFileId: 'x', done: true }).stageLabel, 'انتهت المناقشة', 'التقييم يُنهي الجلسة');
   assert.equal(defenseProgress({ thesisFileId: 'x', done: true }).stageKey, 'final', 'مرحلة النهاية');
+});
+
+/* =============================================================================
+ * المناقشة: حدّ لعدد الأسئلة + تتبّع التغطية + منع التكرار
+ * (كان يسأل بلا نهاية ويعود من الأول لأن `asked` لم يُزد قط)
+ * ============================================================================= */
+
+const THESIS_SAMPLE = `
+الفصل الأول: المقدمة والمشكلة البحثية
+تناولت المقدمة مشكلة الدراسة وأهدافها.
+الفصل الثاني: الإطار النظري والأهداف
+الفصل الثالث: منهجية الدراسة
+مجتمع الدراسة وعينة البحث وأدوات جمع البيانات.
+الفصل الرابع: نتائج الدراسة
+جداول التحليل الإحصائي لكل الفرضيات.
+الفصل الخامس: المناقشة والتوصيات
+`;
+
+test('planParts: تقسيم البحث إلى أجزائه الطبيعية بالترتيب المنطقي', () => {
+  const parts = planParts(THESIS_SAMPLE);
+  const keys = parts.map((part) => part.key);
+  assert.deepEqual(keys, ['intro', 'problem', 'method', 'results', 'discussion'], 'الأجزاء بالترتيب المنطقي');
+  assert.ok(parts.every((part) => part.label), 'لكل جزء عنوان عربي مقروء');
+});
+
+test('planParts: نص بلا عناوين يُطابَق على المتن، ونص فارغ ⇒ خطة فارغة', () => {
+  const fromBody = planParts('يتضمن منهج الدراسة ونتائجها وتحليلها');
+  assert.ok(fromBody.length > 0, 'نص بلا عناوين يُعطي خطة من المتن');
+  assert.deepEqual(planParts(''), [], 'نص فارغ ⇒ لا خطة (سقف افتراضي)');
+  assert.deepEqual(planParts('   '), [], 'نص أبيض ⇒ لا خطة');
+});
+
+test('maxQuestionsFor: سقف محسوب من الأجزاء (لا صفر ولا بلا حدّ)', () => {
+  const parts = planParts(THESIS_SAMPLE);
+  const total = maxQuestionsFor(parts);
+  assert.ok(total > 0, 'السقف أكبر من صفر');
+  assert.ok(total <= 14, 'السقف ضمن الحدّ الأقصى (14)');
+  assert.ok(total >= 5, 'السقف ضمن الحدّ الأدنى (5)');
+  assert.equal(maxQuestionsFor([]), 5, 'بلا خطة ⇒ حدّ أدنى افتراضي');
+  assert.equal(maxQuestionsFor(planParts(THESIS_SAMPLE)), total, 'السقف ثابت لنفس الخطة');
+});
+
+test('applyQuestionToState: كل سؤال يزيد العدّاد ويحفظ نصّه والجزء', () => {
+  const parts = planParts(THESIS_SAMPLE);
+  let state = { asked: 0, coveredParts: [], askedQuestions: [], parts };
+
+  state = applyQuestionToState(state, { question: 'ما مشكلة البحث؟', partKey: 'intro' });
+  assert.equal(state.asked, 1, 'العدّاد يزيد بعد السؤال الأول');
+  assert.deepEqual(state.coveredParts, ['intro'], 'الجزء المغطّى يُسجَّل');
+  assert.deepEqual(state.askedQuestions, ['ما مشكلة البحث؟'], 'نصّ السؤال يُحفظ');
+
+  state = applyQuestionToState(state, { question: 'ما منهجك؟', partKey: 'method' });
+  assert.equal(state.asked, 2, 'العدّاد يزيد مرة أخرى');
+  assert.deepEqual(state.coveredParts, ['intro', 'method'], 'الجزآن مغطّيان');
+
+  // تكرار نفس الجزء ⇒ لا يتضاعف في coveredParts (بل يُعدّ في counter)
+  state = applyQuestionToState(state, { question: 'سؤال آخر في المنهجية؟', partKey: 'method' });
+  assert.equal(state.asked, 3, 'كل سؤال يُحتسب');
+  assert.deepEqual(state.coveredParts, ['intro', 'method'], 'الجزء المغطّى لا يتكرر في القائمة');
+});
+
+test('applyQuestionToState: لا يُكسر العدّاد ولا يفسد الحالة القديمة', () => {
+  const state = applyQuestionToState({ asked: 4, done: false, parts: [] }, { question: 'س؟', partKey: '' });
+  assert.equal(state.asked, 5, 'العدّاد يزيد على الحالة الموجودة');
+  assert.equal(state.done, false, 'بقية الحالة محفوظة');
+  const empty = applyQuestionToState(undefined, {});
+  assert.equal(empty.asked, 1, 'حالة فارغة ⇒ عدّاد من 1');
+  assert.deepEqual(empty.askedQuestions, [], 'بلا نصّ سؤال ⇒ قائمة فارغة');
+});
+
+test('nextPendingPart: يختار أول جزء غير مغطّى ثم ينتهي', () => {
+  const parts = planParts(THESIS_SAMPLE);
+  let state = { asked: 0, coveredParts: [], askedQuestions: [], parts };
+  assert.equal(nextPendingPart(state)?.key, 'intro', 'يبدأ من أول جزء');
+
+  state = applyQuestionToState(state, { question: 'س1؟', partKey: 'intro' });
+  assert.equal(nextPendingPart(state)?.key, 'problem', 'ينتقل للجزء التالي بعد التغطية');
+
+  for (const part of parts) {
+    state = applyQuestionToState(state, { question: 'س؟', partKey: part.key });
+  }
+  assert.equal(nextPendingPart(state), null, 'بعد تغطية كل الأجزاء ⇒ لا جزء متبقٍ (⇒ تقييم نهائي)');
+});
+
+test('extractQuestionFromReply: يستخرج السؤال ولا يعدّ الردود بلا استفهام', () => {
+  assert.equal(
+    extractQuestionFromReply('إجابة دقيقة. السؤال التالي: ما معامل R2 في النموذج؟'),
+    'ما معامل R2 في النموذج؟',
+    'السؤال يُستخرج من آخر جملة استفهامية'
+  );
+  assert.equal(extractQuestionFromReply('إجابة نموذجية بلا أي سؤال.'), '', 'ردّ بلا استفهام ⇒ لا يُسجَّل');
+  assert.equal(extractQuestionFromReply(''), '', 'ردّ فارغ ⇒ لا يُسجَّل');
+});
+
+test('defenseProgress: يعرض السقف والباقي (لم يعد null)', () => {
+  const parts = planParts(THESIS_SAMPLE);
+  const progress = defenseProgress({ asked: 3, parts, coveredParts: ['intro'], thesisFileId: 'file-1' });
+  assert.equal(progress.total, maxQuestionsFor(parts), 'السقف معروض');
+  assert.equal(progress.remaining, maxQuestionsFor(parts) - 3, 'الباقي محسوب');
+  assert.equal(progress.asked, 3, 'العدد المعروض');
+  assert.equal(progress.currentPart?.key, 'problem', 'الجزء التالي معروض');
+  assert.ok(progress.stageHint.includes('باقي'), 'التلميح يذكر المتبقي');
+  const finished = defenseProgress({ asked: 8, parts, thesisFileId: 'file-1' });
+  assert.equal(finished.remaining, 0, 'لا متبقي بعد بلوغ السقف');
+});
+
+test('المناقشة: المناقِش يعرف الخطة والسقف في موجّهه (لا يسأل بلا نهاية)', () => {
+  const parts = planParts(THESIS_SAMPLE);
+  const prompt = buildSystemPrompt({
+    mode: 'defense',
+    defenseParts: parts,
+    defenseTotal: maxQuestionsFor(parts),
+    defenseAsked: 2,
+    defenseCovered: ['intro'],
+    defenseCurrentPart: { key: 'problem', label: 'المشكلة البحثية والأهداف' },
+    defenseAskedQuestions: ['ما مشكلة البحث؟', 'ما هدفك؟']
+  });
+  assert.ok(prompt.includes('# خطة المناقشة'), 'قسم الخطة في موجّه المناقِش');
+  assert.ok(prompt.includes('سقف أسئلة هذه المناقشة'), 'السقف معلن للمناقِش');
+  assert.ok(prompt.includes('المشكلة البحثية والأهداف'), 'الجزء المطلوب معروف');
+  assert.ok(prompt.includes('ما مشكلة البحث؟'), 'أسئلته السابقة معروضة له فلا يكرّرها');
+  assert.ok(prompt.includes('لا تتجاوز سقف'), 'قاعدة عدم تجاوز السقف');
+});
+
+test('المناقشة: لا خطة ⇒ لا قسم خطة (وضع المشرف لا يتأثر)', () => {
+  const prompt = buildSystemPrompt({ mode: 'defense', userName: 'ب' });
+  assert.ok(!prompt.includes('# خطة المناقشة'), 'بلا خطة لا يُحقن القسم');
+  const normal = buildSystemPrompt({ mode: 'normal', currentStage: 'البحث' });
+  assert.ok(!normal.includes('# خطة المناقشة'), 'وضع المشرف لا يحصل على خطة المناقشة');
+});
+
+test('المناقشة: عدّاد حقيقي في المسار (لا يبقى صفراً بعد الأسئلة)', () => {
+  const routeSrc = readFileSync(new URL('../src/routes/defense.js', import.meta.url), 'utf8');
+  assert.ok(routeSrc.includes('recordDefenseQuestion'), 'المسار يسجّل السؤال في defense_state');
+  assert.ok(routeSrc.includes('extractQuestionFromReply'), 'المسار يستخرج نصّ السؤال من الرد');
+  assert.ok(routeSrc.includes('buildDefensePlanForFile'), 'المسار يبني الخطة عند تثبيت الملف');
+  const chatSrc = readFileSync(new URL('../src/services/chat.js', import.meta.url), 'utf8');
+  assert.ok(!chatSrc.includes('asked +'), 'chat.js لا يزيد العدّاد بنفسه (المسار وحده)');
 });
 
 test('المعلم: ذاكرته الخاصة تُحقن في موجّهه ومعزولة عن ذاكرة المشرف', () => {

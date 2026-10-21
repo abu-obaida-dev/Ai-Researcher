@@ -12,14 +12,41 @@ export function questionCountLabel(count) {
   return `${n} سؤالا`;
 }
 
+/**
+ * صيغة العدّاد مع السقف: «سؤال ٣ من ٨». بلا سقف نكتفي بالعدد.
+ */
+export function questionProgressLabel(asked, total) {
+  const n = Number(asked) || 0;
+  const max = Number(total) || 0;
+  if (!max) return questionCountLabel(n);
+  return `سؤال ${n} من ${max}`;
+}
+
 export function renderConversations(sessions, activeId) {
   const list = sessions.length
     ? `<ul class="chat-list">${sessions.map((item) => `<li class="chat-item${item.id === activeId ? ' is-active' : ''}">
-    <a href="/defense?d=${escapeHtml(item.id)}"><b>${escapeHtml(item.title || 'مناقشة')}</b><span class="muted">${escapeHtml(questionCountLabel(item.progress.asked))} · ${escapeHtml(item.progress.stageLabel)} · ${escapeHtml(formatDateTime(item.updatedAt))}</span></a>
+    <a href="/defense?d=${escapeHtml(item.id)}"><b>${escapeHtml(item.title || 'مناقشة')}</b><span class="muted">${escapeHtml(questionProgressLabel(item.progress.asked, item.progress.total))} · ${escapeHtml(item.progress.stageLabel)} · ${escapeHtml(formatDateTime(item.updatedAt))}</span></a>
     <form method="post" action="/defense/${escapeHtml(item.id)}/delete" class="chat-del"><button class="chat-del-btn" type="submit" title="حذف" aria-label="حذف">${icon('trash', 'icon-sm')}</button></form>
   </li>`).join('')}</ul>`
     : '<p class="chat-side-empty">لا مناقشات بعد.</p>';
   return `<div class="chat-nav"><form method="post" action="/defense/start"><button class="btn btn-primary btn-block" type="submit">${icon('plus', 'icon-sm')} مناقشة جديدة</button></form>${list}<p class="chat-side-note">كل دردشة بملف بحث ثابت.</p></div>`;
+}
+
+/**
+ * شريط خطة المناقشة: الأجزاء المغطاة (✓) والباقية (○) — يعرض التقدّم
+ * ويمنع التكرار: الباحث يرى أن «النتائج» غُطّيت فلا ينتظر سؤالاً عنها.
+ */
+export function renderDefensePlan(progress) {
+  const parts = Array.isArray(progress?.parts) ? progress.parts : [];
+  if (!parts.length) return '';
+  const covered = Array.isArray(progress.coveredParts) ? progress.coveredParts : [];
+  const items = parts
+    .map((part) => {
+      const done = covered.includes(part?.key);
+      return `<span class="plan-part${done ? ' is-done' : ''}">${done ? '✓' : '○'} ${escapeHtml(part?.label || part?.key)}</span>`;
+    })
+    .join('');
+  return `<div class="chat-plan" aria-label="خطة المناقشة">${items}</div>`;
 }
 
 export function renderThesisBar(conversation, progress) {
@@ -28,7 +55,12 @@ export function renderThesisBar(conversation, progress) {
   const finish = !progress.done && progress.thesisFileId
     ? `<form method="post" action="/defense/${escapeHtml(conversation.id)}/finish" class="inline-form"><button class="btn btn-quiet btn-sm" type="submit">${icon('check', 'icon-sm')} انهاء بالتقييم النهائي</button></form>`
     : '';
-  return `<div class="chat-modebar is-defense"><span>${icon('graduation', 'icon-sm')} ${escapeHtml(thesis)}${progress.asked ? ` — ${escapeHtml(questionCountLabel(progress.asked))}` : ''}</span>${finish}</div>`;
+  // العدّاد مع السقف: «سؤال ٣ من ٨» — يعرضه دائماً بعد تثبيت الملف (حتى قبل
+  // أول سؤال) ليعرف الباحث حجم المناقشة، ويُخفى قبل التثبيت.
+  const counter = progress.thesisFileId
+    ? ` — ${escapeHtml(questionProgressLabel(progress.asked, progress.total))}`
+    : '';
+  return `<div class="chat-modebar is-defense"><span>${icon('graduation', 'icon-sm')} ${escapeHtml(thesis)}${counter}</span>${finish}</div>`;
 }
 
 export function renderThesisCard(conversation, progress, files) {

@@ -902,6 +902,14 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 }
 .chat-modebar span { display: inline-flex; align-items: center; gap: 6px; }
 .chat-modebar.is-defense { background: rgba(15, 40, 62, 0.08); color: var(--ink); }
+/* خطة المناقشة: الأجزاء المغطاة (✓) والباقية (○) — شريط رفيع يوضّح التقدّم. */
+.chat-plan {
+  display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; padding: 7px 12px;
+  border: 1px solid var(--mist); border-radius: 10px; background: var(--mist-soft);
+  font-size: 12px; color: var(--slate);
+}
+.chat-plan .plan-part { padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.7); }
+.chat-plan .plan-part.is-done { background: rgba(31, 122, 86, 0.14); color: #1f7a56; font-weight: 700; }
 .chat-thesis { flex: 0 0 auto; margin: 0 0 8px; padding: 10px 12px; border: 1px solid var(--mist); border-radius: 14px; background: var(--mist-soft); font-size: 13px; }
 .chat-thesis > summary { cursor: pointer; font-weight: 700; display: flex; align-items: center; gap: 6px; }
 .chat-thesis.is-required { border-color: #d9a441; background: #fdf6e3; }
