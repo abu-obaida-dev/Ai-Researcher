@@ -37,16 +37,7 @@ export function renderConversations(sessions, activeId) {
  * ويمنع التكرار: الباحث يرى أن «النتائج» غُطّيت فلا ينتظر سؤالاً عنها.
  */
 export function renderDefensePlan(progress) {
-  const parts = Array.isArray(progress?.parts) ? progress.parts : [];
-  if (!parts.length) return '';
-  const covered = Array.isArray(progress.coveredParts) ? progress.coveredParts : [];
-  const items = parts
-    .map((part) => {
-      const done = covered.includes(part?.key);
-      return `<span class="plan-part${done ? ' is-done' : ''}">${done ? '✓' : '○'} ${escapeHtml(part?.label || part?.key)}</span>`;
-    })
-    .join('');
-  return `<div class="chat-plan" aria-label="خطة المناقشة">${items}</div>`;
+  return '';
 }
 
 export function renderThesisBar(conversation, progress) {

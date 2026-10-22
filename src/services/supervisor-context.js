@@ -218,6 +218,12 @@ export async function buildSupervisorContext({ userId, profile = {}, conversatio
       ''
   );
 
+  // صورة المناقشة للحالة = defense: تُحقن في موجّه المناقِش (defensePlanSection)
+  // عبر القِيم defenceParts/defenseTotal/defenseAsked/defenseCovered/defenseCurrentPart/defenseAskedQuestions/defensePages.
+  const defenseState = isDefense
+    ? defenseStateView(conversation?.defense_state || {})
+    : null;
+
   return {
     userName: orDash(profile.full_name),
     degree: orDash(degree),
@@ -226,11 +232,6 @@ export async function buildSupervisorContext({ userId, profile = {}, conversatio
     researchGoal,
     researchGoalKey,
     progressLevel,
-    // صورة المناقشة للحالة = defense: تُحقن في موجّه المناقِش (defensePlanSection)
-    // عبر القِيم defenceParts/defenseTotal/defenseAsked/defenseCovered/defenseCurrentPart/defenseAskedQuestions/defensePages.
-    defenseState: isDefense
-      ? defenseStateView(conversation?.defense_state || {})
-      : null,
     university: orDash([profile.university, profile.faculty].filter(Boolean).join(' — ')),
     language,
     citationStyle,

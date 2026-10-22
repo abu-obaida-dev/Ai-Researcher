@@ -21,15 +21,45 @@ function renderMessage(message) {
 export function renderDefensePage({ account = null, unread = 0, conversation = null, sessions = [], progress = null, files = [], flash = null }) {
   const current = progress || { done: false, asked: 0, stageLabel: '', stageHint: '', thesisFileId: null };
   const flashHtml = flash ? (flash.type === 'error' ? `<div class="alert chat-flash">${escapeHtml(flash.message)}</div>` : `<div class="notice chat-flash">${escapeHtml(flash.message)}</div>`) : '';
+  let combinedShown = false;
   const messagesHtml = conversation?.messages?.length
-    ? conversation.messages.map(renderMessage).join('')
-    : `<div class="chat-welcome">${icon('graduation')}<p>دردشة مستقلة: ارفع بحثك فيقراه المناقش ثم يناقشك جزءا جزءا ثم يقييمك.</p></div>`;
+  ? (() => {
+      let welcomeShownLocal = false;
+
+      const filtered = conversation.messages.filter((m) => {
+        // بعد تثبيت ملف البحث: نخفي رسالة البداية القديمة التي تطلب رفع الملف
+        // لأنها أصبحت غير منطقية للمستخدم.
+        if (
+          current.thesisFileId &&
+          m.role === 'assistant' &&
+          (
+            m.content.includes('يرجى رفع ملف بحثك') ||
+            m.content.includes('ارفع ملف بحثك') ||
+            m.content.includes('ثبت ملف بحثك') ||
+            m.content.includes('اختيار ملف البحث')
+          )
+        ) {
+          return false;
+        }
+
+        // فلترة رسائل الترحيب المكررة
+        const isWelcome = /^مرح/.test(m.content);
+
+        if (isWelcome && welcomeShownLocal) return false;
+        if (isWelcome) welcomeShownLocal = true;
+
+        return true;
+      });
+
+      return filtered.map(renderMessage).join('');
+    })()
+  : `<div class="chat-welcome">${icon('graduation')}<p>دردشة مستقلة: ارفع بحثك فيقرأه المناقش ويبدأ المناقشة.</p></div>`;
   let composer = '';
   if (!conversation?.id) {
     composer = `<div class="chat-welcome"><form method="post" action="/defense/start"><button class="btn btn-primary" type="submit">ابدا دردشة مناقشة</button></form></div>`;
   } else if (current.done) {
     composer = `<div class="notice chat-flash">انتهت المناقشة — اقرا التقييم النهائي اعلاه.</div><div class="chat-welcome"><form method="post" action="/defense/start"><button class="btn btn-primary" type="submit">ابدأ مناقشة جديدة</button></form></div>`;
-  } else if (!current.thesisFileId) {
+  } else if (!current.thesisFileId && !conversation?.messages?.length) {
     composer = `<div class="notice chat-flash">ارفع ملف البحث اعلاه ليبدا المناقش.</div>`;
   } else {
     composer = `<form class="chat-composer" method="post" action="/defense/${escapeHtml(conversation.id)}/answer"><div class="chat-composer-row"><textarea id="message" name="answer" rows="1" required maxlength="3000" placeholder="اكتب اجابتك…" aria-label="اجابتك"></textarea><button class="btn btn-primary chat-send" type="submit" title="ارسال" aria-label="ارسال">${icon('send')}</button></div></form>`;

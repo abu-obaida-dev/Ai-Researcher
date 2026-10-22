@@ -161,63 +161,11 @@ export function planParts(text) {
   const raw = String(text || '');
   if (!raw.trim()) return [];
 
-  const lines = raw.split('\n');
-  const blocks = [];
-  let current = { title: '', body: '' };
-  for (const line of lines) {
-    if (isHeadingLine(line)) {
-      if (current.title || current.body.trim()) blocks.push(current);
-      current = { title: line.trim(), body: '' };
-    } else {
-      current.body += (current.body ? '\n' : '') + line;
-    }
-  }
-  if (current.title || current.body.trim()) blocks.push(current);
-
-  const taken = new Set();
-  const parts = [];
-  for (const block of blocks) {
-    const title = String(block.title || '').replace(/\s+/g, ' ').trim();
-    const body = String(block.body || '').trim();
-    const canonical = keyOf(title, body);
-    // كتلة بلا متن وبلا عنوان معروف (عنوان شارد/سطر فهرس) ليست جزءاً.
-    if (!body && !canonical) continue;
-
-    const label = (
-      title ||
-      SECTION_PATTERNS.find((pattern) => pattern.key === canonical)?.label ||
-      `الجزء ${parts.length + 1}`
-    ).slice(0, 90);
-
-    // العنوان نفسه مرّتين (فهرس ثم فصل حقيقي): نُبقي الجزء الأكبر متناً.
-    const twin = parts.findIndex((part) => part.label === label);
-    if (twin !== -1) {
-      if (body.length > parts[twin].chars) {
-        parts[twin].chars = body.length;
-        parts[twin].weight = partWeight(label, body);
-      }
-      continue;
-    }
-
-    if (parts.length >= MAX_PLAN_PARTS) break;
-    parts.push({
-      key: uniqueKey(canonical || `part${parts.length + 1}`, taken),
-      label,
-      chars: body.length,
-      weight: partWeight(label, body)
-    });
-  }
-
-  if (parts.length) return parts;
-
-  // بلا عناوين: تقسيم بالحجم ⇒ الأسئلة تظل متناسبة مع حجم البحث.
+  // تقسيم بالحجم فقط (لا يعتمد على كشف عناوين الفصول).
+  // كل جزء بحجم FALLBACK_CHUNK_CHARS حرفاً، مما يجعل عدد الأسئلة
+  // متناسباً مع حجم البحث بغض النظر عن جودة استخراج النص من PDF.
   return chunkBySize(raw);
 }
-
-/**
- * تقسيم احتياطي بالحجم: كل FALLBACK_CHUNK_CHARS حرفاً جزءاً، ويأخذ كل جزء
- * مفتاحه المنطقي من كلماته إن أمكن (منهج/نتائج…) وإلا «partN».
- */
 function chunkBySize(text) {
   const raw = String(text || '').trim();
   if (!raw) return [];
@@ -333,9 +281,11 @@ export function nextPendingPart(state = {}) {
  * الجزء يُغلق عند **استنفاد حصّته** لا بعد سؤال واحد (جزء المنهجية مثلاً قد
  * يستحق سؤالين) — هذا ما يجعل المناقشة «جزءاً جزءاً» بمعناها الحقيقي.
  */
-export function applyQuestionToState(state = {}, { question = '', partKey = '' } = {}) {
+export function applyQuestionToState(state = {}, { question = '', partKey = '', isCorrect } = {}) {
   const raw = state && typeof state === 'object' ? state : {};
   const asked = Number(raw.asked) || 0;
+  const correctCount = Number(raw.correctCount) || 0;
+  const wrongCount = Number(raw.wrongCount) || 0;
   const askedQuestions = Array.isArray(raw.askedQuestions) ? [...raw.askedQuestions] : [];
   const plan = Array.isArray(raw.parts) ? raw.parts : [];
 
@@ -352,7 +302,15 @@ export function applyQuestionToState(state = {}, { question = '', partKey = '' }
   }
   if (partKey) askedByPart[partKey] = Math.max(0, Number(askedByPart[partKey]) || 0) + 1;
 
-  const next = { ...raw, asked: asked + 1, askedQuestions, askedByPart };
+  // Update correct/wrong counters based on isCorrect
+  if (isCorrect === true) {
+    correctCount += 1;
+  } else if (isCorrect === false) {
+    wrongCount += 1;
+  }
+  // if isCorrect is null or unspecified, don't change the counters
+
+  const next = { ...raw, asked: asked + 1, correctCount, wrongCount, askedQuestions, askedByPart };
   next.coveredParts = coveredPartsOf(next);
   return next;
 }
@@ -387,6 +345,41 @@ export function extractQuestionsFromMessages(messages = []) {
     if (question) questions.push(question);
   }
   return questions;
+}
+
+/** يستخرج حالة الإجابة (correct/incorrect/null) من ردود النموذج باستخدام التاغات [[correct]] أو [[incorrect]]. */
+export function extractAnswerCorrectness(reply = '') {
+  const text = String(reply || '').trim();
+  if (!text) return null;
+
+  // البحث عن تاغ الصواب
+  const correctTag = text.match(/\[\[correct\]\]/i);
+  if (correctTag) return 'correct';
+
+  // Search for incorrect tag
+  const incorrectTag = text.match(/\[\[incorrect\]\]/i);
+  if (incorrectTag) return 'incorrect';
+
+  // No tag means أن الإجابة غير مدقّقة (null)
+  return null;
+}
+
+/** يستنتج حالة الصواب من رد المناقِش باستخدامextractAnswerCorrectness. */
+function inferAnswerState(reply = '') {
+  const correctness = extractAnswerCorrectness(reply);
+  if (correctness === 'correct') return true;
+  if (correctness === 'incorrect') return false;
+  return null;
+}
+
+/**
+ * يستنتج كل من السؤال وثبوت الصواب من رد المناقِش.
+ * يُستخدم في applyQuestionToState عند معالجة الإجابات.
+ */
+function extractQuestionAndCorrectness(reply = '') {
+  const question = extractQuestionFromReply(reply);
+  const isCorrect = inferAnswerState(reply);
+  return { question, isCorrect };
 }
 
 /**
@@ -447,6 +440,8 @@ export function reconcileDefenseState(state = {}, messages = []) {
 export async function startDefense({ userId, title = 'محاكاة مناقشة', thesisFileId = null }) {
   const state = {
     asked: 0,
+    correctCount: 0,
+    wrongCount: 0,
     thesisFileId: thesisFileId || null,
     coveredParts: [],
     askedQuestions: [],
