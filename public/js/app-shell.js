@@ -258,6 +258,11 @@
     if (!config.method) config.method = 'GET';
 
     return fetch(url, config).then(function (response) {
+      if (response.status === 401) {
+        // جلسة منتهية أو غير موجودة — أعد توجيه المستخدم للدخول
+        window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
+        throw new Error('انتهت الجلسة، يرجى تسجيل الدخول مجدداً.');
+      }
       return response.json().then(function (data) {
         if (!response.ok || data.ok === false) {
           throw new Error(data.message || 'تعذّر تنفيذ الطلب.');
