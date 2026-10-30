@@ -4,8 +4,11 @@
   "functions": {
     "api/index.js": {
       "memory": 2048,
-      "maxDuration": 300,
-      "regions": ["iad1"]
+      "maxDuration": 300
     }
-  }
+  },
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/api/index.js" },
+    { "src": "/(.*)", "dest": "/api/index.js" }
+  ]
 }
