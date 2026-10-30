@@ -73,6 +73,11 @@ export function requireAccount(req, res, next) {
     return;
   }
 
+  const wantsJson = String(req.get?.('accept') || '').includes('application/json');
+  if (wantsJson) {
+    res.status(401).json({ ok: false, error: { code: 'auth', message: 'سجّل الدخول أولاً.' } });
+    return;
+  }
   res.redirect(302, `/login?next=${encodeURIComponent(req.originalUrl || '/dashboard')}`);
 }
 
