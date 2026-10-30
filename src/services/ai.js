@@ -250,62 +250,6 @@ async function callOnce({ label, url, headers, body, model, signal }) {
 }
 
 /**
- * نداء Gemini (generateContent) مع تبديل بين نماذج المفتاح الواحد.
- *
- * gemini-3.8-flash نموذج «مفكّر»: يكتب تفكيره في parts منفصلة (thought: true)
- * ويحتسبها usageMetadata.thoughtsTokenCount **خارج** candidatesTokenCount. لذلك:
- *  - نستبعد أجزاء التفكير من النص الظاهر (لا نُفصح عن سلسلة استدلاله للباحث).
- *  - نضمن له هامشاً فوق سقف الرد، وإلا أكل التفكيرُ الحصة كلها فنال رداً فارغاً.
- */
-async function geminiCall({ apiKey, models, system, messages, temperature, maxTokens = MAX_TOKENS, signal = null }) {
-  const budget = Math.min(MAX_TOKENS, Math.max(Number(maxTokens) + 400, 1200));
-  const contents = messages.map((message) => ({
-    role: message.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: message.content }]
-  }));
-
-  const failures = [];
-  for (const model of models) {
-    try {
-      const data = await callOnce({
-        label: 'Gemini',
-        url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
-        headers: { 'content-type': 'application/json' },
-        body: { systemInstruction: { parts: [{ text: system }] }, contents, generationConfig: { temperature, maxOutputTokens: budget } },
-        model,
-        signal
-      });
-
-      const parts = data?.candidates?.[0]?.content?.parts || [];
-      const text = parts
-        .filter((part) => part && part.thought !== true)
-        .map((part) => part.text || '')
-        .join('\n')
-        .trim();
-
-      if (!text) {
-        const finish = data?.candidates?.[0]?.finishReason || 'غير معروف';
-        const error = new Error(`النموذج ${model} أعاد رداً فارغاً (finishReason=${finish}).`);
-        error.status = finish === 'MAX_TOKENS' ? 429 : 500;
-        throw error;
-      }
-      // usageMetadata توحيده في services/tokens.js (promptTokenCount/candidatesTokenCount/thoughtsTokenCount)
-      return { text, model, usage: data?.usageMetadata || null };
-    } catch (error) {
-      failures.push(`${model}: ${String(error?.message || error).slice(0, 90)}`);
-      // مفتاح/رصيد/نموذج غير موجود = لا فائدة من تبديل الباقي
-      if ([401, 402, 403, 404].includes(error.status)) break;
-      if (signal?.aborted) break;
-    }
-  }
-
-  const last = failures.at(-1) || 'بلا تفاصيل';
-  const error = new Error(`Gemini فشل على ${models.length} نموذج — ${last}`);
-  error.status = /402|403|401/.test(last) ? 402 : 503;
-  throw error;
-}
-
-/**
  * المزوّدون بالترتيب مع دالة نداء لكل واحد. كل مزوّد يحمل قائمة نماذج.
  * مُصدَّر للاختبار: نتحقّق من منطق التقصير وإعادة المحاولة على خطأ الطول
  * بلا أي طلبات شبكة (استبدال fetch عالمياً).
@@ -390,54 +334,6 @@ export const PROVIDERS = [
       }
       throw error;
     }
-  },
-  {
-    key: 'openrouter',
-    envKey: 'OPENROUTER_API_KEY',
-    models: modelList(process.env.AI_MODEL_OPENROUTER, 'openai/gpt-4o-mini'),
-    async call({ apiKey, models, system, messages, temperature, maxTokens = MAX_TOKENS, signal = null }) {
-      const failures = [];
-      for (const model of models) {
-        try {
-          const data = await callOnce({
-            label: 'OpenRouter',
-            url: 'https://openrouter.ai/api/v1/chat/completions',
-            headers: {
-              'content-type': 'application/json',
-              authorization: `Bearer ${apiKey}`,
-              'x-title': 'Zena AI',
-              'HTTP-Referer': 'https://zena.ai'
-            },
-            body: { model, messages: [{ role: 'system', content: system }, ...messages], temperature, max_tokens: maxTokens },
-            model,
-            signal
-          });
-
-          const text = data?.choices?.[0]?.message?.content;
-          if (!text) throw new Error('ردّ فارغ');
-          return { text, model: data?.model || model, usage: data?.usage || null };
-        } catch (error) {
-          failures.push(`${model}: ${String(error?.message || error).slice(0, 90)}`);
-          if ([401, 402, 403, 404].includes(error.status) || signal?.aborted) break;
-        }
-      }
-      const last = failures.at(-1) || 'بلا تفاصيل';
-      const error = new Error(`OpenRouter فشل على ${models.length} نموذج — ${last}`);
-      error.status = /402|403|401/.test(last) ? 402 : 503;
-      throw error;
-    }
-  },
-  {
-    key: 'gemini',
-    envKey: 'GEMINI_API_KEY',
-    models: modelList(process.env.AI_MODEL_GEMINI, 'gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-flash-latest'),
-    call: geminiCall
-  },
-  {
-    key: 'gemini-fallback',
-    envKey: 'GEMINI_API_KEY_FALLBACK',
-    models: modelList(process.env.AI_MODEL_GEMINI_FALLBACK, 'gemini-3.6-flash,gemini-3.5-flash,gemini-3.1-flash-lite'),
-    call: geminiCall
   }
 ];
 

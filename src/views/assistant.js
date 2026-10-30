@@ -179,7 +179,7 @@ export function renderAssistantPage({
 
   const providerWarning = providers.length
     ? ''
-    : `<div class="alert chat-flash"><b>لا يوجد مزوّد ذكاء اصطناعي مفعّل.</b> أضف أحد المفاتيح <code>OPENROUTER_API_KEY</code> أو <code>GROQ_API_KEY</code> أو <code>GEMINI_API_KEY</code> في ملف <code>.env</code> ثم أعد تشغيل الخادم.</div>`;
+    : `<div class="alert chat-flash"><b>لا يوجد مزوّد ذكاء اصطناعي مفعّل.</b> أضف مفتاح <code>GROQ_API_KEY</code> في ملف <code>.env</code> ثم أعد تشغيل الخادم.</div>`;
 
   const messagesHtml = conversation?.messages?.length
     ? conversation.messages.map(renderMessage).join('')

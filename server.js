@@ -52,7 +52,7 @@ const REQUIRED_ENV = [
   'GOOGLE_CLIENT_SECRET'
 ];
 
-const AI_ENV_KEYS = ['OPENROUTER_API_KEYS', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'GROQ_API_KEY'];
+const AI_ENV_KEYS = ['GROQ_API_KEY'];
 
 function envPresenceReport() {
   const missing = REQUIRED_ENV.filter((key) => !String(process.env[key] ?? '').trim());

@@ -27,10 +27,7 @@ export const CHARS_PER_TOKEN = 2.1;
  * فنترك لـ Groq نصيباً من الرصيد ونعمل بحدّ 4000 رمز (≈57% من 7000).
  */
 export const INPUT_BUDGETS = {
-  groq: 4000,
-  openrouter: 32000,
-  gemini: 60000,
-  'gemini-fallback': 60000
+  groq: 4000
 };
 
 /**
