@@ -706,8 +706,7 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .wa-float:focus-visible { outline: 2px solid var(--sea); outline-offset: 2px; }
 .wa-float-icon { width: 20px; height: 20px; }
 @media (max-width: 560px) {
-  .wa-float { inset-block-end: 14px; inset-inline-start: 14px; padding: 11px; }
-  .wa-float-label { display: none; }
+  .wa-float { display: none; }
 }
 
 /* ==== الإشعارات: جرس الترويسة + قائمة الإشعارات داخل الموقع ==== */
