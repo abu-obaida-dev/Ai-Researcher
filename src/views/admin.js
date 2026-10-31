@@ -1881,6 +1881,7 @@ function libraryExternalResult(result, provider, token) {
       <button class="btn btn-primary btn-sm" type="submit">${icon('download', 'icon-sm')} استيراد إلى المكتبة${result.downloadable ? ' + تحميل الملف' : ' (بيانات فقط)'}</button>
     </form>
     <a class="btn btn-sm" href="${escapeHtml(result.url || '#')}" target="_blank" rel="noopener">فتح المصدر ↗</a>
+    ${result.doi ? `<a class="btn btn-quiet btn-sm" href="https://doi.org/${escapeHtml(result.doi)}" target="_blank" rel="noopener">DOI ↗</a>` : ''}
     ${result.pdfUrl ? `<a class="btn btn-sm" href="${escapeHtml(result.pdfUrl)}" target="_blank" rel="noopener">${icon('download', 'icon-sm')} PDF مفتوح ↗</a>` : ''}
   </div>
 </article>`;
