@@ -2143,15 +2143,13 @@ export function renderLayout({
   // على الشاشات الكبيرة يظهر في كل الصفحات.
   // على الهاتف (<= 560px) يظهر فقط في الصفحة الرئيسية (area === 'public')
   // وصفحات أدوات البحث (area === 'app' و activeKey في ['library', 'references']).
-  let showOnMobile = false;
+  let whatsappFloat = '';
   if (area === 'admin') {
     whatsappFloat = '';
   } else if (area === 'public') {
-    showOnMobile = true;
-    whatsappFloat = renderWhatsappFloat({ showOnMobile });
+    whatsappFloat = renderWhatsappFloat({ showOnMobile: true });
   } else if (area === 'app' && ['library', 'references'].includes(activeKey)) {
-    showOnMobile = true;
-    whatsappFloat = renderWhatsappFloat({ showOnMobile });
+    whatsappFloat = renderWhatsappFloat({ showOnMobile: true });
   } else {
     whatsappFloat = renderWhatsappFloat();
   }
