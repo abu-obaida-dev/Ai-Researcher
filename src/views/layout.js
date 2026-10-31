@@ -707,6 +707,8 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .wa-float-icon { width: 20px; height: 20px; }
 @media (max-width: 560px) {
   .wa-float { display: none; }
+  /* إظهار الزر على الهاتف فقط في الصفحات المخصصة (الرئيسية وأدوات البحث) */
+  .wa-float--show-mobile { display: inline-flex !important; }
 }
 
 /* ==== الإشعارات: جرس الترويسة + قائمة الإشعارات داخل الموقع ==== */
@@ -2035,11 +2037,15 @@ export function whatsappLink(message = 'مرحباً، لدي مشكلة في ا
 }
 
 /** زر واتساب عائم أسفل الشاشة — نقطة وصول واحدة للدعم في كل صفحة. */
-function renderWhatsappFloat() {
+function renderWhatsappFloat({ showOnMobile = false } = {}) {
   const href = whatsappLink();
   if (!href) return '';
 
-  return `<a class="wa-float" href="${escapeHtml(href)}" target="_blank" rel="noopener"
+  const cls = ['wa-float'];
+  if (showOnMobile) cls.push('wa-float--show-mobile');
+  const clsAttr = cls.join(' ');
+
+  return `<a class="${clsAttr}" href="${escapeHtml(href)}" target="_blank" rel="noopener"
    aria-label="تواصل معنا على واتساب" title="عند أي مشكلة — راسلنا على واتساب">
     ${icon('whatsapp', 'wa-float-icon')}
     <span class="wa-float-label">مشكلة؟ راسلنا</span>
@@ -2133,8 +2139,22 @@ export function renderLayout({
   // تذييل الموقع للصفحات العامة فقط — لوحة الإدارة بلا تذييل (مساحتها أثقل من محتواها)
   const footer = area === 'public' ? renderPublicFooter() : '';
 
-  // زر الدعم العائم: مع الزائر والباحث، وبلا إزعاج في لوحة الإدارة (الفريق لا يحتاجه).
-  const whatsappFloat = area === 'admin' ? '' : renderWhatsappFloat();
+  // زر الدعم العائم: يظهر في كل الصفحات (public/app) وليس في لوحة الإدارة.
+  // على الشاشات الكبيرة يظهر في كل الصفحات.
+  // على الهاتف (<= 560px) يظهر فقط في الصفحة الرئيسية (area === 'public')
+  // وصفحات أدوات البحث (area === 'app' و activeKey في ['library', 'references']).
+  let showOnMobile = false;
+  if (area === 'admin') {
+    whatsappFloat = '';
+  } else if (area === 'public') {
+    showOnMobile = true;
+    whatsappFloat = renderWhatsappFloat({ showOnMobile });
+  } else if (area === 'app' && ['library', 'references'].includes(activeKey)) {
+    showOnMobile = true;
+    whatsappFloat = renderWhatsappFloat({ showOnMobile });
+  } else {
+    whatsappFloat = renderWhatsappFloat();
+  }
 
   // وصف الصفحة للمشاركة ومحركات البحث: نصّ الصفحة إن وُجد، وإلا وسم المنصة.
   const metaDescription = String(subtitle || '').trim() || `${APP_NAME} — ${APP_TAGLINE}`;
