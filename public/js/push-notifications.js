@@ -57,7 +57,7 @@
   function ensureWorker() {
     if (!('serviceWorker' in navigator)) return Promise.reject(new Error('متصفحك لا يدعم الإشعارات.'));
     return navigator.serviceWorker.register(SW_PATH).then(function (registration) {
-      console.info('[Zena Push] Service worker registered', {
+      console.info('[Zena Push] Service worker registered: ' + JSON.stringify({
         path: SW_PATH,
         registrationType: registration && registration.constructor && registration.constructor.name,
         isServiceWorkerRegistration: typeof ServiceWorkerRegistration !== 'undefined'
@@ -68,14 +68,14 @@
         installingState: registration && registration.installing && registration.installing.state,
         waitingState: registration && registration.waiting && registration.waiting.state,
         controllerScriptURL: navigator.serviceWorker.controller && navigator.serviceWorker.controller.scriptURL
-      });
+      }));
       return registration;
     }).catch(function (error) {
-      console.error('[Zena Push] Service worker registration failed', {
+      console.error('[Zena Push] Service worker registration failed: ' + JSON.stringify({
         path: SW_PATH,
-        error: error,
+        errorName: error && error.name,
         message: error && error.message
-      });
+      }));
       throw new Error('تعذّر تفعيل عامل الخدمة (Service Worker).');
     });
   }
@@ -161,7 +161,7 @@
           })
           .then(function (registration) {
             activationStage = 'firebase-get-token';
-            console.info('[Zena Push] Calling Firebase getToken', {
+            console.info('[Zena Push] Calling Firebase getToken: ' + JSON.stringify({
               firebaseVersion: FIREBASE_VERSION,
               registrationType: registration && registration.constructor && registration.constructor.name,
               isServiceWorkerRegistration: typeof ServiceWorkerRegistration !== 'undefined'
@@ -169,7 +169,7 @@
               scope: registration && registration.scope,
               activeState: registration && registration.active && registration.active.state,
               activeScriptURL: registration && registration.active && registration.active.scriptURL
-            });
+            }));
             return messagingSdk.getToken(messagingInstance, {
               vapidKey: state.config.vapidKey || undefined,
               serviceWorkerRegistration: registration
@@ -186,12 +186,12 @@
           });
       })
       .catch(function (error) {
-        console.error('[Zena Push] Notification activation failed', {
+        var diagnostic = {
           stage: activationStage,
-          error: error,
-          message: error && error.message,
-          code: error && error.code,
-          stack: error && error.stack,
+          errorName: error && error.name,
+          errorMessage: error && error.message ? error.message : String(error),
+          errorCode: error && error.code,
+          errorStack: error && error.stack,
           firebaseVersion: FIREBASE_VERSION,
           permission: 'Notification' in window ? Notification.permission : 'unsupported',
           registrationType: workerRegistration && workerRegistration.constructor
@@ -201,9 +201,10 @@
           registrationScope: workerRegistration && workerRegistration.scope,
           activeScriptURL: workerRegistration && workerRegistration.active
             && workerRegistration.active.scriptURL
-        });
+        };
+        console.error('[Zena Push] Notification activation failed: ' + JSON.stringify(diagnostic));
         renderState(Notification.permission);
-        note(error.message || 'تعذّر تفعيل الإشعارات على هذا الجهاز.');
+        note((error && error.message) || 'تعذّر تفعيل الإشعارات على هذا الجهاز.');
       })
       .then(function () {
         if (button) button.disabled = Notification.permission === 'denied';
