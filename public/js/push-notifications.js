@@ -56,7 +56,26 @@
 
   function ensureWorker() {
     if (!('serviceWorker' in navigator)) return Promise.reject(new Error('متصفحك لا يدعم الإشعارات.'));
-    return navigator.serviceWorker.register(SW_PATH).catch(function () {
+    return navigator.serviceWorker.register(SW_PATH).then(function (registration) {
+      console.info('[Zena Push] Service worker registered', {
+        path: SW_PATH,
+        registrationType: registration && registration.constructor && registration.constructor.name,
+        isServiceWorkerRegistration: typeof ServiceWorkerRegistration !== 'undefined'
+          && registration instanceof ServiceWorkerRegistration,
+        scope: registration && registration.scope,
+        activeState: registration && registration.active && registration.active.state,
+        activeScriptURL: registration && registration.active && registration.active.scriptURL,
+        installingState: registration && registration.installing && registration.installing.state,
+        waitingState: registration && registration.waiting && registration.waiting.state,
+        controllerScriptURL: navigator.serviceWorker.controller && navigator.serviceWorker.controller.scriptURL
+      });
+      return registration;
+    }).catch(function (error) {
+      console.error('[Zena Push] Service worker registration failed', {
+        path: SW_PATH,
+        error: error,
+        message: error && error.message
+      });
       throw new Error('تعذّر تفعيل عامل الخدمة (Service Worker).');
     });
   }
@@ -109,6 +128,8 @@
 
   function enable() {
     var button = el('push-toggle');
+    var activationStage = 'checking-browser';
+    var workerRegistration = null;
     if (!('Notification' in window)) return;
     if (Notification.permission === 'denied') {
       note('افتح إعدادات الموقع في المتصفح واسمح بالإشعارات، ثم أعد تحميل الصفحة.');
@@ -120,20 +141,35 @@
 
     Notification.requestPermission()
       .then(function (permission) {
+        activationStage = 'notification-permission';
         if (permission !== 'granted') {
           renderState(permission);
           return null;
         }
+        activationStage = 'service-worker-registration';
         return ensureWorker()
           .then(function (registration) {
+            workerRegistration = registration;
+            activationStage = 'firebase-config';
             return loadConfig().then(function (config) {
               state.config = config;
+              activationStage = 'firebase-sdk-initialization';
               return loadFirebase(config).then(function () {
                 return registration;
               });
             });
           })
           .then(function (registration) {
+            activationStage = 'firebase-get-token';
+            console.info('[Zena Push] Calling Firebase getToken', {
+              firebaseVersion: FIREBASE_VERSION,
+              registrationType: registration && registration.constructor && registration.constructor.name,
+              isServiceWorkerRegistration: typeof ServiceWorkerRegistration !== 'undefined'
+                && registration instanceof ServiceWorkerRegistration,
+              scope: registration && registration.scope,
+              activeState: registration && registration.active && registration.active.state,
+              activeScriptURL: registration && registration.active && registration.active.scriptURL
+            });
             return messagingSdk.getToken(messagingInstance, {
               vapidKey: state.config.vapidKey || undefined,
               serviceWorkerRegistration: registration
@@ -141,6 +177,7 @@
           })
           .then(function (token) {
             if (!token) throw new Error('لم يمنح المتصفح توكن إشعار — جرّب Chrome من جديد.');
+            activationStage = 'saving-device-token';
             return post('/api/notifications/register', { token: token, platform: 'web' }).then(function (result) {
               if (result && result.ok === false) throw new Error(result.message || 'تعذّر حفظ الجهاز.');
               state.enabled = true;
@@ -149,6 +186,22 @@
           });
       })
       .catch(function (error) {
+        console.error('[Zena Push] Notification activation failed', {
+          stage: activationStage,
+          error: error,
+          message: error && error.message,
+          code: error && error.code,
+          stack: error && error.stack,
+          firebaseVersion: FIREBASE_VERSION,
+          permission: 'Notification' in window ? Notification.permission : 'unsupported',
+          registrationType: workerRegistration && workerRegistration.constructor
+            && workerRegistration.constructor.name,
+          isServiceWorkerRegistration: typeof ServiceWorkerRegistration !== 'undefined'
+            && workerRegistration instanceof ServiceWorkerRegistration,
+          registrationScope: workerRegistration && workerRegistration.scope,
+          activeScriptURL: workerRegistration && workerRegistration.active
+            && workerRegistration.active.scriptURL
+        });
         renderState(Notification.permission);
         note(error.message || 'تعذّر تفعيل الإشعارات على هذا الجهاز.');
       })
