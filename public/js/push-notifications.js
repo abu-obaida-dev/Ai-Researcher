@@ -7,6 +7,8 @@
   var FIREBASE_VERSION = '10.12.2';
 
   var state = { enabled: false, config: null };
+  var messagingSdk = null;
+  var messagingInstance = null;
 
   function el(id) {
     return document.getElementById(id);
@@ -34,18 +36,6 @@
     });
   }
 
-  function loadScript(src) {
-    return new Promise(function (resolve, reject) {
-      var tag = document.createElement('script');
-      tag.src = src;
-      tag.async = true;
-      tag.onload = function () {
-        resolve();
-      };
-      tag.onerror = reject;
-      document.head.appendChild(tag);
-    });
-  }
   /** Loads public Firebase configuration and rejects incomplete setup. */
   function loadConfig() {
     return fetch('/api/firebase-config', { headers: { accept: 'application/json' } })
@@ -72,17 +62,17 @@
   }
 
   function loadFirebase(config) {
-    if (window.firebase && window.firebase.messaging) return Promise.resolve(window.firebase);
     var base = 'https://www.gstatic.com/firebasejs/' + FIREBASE_VERSION + '/';
-    return loadScript(base + 'firebase-app-compat.js')
-      .then(function () {
-        return loadScript(base + 'firebase-messaging-compat.js');
-      })
-      .then(function () {
-        if (!window.firebase) throw new Error('تعذّر تحميل مكتبة Firebase.');
-        if (!window.firebase.apps.length) window.firebase.initializeApp(config);
-        return window.firebase;
-      });
+    return Promise.all([
+      import(base + 'firebase-app.js'),
+      import(base + 'firebase-messaging.js')
+    ]).then(function (modules) {
+      var appSdk = modules[0];
+      messagingSdk = modules[1];
+      var app = appSdk.getApps().length ? appSdk.getApp() : appSdk.initializeApp(config);
+      messagingInstance = messagingSdk.getMessaging(app);
+      return messagingInstance;
+    });
   }
 
   /** Renders the current notification-permission state. */
@@ -144,7 +134,7 @@
             });
           })
           .then(function (registration) {
-            return window.firebase.messaging().getToken({
+            return messagingSdk.getToken(messagingInstance, {
               vapidKey: state.config.vapidKey || undefined,
               serviceWorkerRegistration: registration
             });
@@ -170,8 +160,8 @@
   function disable() {
     setButton('جارٍ الإيقاف…');
     var token = '';
-    if (window.firebase && window.firebase.messaging) {
-      token = window.firebase.messaging().getToken().catch(function () {
+    if (messagingSdk && messagingInstance) {
+      token = messagingSdk.getToken(messagingInstance).catch(function () {
         return '';
       });
     } else {
@@ -183,8 +173,8 @@
         return value ? post('/api/notifications/unregister', { token: value }) : null;
       })
       .then(function () {
-        if (window.firebase && window.firebase.messaging) {
-          return window.firebase.messaging().deleteToken().catch(function () {});
+        if (messagingSdk && messagingInstance) {
+          return messagingSdk.deleteToken(messagingInstance).catch(function () {});
         }
         return null;
       })
