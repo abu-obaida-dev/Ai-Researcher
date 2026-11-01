@@ -3,11 +3,13 @@ import { Readable } from 'node:stream';
 import { requireCoreOnboarding, requireService } from '../middleware/auth.js';
 import { concurrencyLimit, rateLimitUser } from '../middleware/security.js';
 import { deleteConversation, getConversation, askSupervisor, appendMessage } from '../services/chat.js';
+import { gradeDefenseAnswer } from '../services/defense-grading.js';
 import {
   buildDefensePlan,
   defenseChecklist,
   defenseProgress,
   extractQuestionFromReply,
+  finishDefense,
   listDefenses,
   nextPendingPart,
   recordDefenseQuestion,
@@ -23,20 +25,10 @@ import { getProfile } from '../services/users.js';
 import { renderNotice } from '../views/layout.js';
 import { renderDefensePage } from '../views/defense.js';
 
-/**
- * المناقشة المستقلة (defense): دردشة مستقلة تماماً بملف بحث ثابت.
- *   GET  /defense                    قائمة الجلسات + الدردشة الحالية (?d=id)
- *   POST /defense/start              جلسة جديدة — أول رسالة: طلب رفع البحث
- *   POST /defense/:id/thesis         رفع ملف البحث وتثبيته للجلسة ثم بدء المناقشة منه
- *   POST /defense/:id/answer         إجابة سؤال المناقِش (تقييم + السؤال التالي من نفس الجزء أو التالي)
- *   POST /defense/:id/finish         إنهاء الجلسة بالتقييم النهائي
- *   POST /defense/:id/delete         حذف الجلسة
- *
- * النقاط تُخصم ذرّياً داخل services/chat.js كما في الدردشة تماماً.
- */
+/** Independent defense-session routes. */
 const router = express.Router();
 
-/** رسائل النتيجة بعد التحويل. */
+/** Flash messages shown after redirects. */
 const FLASH = {
   empty: { type: 'error', message: 'اكتب إجابتك أولاً.' },
   missing: { type: 'error', message: 'جلسة المناقشة غير موجودة.' },
@@ -45,43 +37,30 @@ const FLASH = {
   no_provider: { type: 'error', message: 'لم يُضبط أي مزوّد ذكاء اصطناعي بعد.' },
   failed: { type: 'error', message: 'تعذّر الوصول للمناقِش الآن — نقاطك أُعيدت، أعد المحاولة.' },
   done: { type: 'ok', message: 'بدأت دردشة مناقشة مستقلة — ارفع ملف البحث أولاً.' },
-  thesis_ok: { type: 'ok', message: 'وصل ملف البحث — بدأ المناقِش قراءته ومناقشتك فيه.' },
-  answered: { type: 'ok', message: 'سجّل رد المناقِش على إجابتك.' },
+  grade_no_tokens: { type: 'error', message: 'تم حفظ ردك، لكن رصيدك لا يكفي لتقييمه؛ سيظهر ضمن الأسئلة غير المقيمة.' },
+  grade_invalid: { type: 'error', message: 'تم حفظ ردك، لكن تعذّر فهم نتيجة التقييم؛ سيظهر ضمن الأسئلة غير المقيمة.' },
+  grade_failed: { type: 'error', message: 'تم حفظ ردك، لكن خدمة تقييم الإجابات غير متاحة الآن؛ سيظهر ضمن الأسئلة غير المقيمة.' },
   finished: { type: 'ok', message: 'انتهت المناقشة — اقرأ التقييم النهائي.' },
   file_bad: { type: 'error', message: 'تعذّر رفع الملف — تحقق من النوع والحجم.' }
 };
 
-/**
- * يسجّل سؤال المناقِش بعد كل ردّ: يزيد العدّاد، يحفظ نصّ السؤال، ويحدّد
- * الجزء الذي غطّاه (الجزء التالي في الخطة وقت السؤال).
- *
- * إن لم يكن في الردّ استفهام (تقييم فقط) فلا يُسجَّل شيء — العدّاد يعدّ
- * الأسئلة فعلاً لا الردود.
- */
-async function recordReplyQuestion(conversationId, replyText) {
-  try {
-    const question = extractQuestionFromReply(replyText);
-    if (!question) return null;
-    const { pool: dbPool } = await import('../db/client.js');
-    const { rows } = await dbPool.query('SELECT defense_state FROM conversations WHERE id = $1', [conversationId]);
-    const raw = rows[0]?.defense_state && typeof rows[0].defense_state === 'object' ? rows[0].defense_state : {};
-    const current = nextPendingPart(raw);
-    return await recordDefenseQuestion(conversationId, {
-      question,
-      partKey: current?.key || ''
-    });
-  } catch (error) {
-    console.warn(`تعذّر تسجيل سؤال المناقشة: ${error?.code || error?.message}`);
-    return null;
-  }
+/** Records the next question and the previous answer's grade. */
+async function recordReplyQuestion(conversationId, replyText, { grade = null, gradeIssue = null } = {}) {
+  const question = extractQuestionFromReply(replyText);
+  if (!question && !grade && !gradeIssue) return null;
+  const { pool: dbPool } = await import('../db/client.js');
+  const { rows } = await dbPool.query('SELECT defense_state FROM conversations WHERE id = $1', [conversationId]);
+  const raw = rows[0]?.defense_state && typeof rows[0].defense_state === 'object' ? rows[0].defense_state : {};
+  const current = nextPendingPart(raw);
+  return await recordDefenseQuestion(conversationId, {
+    question,
+    partKey: current?.key || '',
+    grade,
+    gradeIssue
+  });
 }
 
-/**
- * يبني خطة المناقشة من نصّ ملف البحث: يقسمه إلى أجزاء ويحدّد سقف الأسئلة.
- *
- * تُستدعى مرة واحدة عند تثبيت الملف. الفشل لا يُسقط المناقشة: خطة فارغة
- * تعني «سقف افتراضي» والمناقِش يقرأ البحث بنفسه كالسابق.
- */
+/** Builds a thesis plan; extraction failures fall back to the default question limit. */
 async function buildDefensePlanForFile(userId, conversationId, fileId) {
   try {
     const found = await readOwnedFile(userId, fileId);
@@ -96,7 +75,7 @@ async function buildDefensePlanForFile(userId, conversationId, fileId) {
   }
 }
 
-/** كود خطأ من askSupervisor → مفتاح رسالة FLASH. */
+/** Maps askSupervisor errors to flash-message keys. */
 function flashKeyForError(error) {
   return (
     {
@@ -120,8 +99,7 @@ router.get('/defense', requireService('defense'), async (req, res) => {
       listFiles(userId, {})
     ]);
 
-    // توفّق حالة المناقشة مع ما سُئل فعلاً (ترحيل الجلسات القديمة التي سُئلت
-    // قبل وجود العدّاد) — فيعرض العدّاد الحقيقي بدل صفر.
+    // Reconcile legacy sessions whose questions were not tracked yet.
     if (conversation?.mode === 'defense') {
       try {
         const synced = await syncDefenseState(conversation.id, conversation.messages || []);
@@ -155,13 +133,12 @@ router.get('/defense', requireService('defense'), async (req, res) => {
   }
 });
 
-/** بدء دردشة مناقشة مستقلة جديدة — أول رسالة: ترحيب باسم الباحث + طلب تثبيت البحث. */
+/** Starts a defense session and asks the user to attach a thesis. */
 router.post('/defense/start', requireService('defense'), requireCoreOnboarding, rateLimitUser('defense_start', { limit: 5, windowMs: 30 * 60 * 1000 }), async (req, res) => {
   try {
     const conversation = await startDefense({ userId: req.account.id, title: 'مناقشة البحث' });
 
-    // اسم الباحث يُحقن صراحةً في التعليمات (النموذج يتجاهل قسم السياق أحياناً)،
-    // وكذلك إن كان يملك ملفات مرفوعة مسبقاً — فلا يقول «ارفع» وهو يملك ملفه أصلاً.
+    // Include the name and existing files explicitly because models may overlook context.
     const profile = (await getProfile(req.account.id)) || {};
     const name = String(profile.full_name || req.account.full_name || '').trim().slice(0, 60);
     const existingFiles = await listFiles(req.account.id, {});
@@ -169,7 +146,7 @@ router.post('/defense/start', requireService('defense'), requireCoreOnboarding, 
       ? 'أن يثبّت ملف بحثه: إن كان يملك ملفات مرفوعة مسبقاً فليخترها من قائمة ملفاته، وإلا فيرفعه جديداً (PDF أو Word)'
       : 'أن يرفع ملف بحثه (PDF أو Word)';
 
-    // أول رسالة من المناقِش: ترحيب باسمه + طلب التثبيت — تُخزَّن كرسالة مساعد
+    // Store the opening prompt as an assistant message.
     await askSupervisor({
       userId: req.account.id,
       prompt: `[بدء مناقشة مستقلة] أنت الآن مناقِش أكاديمي في دردشة مستقلة تماماً. رحّب بالباحث${name ? ` «${name}»` : ' باسمه'} تحية أكاديمية قصيرة مع ذكر تخصصه ودرجته، ثم اطلب منه ${uploadHint} ليقرأه كاملاً ويناقشه جزءاً جزءاً. لا تطرح أي سؤال علمي في هذه الرسالة.`,
@@ -186,10 +163,7 @@ router.post('/defense/start', requireService('defense'), requireCoreOnboarding, 
   }
 });
 
-/**
- * رفع ملف البحث وتثبيته للجلسة: يستقبل multipart (حقل file) أو file_id لملف
- * موجود، ثم يثبّته في defense_state ويطلب من المناقِش قراءته وبدء المناقشة منه.
- */
+/** Attaches an uploaded or existing thesis, stores it in session state, and starts the defense. */
 router.post(
   '/defense/:id/thesis',
   requireService('defense'),
@@ -200,9 +174,7 @@ router.post(
     const conversationId = String(req.params.id);
     const back = (key) => `/defense?d=${encodeURIComponent(conversationId)}&${key}`;
 
-    // فحص مبكر للحجم المعلن (C4): express 5 يقرأ جسم POST كاملاً في الذاكرة،
-    // فنرفض الطلب الضخم قبل قراءته — كما في مسار /files (workspace.js).
-    // الهامش 2MB لأن ترميز multipart يضيف ~100 بايت فقط لكل حقل.
+    // Reject oversized requests before Express buffers the multipart body.
     const declared = Number(req.headers['content-length'] || 0);
     if (declared > 0) {
       const maxBytes = await userFileMaxBytes(req.account.id);
@@ -222,7 +194,7 @@ router.post(
 
       let fileId = String(req.body?.file_id || '').trim();
 
-      // رفع جديد عبر multipart (حقل file) — نفس حماية /files بدون مكتبة خارجية
+      // Parse multipart uploads without an additional dependency.
       const contentType = String(req.headers['content-type'] || '');
       if (!fileId && contentType.includes('multipart/form-data')) {
         const request = new Request('http://localhost/defense-thesis', {
@@ -255,24 +227,16 @@ router.post(
 
       await setDefenseThesisFile(conversationId, fileId);
 
-      // خطة المناقشة: نقسم نصّ البحث إلى أجزاء ونحدّد سقف الأسئلة — قبل أول
-      // سؤال، حتى يعرف المناقِش خطّته وكم-question له. تُبنى مرة واحدة هنا.
+      // Build the plan once, before the first question.
       await buildDefensePlanForFile(req.account.id, conversationId, fileId);
 
-      // رسالة نظام مرئية تفصل بين «اطلب التثبيت» و«قرأتُ بحثك»: بدونها يبدو ردّ
-      // المناقِش تناقضاً (طلب رفعاً ثم أعلن قراءته فوراً). دور='system' فلا تُعدّ
-      // رسالة باحث في isFirstMessageEver ولا في عدّادات المحادثات.
+      // Explain the transition to the attached thesis without counting this as a user message.
       await appendMessage(conversationId, {
         role: 'system',
         content: `📎 ثُبِّت ملف البحث «${row.file_name || row.title || 'الملف'}» في هذه الجلسة.`
       });
 
-      // المناقِش يقرأ البحث المثبّت ويبدأ المناقشة من أول جزء — الملف يُحقن تلقائياً.
-      // التثبيت يبقى حتى لو فشل نداء الذكاء (البطاقة تختفي والدردشة تظهر) — الباحث
-      // يعيد تحميل الصفحة فيجد ملفه مثبّتاً ويحاول بدء المناقشة من جديد.
-      // ملاحظة: رسالة البدء قصيرة عمداً (بلا إقحام نص الملف كاملاً في سطر البرومبت)
-      // لأن النص الكامل يُحقن أصلاً من defense_state عبر buildSupervisorContext —
-      // إقحامه هنا يضاعف السياق فيفشل Groq بحد الطول، ويفشل OpenRouter بنفاد الرصيد.
+      // The thesis is already injected from defense_state; do not duplicate its text in this prompt.
       try {
         const opening = await askSupervisor({
           userId: req.account.id,
@@ -282,7 +246,7 @@ router.post(
           mode: 'defense',
           internal: true
         });
-        // أول سؤال من المناقِش يُحتسب في العدّاد (كغيره).
+        // Count the opening question like any other defense question.
         await recordReplyQuestion(conversationId, opening?.answer);
       } catch (aiError) {
         console.warn(`فشل بدء المناقشة من البحث (الملف مثبّت): ${aiError?.code || aiError?.message}`);
@@ -298,7 +262,7 @@ router.post(
   }
 );
 
-/** إرسال إجابة: المناقِش يقيّمها ثم يطرح سؤاله التالي من نفس الجزء أو التالي — بلا تكرار. */
+/** Grades the user's answer and records the next defense question. */
 router.post('/defense/:id/answer', requireService('defense'), requireCoreOnboarding, async (req, res) => {
   const conversationId = String(req.params.id);
 
@@ -325,8 +289,7 @@ router.post('/defense/:id/answer', requireService('defense'), requireCoreOnboard
       return;
     }
 
-    // الإجابة تُحفظ كما كتبها الباحث (رسالة user)، والمناقِش يرد تقييماً + سؤاله التالي
-    // (ملف البحث يُحقن تلقائياً من defense_state — لا يحتاج إرفاقاً جديداً)
+    // The thesis is injected from defense_state; no repeat attachment is needed.
     const result = await askSupervisor({
       userId: req.account.id,
       prompt,
@@ -335,11 +298,59 @@ router.post('/defense/:id/answer', requireService('defense'), requireCoreOnboard
       mode: 'defense'
     });
 
-    // عدّاد المناقشة: نسجّل سؤال المناقِش (نصّه + الجزء الذي غطّاه) ⇒ يعرف
-    // المناقِش كم طرح وكم بقي، فلا يكرّر ولا يتجاوز السقف.
-    await recordReplyQuestion(conversationId, result.answer);
+    const previousExaminerReply = [...(existing.messages || [])]
+      .reverse()
+      .find((message) => message.role === 'assistant' && extractQuestionFromReply(message.content));
+    let gradeResult = { grade: null, reason: 'question_not_found' };
+    if (previousExaminerReply) {
+      try {
+        let thesisContext = '';
+        const thesisId = existing.defense_state?.thesisFileId;
+        if (thesisId) {
+          try {
+            const thesis = await readOwnedFile(req.account.id, thesisId);
+            if (thesis?.buffer) {
+              const extracted = await extractFileText(thesis.buffer, thesis.row?.file_name || '');
+              thesisContext = extracted.text.slice(0, 500);
+            }
+          } catch (contextError) {
+            console.warn(`تعذّر تجهيز نص البحث لتقييم الإجابة: ${contextError?.code || contextError?.message}`);
+          }
+        }
+        gradeResult = await gradeDefenseAnswer({
+          userId: req.account.id,
+          question: extractQuestionFromReply(previousExaminerReply.content),
+          answer: prompt,
+          examinerReply: previousExaminerReply.content,
+          thesisContext
+        });
+      } catch (gradeError) {
+        console.warn(`تعذّر تقييم إجابة المناقشة: ${gradeError?.code || gradeError?.message}`);
+        gradeResult = { grade: null, reason: gradeError?.code || 'provider_failed' };
+      }
+    }
 
-    res.redirect(303, `/defense?d=${encodeURIComponent(result.conversationId)}&ok=answered`);
+    // Persist the grade separately from the examiner's prose and record the next question.
+    const gradeIssue = gradeResult.grade ? null : gradeResult.reason || 'provider_failed';
+    const savedState = await recordReplyQuestion(conversationId, result.answer, {
+      grade: gradeResult.grade,
+      gradeIssue
+    });
+    if (gradeResult.grade && !savedState) {
+      gradeResult = { grade: null, reason: 'persistence_failed' };
+    }
+    if (!gradeResult.grade) {
+      console.warn(`لم يُسجّل تقييم إجابة المناقشة: ${gradeResult.reason || 'unknown'}`);
+    }
+    if (result.defenseEnded) await finishDefense(conversationId);
+
+    const gradeErrorKey = gradeResult.reason === 'insufficient_credits'
+      ? 'grade_no_tokens'
+      : gradeResult.reason === 'invalid_grade'
+        ? 'grade_invalid'
+        : 'grade_failed';
+    const gradeStatus = gradeResult.grade ? 'ok=answered' : `err=${gradeErrorKey}`;
+    res.redirect(303, `/defense?d=${encodeURIComponent(result.conversationId)}&${gradeStatus}`);
   } catch (error) {
     console.warn(`فشل تسجيل إجابة المناقشة: ${error?.code || error?.message}`);
     res.redirect(
@@ -351,7 +362,7 @@ router.post('/defense/:id/answer', requireService('defense'), requireCoreOnboard
   }
 });
 
-/** إنهاء الجلسة بالتقييم النهائي: نقاط القوة والضعف والتوصيات قبل المناقشة الحقيقية. */
+/** Requests the final defense report and marks the session complete. */
 router.post('/defense/:id/finish', requireService('defense'), requireCoreOnboarding, async (req, res) => {
   const conversationId = String(req.params.id);
 
@@ -364,22 +375,15 @@ router.post('/defense/:id/finish', requireService('defense'), requireCoreOnboard
 
     await askSupervisor({
       userId: req.account.id,
-      prompt: 'انتهت المناقشة — غطّيتَ كل أجزاء البحث. أعطني الآن التقييم النهائي: نقاط القوة، ونقاط الضعف، والتوصيات قبل المناقشة الحقيقية. لا تطرح أسئلة جديدة.',
+      prompt: 'أنهينا المناقشة الآن قبل تغطية جميع الأسئلة. قيّم محتوى ملف البحث كاملاً: نقاط القوة، ونقاط الضعف، والتوصيات العملية قبل المناقشة الحقيقية. قيّم أداء الباحث فقط في الإجابات التي أجاب عنها، واذكر بوضوح الجوانب التي لم تُختبر بسبب عدم طرح أسئلتها. لا ترفض التقييم، ولا تطلب متابعة الأسئلة، ولا تطرح سؤالاً جديداً.',
       conversationId,
       profile: (await getProfile(req.account.id)) || {},
       mode: 'defense',
-      internal: true
+      internal: true,
+      defenseFinalRequested: true
     });
 
-    // نقرأ الحالة مجدداً بعد رد المناقِش (قد يكون حدّث العدّاد أو أغلق الجلسة
-    // بنفسه بالوسم الداخلي) — لا نكتب حالة قديمة فوق ما حدّثه.
-    const { pool: dbPool } = await import('../db/client.js');
-    const { rows } = await dbPool.query('SELECT defense_state FROM conversations WHERE id = $1', [conversationId]);
-    const raw = rows[0]?.defense_state && typeof rows[0].defense_state === 'object' ? rows[0].defense_state : {};
-    await dbPool.query('UPDATE conversations SET defense_state = $2 WHERE id = $1', [
-      conversationId,
-      JSON.stringify({ ...raw, done: true })
-    ]);
+    await finishDefense(conversationId);
 
     res.redirect(303, `/defense?d=${encodeURIComponent(conversationId)}&ok=finished`);
   } catch (error) {
@@ -388,7 +392,7 @@ router.post('/defense/:id/finish', requireService('defense'), requireCoreOnboard
   }
 });
 
-/** حذف جلسة محاكاة. */
+/** Deletes a defense session. */
 router.post('/defense/:id/delete', requireService('defense'), async (req, res) => {
   await deleteConversation(req.account.id, String(req.params.id));
   res.redirect(303, '/defense');

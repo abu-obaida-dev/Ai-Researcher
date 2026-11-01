@@ -1,7 +1,4 @@
-/**
- * أيقونات SVG مضغوطة تُرسم داخل الصفحات المولَّدة على الخادم — بدون أي مكتبة أيقونات
- * وبدون أي ملف خارجي. كل الأيقونات ترث اللون من النص (currentColor).
- */
+/** Inline SVG icons for server-rendered pages. */
 
 const PATHS = {
   sparkles:
@@ -37,12 +34,12 @@ const PATHS = {
   pin: '<path d="M9 4h6l-1 6 4 3v2H6v-2l4-3z"/><path d="M12 15v5"/>',
   refresh: '<path d="M20 11.5A8 8 0 1 0 18 17"/><path d="M20 5v6h-6"/>',
   user: '<circle cx="12" cy="8" r="3.6"/><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0"/>',
-  // واتساب: فقاعة حوار بداخلها هاتف — يُلوَّن بلون العلامة في زر الدعم
+  // WhatsApp icon used by the support button.
   whatsapp:
     '<path d="M20.5 11.6a8.4 8.4 0 0 1-12.4 7.4L3.5 20.5l1.6-4.4a8.4 8.4 0 1 1 15.4-4.5Z"/><path d="M9.2 8.9c.3-.1.6 0 .8.3l.7 1.3c.1.3.1.5-.1.8l-.4.5c-.1.2-.2.4 0 .6a6 6 0 0 0 2.7 2.3c.2.1.4 0 .6-.1l.4-.5c.2-.2.4-.2.6-.1l1.3.6c.3.2.4.4.3.7-.2.9-1 1.4-1.8 1.4a7.6 7.6 0 0 1-6-6c0-.8.4-1.6 1.1-1.9Z"/>'
 };
 
-/** أيقونة واحدة بحجم افتراضي مناسب للنصوص والبطاقات. */
+/** Renders an icon with an optional CSS class. */
 export function icon(name, className = 'icon') {
   const paths = PATHS[name] || PATHS.check;
   return `<svg class="${className}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;

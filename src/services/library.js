@@ -7,30 +7,24 @@ import { citationText, normalizeArabic } from './workspace.js';
 import { assertContentMatchesExtension } from './upload-guard.js';
 import { isEphemeralStorage } from './files.js';
 
-/**
- * المكتبة العلمية المركزية (P3): جدول library_items + بايتات الملف على القرص
- * تحت storage/library/references/{id}-{slug}.{ext} كما في storage/README.md.
- * - المدير يرفع كتاباً (ملف + بيانات) أو يستوردها من مواقع مرجعية مجانية.
- * - التوثيق (APA مبسّط) يُولَّد تلقائياً من الحقول إن لم يكتبه المدير.
- * - الحذف النهائي يزيل الملف والصف مع بقاء مراجع الباحثين (SET NULL).
- */
+/** Shared scientific library metadata and file storage. */
 
 const STORAGE_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'storage');
 const LIBRARY_DIR = 'library/references';
 
-/** أقصى حجم لملف كتاب (رفع أو جلب) — 200 ميجابايت. */
+/** Maximum library-file size. */
 export const LIBRARY_MAX_FILE_BYTES = 200 * 1024 * 1024;
 
-/** الأنواع المسموحة لملفات المكتبة: قائمة الموقع + EPUB للكتب الإلكترونية. */
+/** Allowed library file extensions. */
 export const LIBRARY_EXTENSIONS = [...new Set([...FILE_UPLOAD_LIMITS.allowedExtensions, 'epub'])];
 
-/** امتداد بحروف صغيرة أو null. */
+/** Returns a lowercase extension or null. */
 function extensionOf(name) {
   const match = /\.([A-Za-z0-9]{1,8})$/.exec(String(name || ''));
   return match ? match[1].toLowerCase() : null;
 }
 
-/** اسم ملف نظيف: حروف و/أرقام فقط مع الامتداد. */
+/** Sanitizes a filename while preserving its extension. */
 function safeName(name, fallbackSlug) {
   const base = path.basename(String(name || 'file')).replace(/\.[^.]*$/, '');
   const slug =
@@ -42,7 +36,7 @@ function safeName(name, fallbackSlug) {
   return slug.replace(/[\\/]/g, '-');
 }
 
-/** المسار المطلق للملف بعد التأكد أنه داخل storage/. */
+/** Resolves a library path and rejects traversal outside storage/. */
 function absolutePath(storedPath) {
   const absolute = path.resolve(STORAGE_ROOT, String(storedPath || ''));
   if (!absolute.startsWith(path.resolve(STORAGE_ROOT) + path.sep)) {
@@ -53,18 +47,18 @@ function absolutePath(storedPath) {
   return absolute;
 }
 
-/** نص نظيف بحد أقصى للطول. */
+/** Trims text to a maximum length. */
 function clean(value, max = 500) {
   return String(value ?? '').trim().slice(0, max);
 }
 
-/** سنة صحيحة أو null. */
+/** Validates a publication year. */
 function cleanYear(value) {
   const year = Number.parseInt(String(value ?? ''), 10);
   return Number.isInteger(year) && year >= 1000 && year <= 2999 ? year : null;
 }
 
-/** نص البحث الآمن مع تهريب الرموز الخاصة بـ ILIKE. */
+/** Escapes wildcard characters in ILIKE search text. */
 function likeTerm(q) {
   const term = clean(q, 120);
   return {
@@ -73,12 +67,12 @@ function likeTerm(q) {
   };
 }
 
-/** محتوى HTML إلى نص خالٍ (لملخصات المصادر الخارجية). */
+/** Removes HTML markup from external abstracts. */
 export function stripHtml(value) {
   return clean(String(value || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' '), 1200);
 }
 
-/** صف مكتبة جاهز للعرض. */
+/** Normalizes a library row for display. */
 export function normalizeLibraryItem(row) {
   return {
     id: row.id,
@@ -106,7 +100,7 @@ export function normalizeLibraryItem(row) {
 const LIBRARY_COLUMNS = `id, title, authors, year, source, abstract, subjects, degree_level, field,
   citation_text, stored_path, file_name, mime, size_bytes, external_url, source_system, is_active, created_at`;
 
-/** عناصر المكتبة (للوحة الإدارة): بحث + فلترة الحالة + ترقيم صفحات. */
+/** Lists library items for administration. */
 export async function listLibraryItems({ q = '', status = 'all', page = 1, pageSize = 20 } = {}) {
   const { term, like } = likeTerm(q);
   const safeStatus = ['all', 'active', 'off'].includes(String(status)) ? String(status) : 'all';
@@ -126,7 +120,7 @@ export async function listLibraryItems({ q = '', status = 'all', page = 1, pageS
         LIMIT $4 OFFSET $5`,
       [term, like, safeStatus, size, (current - 1) * size]
     ),
-    // شريط الإحصاءات أعلى الصفحة: أرقام عامة للكل (لا تتأثر بالفلاتر)
+    // Keep global counts independent from active filters.
     pool.query(`SELECT count(*)::int AS total,
         count(*) FILTER (WHERE stored_path IS NOT NULL)::int AS with_file,
         count(*) FILTER (WHERE NOT is_active)::int AS inactive
@@ -147,17 +141,17 @@ export async function listLibraryItems({ q = '', status = 'all', page = 1, pageS
   };
 }
 
-/** عنصر واحد بالمعرّف أو null. */
+/** Loads one library item by ID. */
 export async function getLibraryItem(id) {
-  // حارس UUID: يمنع رمي Postgres على معرّف من المسار (وإلا انهار الخادم — DoS).
+  // Validate UUIDs before querying PostgreSQL.
   if (!isUuid(id)) return null;
   const { rows } = await pool.query(`SELECT ${LIBRARY_COLUMNS} FROM library_items WHERE id = $1`, [String(id)]);
   return rows[0] ? normalizeLibraryItem(rows[0]) : null;
 }
 
-/** حفظ بايتات ملف كتاب على القرص وتحديث صفّه — يزيل الملف السابق إن وُجد. */
+/** Stores a library file and removes any previous file. */
 async function writeLibraryFile(item, { buffer, fileName, mime }) {
-  // منصّات Serverless: لا قرص دائم ⇒ نرفض برسالة عربية بدل فشل غامض.
+  // Reject uploads where the filesystem is ephemeral.
   if (isEphemeralStorage()) {
     const error = new Error('رفع الكتب غير متاح على هذه المنصة حالياً (نظام الملفات مؤقّت).');
     error.code = 'NO_STORAGE';
@@ -181,7 +175,7 @@ async function writeLibraryFile(item, { buffer, fileName, mime }) {
     throw error;
   }
 
-  // البصمة الثنائية قبل أي كتابة: كتاب باسم report.pdf قد يكون ملفاً آخر تماماً.
+  // Verify file signatures before writing bytes.
   assertContentMatchesExtension(extension, buffer);
 
   const previousPath = item.storedPath;
@@ -191,7 +185,7 @@ async function writeLibraryFile(item, { buffer, fileName, mime }) {
   await mkdir(path.dirname(absolute), { recursive: true });
   await writeFile(absolute, buffer);
 
-  // تحديث الصف أولاً ثم حذف القديم: لو فشل حذف القديم لا يضيع الجديد.
+  // Update metadata before deleting the previous file.
   const updated = await pool.query(
     `UPDATE library_items SET stored_path = $2, file_name = $3, mime = $4, size_bytes = $5 WHERE id = $1
       RETURNING ${LIBRARY_COLUMNS}`,
@@ -202,17 +196,14 @@ async function writeLibraryFile(item, { buffer, fileName, mime }) {
     try {
       await unlink(absolutePath(previousPath));
     } catch {
-      /* الملف القديم غير موجود — لا مشكلة */
+      /* The previous file is already absent. */
     }
   }
 
   return normalizeLibraryItem(updated.rows[0]);
 }
 
-/**
- * إضافة عنصر إلى المكتبة: بيانات + توثيق (يُولَّد تلقائياً إن لم يُكتب) + ملف اختياري.
- * يرمي أكواد: BAD_TITLE / TOO_LARGE / BAD_TYPE لعرضها كرسائل عربية.
- */
+/** Adds a library item with optional file and generated citation. */
 export async function addLibraryItem({
   title,
   authors = '',
@@ -258,7 +249,7 @@ export async function addLibraryItem({
       cleanCitation,
       clean(externalUrl, 500) || null,
       clean(sourceSystem, 50) || 'upload',
-      // نصّ البحث المطبَّع: يجعل البحث متسامحاً مع الهمزات والتاء المربوطة.
+      // Normalize Arabic search text to tolerate spelling variants.
       normalizeArabic(
         [cleanTitle, cleanAuthors, cleanSource, clean(subjects, 500), clean(field, 255), clean(externalUrl, 500)]
           .filter(Boolean)
@@ -271,7 +262,7 @@ export async function addLibraryItem({
   return file ? writeLibraryFile(item, file) : item;
 }
 
-/** تعديل بيانات عنصر موجود — التوثيق يُعاد توليده إن لم يُقدَّم نصاً جديداً. */
+/** Updates a library item and regenerates its citation when omitted. */
 export async function updateLibraryItem(id, fields = {}) {
   const current = await getLibraryItem(id);
   if (!current) return null;
@@ -308,7 +299,7 @@ export async function updateLibraryItem(id, fields = {}) {
   return rows[0] ? normalizeLibraryItem(rows[0]) : null;
 }
 
-/** تفعيل/تعطيل عنصر (يختفي فوراً من نتائج الباحثين عند التعطيل). */
+/** Enables or disables a library item. */
 export async function setLibraryItemActive(id, active) {
   if (!isUuid(id)) return false;
   const { rowCount } = await pool.query('UPDATE library_items SET is_active = $2 WHERE id = $1', [
@@ -318,7 +309,7 @@ export async function setLibraryItemActive(id, active) {
   return rowCount > 0;
 }
 
-/** حذف نهائي: ملف الكتاب من القرص ثم الصف (مراجع الباحثين تبقى بدون رابط). */
+/** Deletes the library file and row while preserving user references. */
 export async function deleteLibraryItem(id) {
   const item = await getLibraryItem(id);
   if (!item) return false;
@@ -335,9 +326,9 @@ export async function deleteLibraryItem(id) {
   return rowCount > 0;
 }
 
-/** قراءة ملف عنصر من القرص (للتحميل) — activeOnly يمنع تحميل معطّل. */
+/** Reads a library file, optionally requiring the item to be active. */
 export async function readLibraryItem(id, { activeOnly = false } = {}) {
-  // حارس ضد الرمي من Postgres على معرّف غير UUID (وإلا انهار الخادم — DoS).
+  // Validate UUIDs before querying PostgreSQL.
   if (!isUuid(id)) return null;
   const { rows } = await pool.query(
     `SELECT ${LIBRARY_COLUMNS} FROM library_items WHERE id = $1 ${activeOnly ? 'AND is_active' : ''}`,

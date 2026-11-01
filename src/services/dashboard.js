@@ -1,20 +1,11 @@
 import { pool } from '../db/client.js';
 
-/**
- * إحصاءات صفحة الإحصائية (لوحة الباحث) — كل الأرقام من بيانات المستخدم نفسه فقط.
- *
- * تُجمَّع في استعلامات مجمّعة (aggregate) بدل تحميل الصفوف ثم العدّ في JS:
- * - days:    نشاط آخر ٧ أيام (نقاط + عدد عمليات) مع الأيام الفارغة مملوءة بصفر
- * - byType:  توزيع النقاط المستهلكة على أنواع العمليات (لمخطط دائري)
- * - counts:  أعداد المراجع والملاحظات والملفات والمحادثات وأسئلة المشرف
- *
- * لا يفشل أبداً: أي خطأ في قاعدة البيانات يعيد بنية فارغة (الصفحة تبقى تعمل).
- */
+/** Aggregates dashboard metrics for the current user; database failures return empty data. */
 
-/** عدد أيام مخطط النشاط. */
+/** Number of days shown in the activity chart. */
 const DAY_COUNT = 7;
 
-/** بنية فارغة متسقة مع النجاح — يستخدمها العرض مباشرة إن تعذّر الاستعلام. */
+/** Empty response shape used when queries fail. */
 function emptyStats() {
   return {
     days: [],
@@ -30,30 +21,27 @@ function emptyStats() {
   };
 }
 
-/** تسمية اليوم بالأحرف العربية (تُحسب في JS لتفادي اختلافات لغة قاعدة البيانات). */
+/** Formats weekday labels consistently across database locales. */
 function weekdayLabel(isoDay) {
   const date = new Date(`${isoDay}T00:00:00`);
   if (Number.isNaN(date.getTime())) return isoDay;
   return new Intl.DateTimeFormat('ar-EG-u-nu-latn', { weekday: 'short' }).format(date);
 }
 
-/** تسمية اليوم والشهر للعرض المختصر (مثل «1 أكتوبر»). */
+/** Formats a compact day-and-month label. */
 function dateLabel(isoDay) {
   const date = new Date(`${isoDay}T00:00:00`);
   if (Number.isNaN(date.getTime())) return isoDay;
   return new Intl.DateTimeFormat('ar-EG-u-nu-latn', { day: 'numeric', month: 'long' }).format(date);
 }
 
-/**
- * كل إحصاءات الصفحة في نداء واحد (٣ استعلامات متوازية).
- * @param {string} userId معرّف المستخدم من الجلسة.
- */
+/** Loads all dashboard metrics with three parallel aggregate queries. */
 export async function getDashboardStats(userId) {
   if (!userId) return emptyStats();
 
   try {
     const [dailyResult, typeResult, countsResult] = await Promise.all([
-      // نشاط آخر ٧ أيام: generate_series يضمن ظهور الأيام الفارغة بصفر
+      // generate_series preserves days with no activity.
       pool.query(
         `SELECT to_char(d.day, 'YYYY-MM-DD') AS day,
                 COALESCE(u.events, 0)::int AS events,
@@ -71,7 +59,7 @@ export async function getDashboardStats(userId) {
           ORDER BY d.day ASC`,
         [userId, DAY_COUNT]
       ),
-      // توزيع النقاط على الأنواع (نستثني المحاولات الفاشلة — نقاطها صفر)
+      // Failed attempts have no usage charge and are excluded.
       pool.query(
         `SELECT type,
                 count(*)::int AS events,
@@ -82,7 +70,7 @@ export async function getDashboardStats(userId) {
        ORDER BY tokens DESC, events DESC`,
         [userId]
       ),
-      // أعداد المحتوى البحثي للمستخدم (كل جدول مقيّد بـ user_id)
+      // Count only records owned by this user.
       pool.query(
         `SELECT
            (SELECT count(*)::int FROM user_references WHERE user_id = $1) AS references,

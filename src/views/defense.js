@@ -1,12 +1,12 @@
 import { formatDateTime } from './format.js';
 import { icon } from './icons.js';
 import { escapeHtml, renderLayout } from './layout.js';
-import { renderThesisBar, renderThesisCard, renderConversations, renderDefensePlan } from './defense-parts.js';
+import { renderThesisBar, renderThesisCard, renderConversations, renderDefenseGradeNotice, renderDefensePlan, renderDefenseStats } from './defense-parts.js';
 
-/** صفحة /defense: دردشة بملء الشاشة + السجل في السايدبار (نمط المشرف والمعلم). */
+/** Full-screen defense chat with the session list in the sidebar. */
 function renderMessage(message) {
   const isUser = message.role === 'user';
-  // رسالة نظام (كإشعار تثبيت ملف البحث): صيغة مصغّرة متمركزة لا تشبه حوار المناقِش.
+  // Render system notices separately from the conversation.
   if (message.role === 'system') {
     return `<div class="bubble bubble-system">
   <p class="bubble-text">${escapeHtml(message.content)}</p>
@@ -27,8 +27,7 @@ export function renderDefensePage({ account = null, unread = 0, conversation = n
       let welcomeShownLocal = false;
 
       const filtered = conversation.messages.filter((m) => {
-        // بعد تثبيت ملف البحث: نخفي رسالة البداية القديمة التي تطلب رفع الملف
-        // لأنها أصبحت غير منطقية للمستخدم.
+        // Hide obsolete upload prompts after the thesis is attached.
         if (
           current.thesisFileId &&
           m.role === 'assistant' &&
@@ -42,7 +41,7 @@ export function renderDefensePage({ account = null, unread = 0, conversation = n
           return false;
         }
 
-        // فلترة رسائل الترحيب المكررة
+        // Keep only the first welcome message.
         const isWelcome = /^مرح/.test(m.content);
 
         if (isWelcome && welcomeShownLocal) return false;
@@ -58,15 +57,13 @@ export function renderDefensePage({ account = null, unread = 0, conversation = n
   if (!conversation?.id) {
     composer = `<div class="chat-welcome"><form method="post" action="/defense/start"><button class="btn btn-primary" type="submit">ابدا دردشة مناقشة</button></form></div>`;
   } else if (current.done) {
-    composer = `<div class="notice chat-flash">انتهت المناقشة — اقرا التقييم النهائي اعلاه.</div><div class="chat-welcome"><form method="post" action="/defense/start"><button class="btn btn-primary" type="submit">ابدأ مناقشة جديدة</button></form></div>`;
+    composer = `<div class="chat-welcome"><form method="post" action="/defense/start"><button class="btn btn-primary" type="submit">ابدأ مناقشة جديدة</button></form></div>`;
   } else if (!current.thesisFileId && !conversation?.messages?.length) {
     composer = `<div class="notice chat-flash">ارفع ملف البحث اعلاه ليبدا المناقش.</div>`;
   } else {
     composer = `<form class="chat-composer" method="post" action="/defense/${escapeHtml(conversation.id)}/answer"><div class="chat-composer-row"><textarea id="message" name="answer" rows="1" required maxlength="3000" placeholder="اكتب اجابتك…" aria-label="اجابتك"></textarea><button class="btn btn-primary chat-send" type="submit" title="ارسال" aria-label="ارسال">${icon('send')}</button></div></form>`;
   }
-  // chat-card--defense: بطاقة المناقشة تتمدد بدل الارتفاع الثابت — نموذج تثبيت
-  // الملف أسفل الرسائل، والارتفاع المقصوص كان يدفع زر البدء تحت الطيّ على الهاتف.
-  const body = `<section class="card chat-card chat-card--defense">${flashHtml}${renderThesisBar(conversation, current)}${renderDefensePlan(current)}<div class="chat-body" id="messages">${messagesHtml}</div>${conversation?.id ? renderThesisCard(conversation, current, files) : ''}${composer}</section>`;
+  const body = `<div class="defense-page"><section class="card chat-card chat-card--defense">${flashHtml}${renderThesisBar(conversation, current)}${renderDefenseGradeNotice(current)}${renderDefensePlan(current)}<div class="chat-body" id="messages">${messagesHtml}</div>${conversation?.id ? renderThesisCard(conversation, current, files) : ''}${composer}</section>${renderDefenseStats(current)}</div>`;
   return renderLayout({
     title: 'مناقشة البحث',
     pageHead: false,

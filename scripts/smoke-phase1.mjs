@@ -1,8 +1,4 @@
-/**
- * اختبار دخان للمرحلة الأولى (1D + 1E + 1F): مسار البحث، المراجع، المفكرة، الملفات، الشات.
- * ينشئ حساب اختبار في قاعدة البيانات، يوقّع جلسة، ثم يضرب المسارات ويتحقق من الردود.
- * التشغيل: شغّل الخادم ثم node scripts/smoke-phase1.mjs
- */
+/** Smoke tests for the research journey, library, notes, files, and chat. */
 import { createSessionCookie, SESSION_COOKIE_NAME } from '../src/auth/google.js';
 import { pool } from '../src/db/client.js';
 import { deleteFile, filesSummary, saveUpload } from '../src/services/files.js';
@@ -17,14 +13,14 @@ import { detectStepCompletion } from '../src/services/step-review.js';
 import { chargeUsage, estimateReservation, normalizeUsage } from '../src/services/tokens.js';
 import { TOKEN_RATES } from '../src/constants.js';
 
-/** باقة الاختبار: دور «رسائل علمية» — أوسع صلاحيات، فكل مسارات البحث تعمل. */
+/** Test plan with access to all research features. */
 const TEST_PLAN_CODE = 'thesis';
 
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:3000';
 const results = [];
 
-// حماية CSRF في الخادم ترفض أي POST يحمل كوكي جلسة بلا ترويسة Origin،
-// فكل نداءات الاختبار تُرسل Origin مطابقاً للمضيف (كما يفعل المتصفح).
+// CSRF protection requires an Origin header on authenticated POST requests.
+// Match the request origin to the host, as a browser would.
 const nativeFetch = globalThis.fetch;
 globalThis.fetch = (url, options = {}) => {
   const headers = new Headers(options.headers || {});
@@ -32,16 +28,16 @@ globalThis.fetch = (url, options = {}) => {
   return nativeFetch(url, { ...options, headers });
 };
 
-/** يسجّل نتيجة اختبار واحدة ويطبعها. */
+/** Records and prints one test result. */
 function check(name, ok, extra = '') {
   results.push({ name, ok, extra });
   console.log(`${ok ? '✅' : '❌'} ${name}${extra ? ` — ${extra}` : ''}`);
 }
 
-/** طلب HTTP مع كوكي الجلسة، ويعيد الحالة والنص ورابط التحويل. */
+/** Sends an HTTP request with the session cookie and returns its response. */
 async function call(path, { method = 'GET', form, cookie, expect = [200], accept = 'text/html' } = {}) {
   const headers = { accept };
-  // بوابة لوحة الإدارة: الرمز يُرسل في ترويسة x-admin-token (يقرأه السكربت من .env نفسه)
+  // Pass the admin token from .env when testing admin routes.
   if (path.startsWith('/admin') && process.env.ADMIN_TOKEN) headers['x-admin-token'] = process.env.ADMIN_TOKEN;
   if (cookie) headers.cookie = cookie;
   let body;
@@ -55,7 +51,7 @@ async function call(path, { method = 'GET', form, cookie, expect = [200], accept
   return { ok: expect.includes(response.status), status: response.status, text, location: response.headers.get('location') || '' };
 }
 
-/** ينشئ حساب اختبار بدرجة ماجستير وكوكي جلسة موقع. */
+/** Creates a test researcher and signed session cookie. */
 async function createTestUser() {
   const stamp = Date.now();
   const { rows } = await pool.query(
@@ -76,9 +72,9 @@ async function createTestUser() {
   return { user, cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(createSessionCookie(user))}` };
 }
 
-/** اختبارات 1C: صفحة الإحصائية (المؤشرات + المخططات + عدم تكرار أزرار السايدبار). */
+/** Tests dashboard metrics, charts, and duplicate navigation links. */
 async function testDashboard(userId, cookie) {
-  // نزرع استهلاكاً بأنواع مختلفة لضمان رسم المخطط الدائري والأعمدة
+  // Seed varied usage so both charts have data.
   await pool.query(
     `INSERT INTO usage_logs (user_id, type, tokens_used, summary, created_at) VALUES
        ($1, 'chat', 30, 'سؤال اختباري', NOW()),
@@ -103,7 +99,7 @@ async function testDashboard(userId, cookie) {
   check('1C زر «إضافة نقاط» باقٍ (غير مكرّر)', main.includes('href="/#pricing"'));
 }
 
-/** اختبارات 1D: صفحة المسار + حفظ الحالة + رفض خطوة غير موجودة. */
+/** Tests journey display, status updates, and invalid-step rejection. */
 async function testJourney(cookie) {
   const journey = await call('/journey', { cookie });
   check('1D /journey يفتح ويعرض مسار الماجستير', journey.ok && journey.text.includes('مسار الماجستير'), `status=${journey.status}`);
@@ -137,7 +133,7 @@ async function testJourney(cookie) {
   check('الحماية: زائر بلا جلسة يُحوَّل إلى /login', guest.ok && guest.location.includes('/login'), guest.location);
 }
 
-/** اختبارات 1E: المراجع (مكتبة + يدوي + الحالة + الحذف). */
+/** Tests reference creation, status updates, and deletion. */
 async function testReferences(userId, cookie) {
   const page = await call('/references', { cookie });
   check('1E /references يفتح', page.ok && page.text.includes('مراجعي'));
@@ -191,7 +187,7 @@ async function testReferences(userId, cookie) {
   check('1E المرجع اختفى من قاعدة البيانات', gone.rows[0].total === 0);
 }
 
-/** اختبارات 1E: المفكرة (إنشاء + تثبيت + تعديل + بحث + حذف). */
+/** Tests note creation, pinning, editing, search, and deletion. */
 async function testNotes(userId, cookie) {
   const page = await call('/notes', { cookie });
   check('1E /notes يفتح', page.ok && page.text.includes('مفكرتي'));
@@ -204,7 +200,7 @@ async function testNotes(userId, cookie) {
   });
   check('1E إنشاء ملاحظة (303)', add.ok && add.location.includes('ok=note_added'), add.location);
 
-  // نحدد الملاحظة بالعنوان: الاختبار أنشأ ملاحظة أخرى مرتبطة بالمرجع في testReferences
+  // Select by title; testReferences creates a separate linked note.
   const rows = await pool.query(
     "SELECT id, pinned, tags, step_key FROM notes WHERE user_id = $1 AND title = 'ملاحظة اختبار'",
     [userId]
@@ -236,7 +232,7 @@ async function testNotes(userId, cookie) {
   check('1E الملاحظة اختفت من قاعدة البيانات', gone.rows[0].total === 0);
 }
 
-/** اختبارات 1E: الملفات (رفع multipart + تحميل + رفض نوع + حماية). */
+/** Tests file upload, download, preview, and access controls. */
 async function testFiles(userId, cookie) {
   const page = await call('/files', { cookie });
   check('1E /files يفتح', page.ok && page.text.includes('ملفاتي'));
@@ -259,7 +255,7 @@ async function testFiles(userId, cookie) {
   const bytes = Buffer.from(await download.arrayBuffer());
   check('1E تحميل الملف بنفس البايتات', download.status === 200 && bytes.toString().includes('%PDF-1.4'), `status=${download.status}`);
 
-  // المعاينة: PDF داخل iframe عبر ?inline=1
+  // Preview PDFs inline in an iframe.
   const viewPage = await call(`/files/${file.id}/view`, { cookie });
   check('1E صفحة معاينة PDF تفتح', viewPage.ok && viewPage.text.includes('file-preview--pdf'), `status=${viewPage.status}`);
   const inline = await fetch(`${BASE}/files/${file.id}/raw?inline=1`, { headers: { cookie } });
@@ -274,7 +270,7 @@ async function testFiles(userId, cookie) {
   const shown = await call('/files', { cookie });
   check('1E الملف يظهر في الصفحة', shown.text.includes('مقترح البحث'));
 
-  // منتقي الملف منسّق: input حقيقي مغطّى + بطاقة قابلة للسحب + سكربت عرض الاسم
+  // Verify the styled file picker and filename display.
   const filesBody = shown.text.split('</style>')[1] || '';
   check(
     '1E منتقي الملف منسّق (سحب وإفلات + اسم الملف)',
@@ -285,14 +281,14 @@ async function testFiles(userId, cookie) {
   badForm.append('file', new Blob(['#!/bin/sh\necho hi'], { type: 'application/x-sh' }), 'evil.sh');
   const badUpload = await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: badForm, redirect: 'manual' });
   check('1E يرفض رفع ملف من نوع ممنوع', badUpload.status === 303 && (badUpload.headers.get('location') || '').includes('err=file_type_bad'));
-  // التنبيه بعد الرفض يشرح السبب ويوثّق الأنواع المسموحة
+  // The rejection notice must explain the error and list supported types.
   const typeFlash = (await call('/files?err=file_type_bad', { cookie })).text;
   check(
     '1E تنبيه النوع يذكر الأنواع المسموحة',
     typeFlash.includes('نوع الملف غير مدعوم') && typeFlash.includes('.pdf')
   );
 
-  // مستخدم آخر لا يستطيع تحميل الملف
+  // Another user must not be able to access the file.
   const stamp = Date.now();
   const other = await pool.query(
     `INSERT INTO users (email, full_name, google_sub, role, tokens_balance, onboarding_complete)
@@ -306,7 +302,7 @@ async function testFiles(userId, cookie) {
   check('الحماية: مستخدم آخر لا يعرض الملف (404)', stealView.status === 404, `status=${stealView.status}`);
   await pool.query('DELETE FROM users WHERE id = $1', [other.rows[0].id]);
 
-  // معاينة النص: يُعرض داخل <pre> مُهرَّب، ويُقدَّم text/plain (لا HTML)
+  // Render text previews as escaped plain text, never HTML.
   const textUpload = new FormData();
   textUpload.append('title', 'ملف نصي');
   textUpload.append('file', new Blob(['<script>alert(1)</script>\nنص البحث'], { type: 'text/plain' }), 'notes.txt');
@@ -355,7 +351,7 @@ async function testFiles(userId, cookie) {
   check('1E أرقام Excel تُعرض كنص', sheetView.text.includes('90') && sheetView.text.includes('ممتاز'));
   check('1E زر «عرض» يظهر لملف Excel', (await call('/files', { cookie })).text.includes(`/files/${sheetId}/view`));
 
-  // xlsx تالف ⇒ رفض عند الرفع (بصمة ZIP غير صحيحة) ⇒ لا يُخزَّن أصلاً
+  // Reject malformed XLSX files before storing them.
   const brokenForm = new FormData();
   brokenForm.append('title', 'جدول تالف');
   brokenForm.append(
@@ -373,7 +369,7 @@ async function testFiles(userId, cookie) {
     brokenRes.status === 303 && brokenRow.rows.length === 0
   );
 
-  // xlsx بتوقيع ZIP صحيح لكن محتواه تالف ⇒ يمرّ الرفع، وتتعامل المعاينة برسالة خطأ مفهومة
+  // Accept the ZIP signature, but show a clear preview error for malformed contents.
   const halfBrokenForm = new FormData();
   halfBrokenForm.append('title', 'جدول نصف تالف');
   halfBrokenForm.append(
@@ -392,7 +388,7 @@ async function testFiles(userId, cookie) {
     Boolean(halfBrokenId) && (await call(`/files/${halfBrokenId}/view`, { cookie })).text.includes('تعذّرت قراءة الملف')
   );
 
-  // csv ⇒ نفس معاينة الجدول
+  // CSV files use the same table preview.
   const csvForm = new FormData();
   csvForm.append('title', 'قائمة csv');
   csvForm.append('file', new Blob(['الاسم,الدرجة\nأحمد,90'], { type: 'text/csv' }), 'data.csv');
@@ -401,7 +397,7 @@ async function testFiles(userId, cookie) {
     await pool.query("SELECT id FROM files WHERE user_id = $1 AND title = 'قائمة csv' ORDER BY created_at DESC LIMIT 1", [userId])
   ).rows[0].id;
   check('1E معاينة CSV كجدول', (await call(`/files/${csvId}/view`, { cookie })).text.includes('الدرجة'));
-  // ملف غير معروض (zip) ⇒ إرشاد تحميل بلا معاينة
+  // ZIP files offer a download instead of a preview.
   const zipUpload = new FormData();
   zipUpload.append('title', 'أرشيف مضغوط');
   zipUpload.append(
@@ -417,7 +413,7 @@ async function testFiles(userId, cookie) {
   const zipView = zipRow.rows[0] ? await call(`/files/${zipRow.rows[0].id}/view`, { cookie }) : { ok: false, text: '' };
   check('1E ملف zip: إرشاد تحميل (لا معاينة)', zipView.ok && zipView.text.includes('لا يعرض المتصفح هذا النوع'));
 
-  // zip بتنكّر (توقيع ناقص) ⇒ مرفوض عند الرفع ولا يُخزَّن
+  // Reject disguised ZIP files with an invalid signature.
   const fakeZipUpload = new FormData();
   fakeZipUpload.append('title', 'أرشيف مزوّر');
   fakeZipUpload.append('file', new Blob(['#!/bin/sh\necho hacked'], { type: 'application/zip' }), 'fake.zip');
@@ -434,7 +430,7 @@ async function testFiles(userId, cookie) {
   check('1E صف الملف حُذف', gone.rows[0].total === 0);
 }
 
-/** اختبارات 1F: الشات (الصفحة + الإرسال + الخصم + الحذف). */
+/** Tests chat display, sending, billing, and deletion. */
 async function testChat(userId, cookie) {
   const page = await call('/chat', { cookie });
   check('1F /chat يفتح', page.ok && page.text.includes('المشرف الذكي'));
@@ -449,7 +445,7 @@ async function testChat(userId, cookie) {
   let messages = { rows: [] };
   let after = before;
 
-  // مزوّدو الذكاء الاصطناعي المجانيون قد يردّون 503 مؤقتاً، فنُعيد المحاولة ٣ مرات
+  // Retry temporary 503 responses from free AI providers up to three times.
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     ask = await call('/chat', {
       method: 'POST',
@@ -489,7 +485,7 @@ async function testChat(userId, cookie) {
     );
     check('1F الاستهلاك الفعلي أقل من الحجز المسبق', spent <= 200, `الحجز الأقصى ≈ ${Math.ceil(spent * 1.5)}`);
   } else {
-    // مزوّدو الذكاء الاصطناعي خدمة خارجية: نُبقيها تحذيراً لا فشلاً، وال deduct أُعيد فعلاً
+    // AI providers are external; report an unavailable provider as a warning.
     console.log('⚠️  1F لم يصل رد من أي مزوّد (خدمة خارجية: رصيد OpenRouter أو ازدحام Gemini/Groq)');
     const usage = await pool.query('SELECT type FROM usage_logs WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1', [userId]);
     check('1F سُجّل الفشل وأُعيدت التوكنز للباحث', usage.rows[0]?.type === 'chat_failed' && after.rows[0].tokens_balance === before.rows[0].tokens_balance);
@@ -501,7 +497,7 @@ async function testChat(userId, cookie) {
   const listed = await call('/chat', { cookie });
   check('1F المحادثة تظهر في السجل', listed.text.includes('أراجع منهجي'));
 
-  /* ---------- 1F: شخصية المشرفة + المتغيّرات التي يحسبها الكود ---------- */
+  /* ---------- 1F: Supervisor prompt and computed context ---------- */
   const ctxBase = {
     userName: 'أحمد',
     degree: 'باحث ماجستير',
@@ -540,7 +536,7 @@ async function testChat(userId, cookie) {
     !firstPrompt.includes('اسأليه عما يريد إنجازه اليوم')
   ].every(Boolean));
 
-  // الأقسام الشرطية: لا تظهر إلا عند الحاجة
+  // Conditional sections appear only when needed.
   check('1G البرومبت: لا قسم مناقشة في الوضع العادي', !firstPrompt.includes('المناقشة الأكاديمية المستقلة'));
   check('1G البرومبت: لا قواعد استهثار بلا عدّاد', !firstPrompt.includes('[[strike]]'));
   const latePrompt = buildSystemPrompt({ ...ctxBase, isFirstMessageEver: false, strikes: 2, mode: 'defense', openTask: 'كتابة المشكلة البحثية', memorySummary: 'قرّر استخدام مقاييس مرجعية', daysSinceLast: 9 });
@@ -614,7 +610,7 @@ async function testChat(userId, cookie) {
   const labels = providerStatus().map((row) => row.label);
   check('1H أسماء المزوّدين عربية في التقارير', labels.includes('OpenRouter') && labels.includes('Groq') && labels.includes('Gemini'), labels.join(' · '));
 
-  // مفاتيح متعدّدة: مفتاح نُفد رصيده لا يطعن في أخيه، والحالة تُعرض لكل مفتاح
+  // Check that exhausted provider keys do not affect other keys.
   const multi = providerStatus().find((row) => row.keyCount > 1);
   if (multi) {
     check('1H عدّة مفاتيح = عدّة أهداف مستقلّة', multi.keyStates.length === multi.keyCount, `${multi.label}: ${multi.keyCount} مفاتيح`);
@@ -624,14 +620,14 @@ async function testChat(userId, cookie) {
   const groqRow = providerStatus().find((row) => row.key === 'groq');
   check('1H Groq مزوّد معرّف بنماذج عربية', Boolean(groqRow) && groqRow.models.some((m) => /qwen|allam/.test(m)), groqRow?.models.join(' ← '));
 
-  // صفحة المزوّدين حُذفت بالكامل ⇒ 404، ولا رابط إليها في السايدبار.
+  // The removed providers page should return 404 and have no admin link.
   const providersPage = await call('/admin/providers', { cookie });
   check('1H صفحة المزوّدين محذوفة (404)', providersPage.status === 404, `الحالة ${providersPage.status}`);
   const adminHome = await call('/admin', { cookie });
   check('1H لا رابط للمزوّدين في لوحة الإدارة', !adminHome.text.includes('/admin/providers'));
   check('1H المزوّدون يعملون بمفاتيح .env فقط (بلا روابط مخصّصة)', !providerStatus().some((row) => typeof row.custom !== 'undefined'));
 
-  // مزوّد وهمي بلا مفتاح: يفشل فوراً ولا يُعيد المحاولة (لا مضيعة وقت ولا رصيد)
+  // An unknown provider should fail immediately without retries or charges.
   const fakeKey = 'zena-test-unknown';
   const saved = process.env.ZEN_FAKE_KEY;
   process.env.ZEN_FAKE_KEY = fakeKey;
@@ -944,12 +940,12 @@ async function testStorageLimits() {
   check('1F سكربت تفعيل إشعارات الهاتف موجود', pushScript.ok && pushScript.text.includes('firebase-messaging') && pushScript.text.includes('/api/notifications/register'));
   const swFile = await call('/firebase-messaging-sw.js', { expect: [200] });
   check('1F عامل الخدمة يستقبل الإشعارات ويفتحها', swFile.ok && swFile.text.includes('onBackgroundMessage') && swFile.text.includes('notificationclick'));
-  // زر واتساب للدعم: يظهر مع الزائر والباحث، ولا يظهر في لوحة الإدارة.
-  // بدون رقم في البيئة لا يظهر إطلاقاً (لا رابط مكسور).
+  // Show the support WhatsApp button to visitors and researchers, not admins.
+  // Hide it when no number is configured.
   const waUser = await createTestUser();
   const waChat = await call('/chat', { cookie: waUser.cookie, expect: [200] });
   const waAdmin = await call('/admin/users', { expect: [200] });
-  // قاعدة لا تعتمد على بيئة التشغيل: إن ظهر الزر فـ رابطه سليم دائماً.
+  // If shown, the link must always be valid regardless of environment.
   const waHref = /href="(https:\/\/wa\.me\/[^"?]+)\?text=/.exec(waChat.text)?.[1] || '';
   const waValid = Boolean(waHref) && /wa\.me\/\d{8,15}$/.test(waHref);
   check(
@@ -959,11 +955,10 @@ async function testStorageLimits() {
   );
   check('1G لا زر واتساب في لوحة الإدارة', !waAdmin.text.includes('wa-float"'));
 
-  // نلتقط الرقم الأصلي من القاعدة قبل تعديله — الاختبار يعيده كما كان فعلاً
-  // (لا فراغاً دائماً: قد يكون المدير مضبوطاً على رقم حقيقي لا يجب فقده).
+  // Save the original number so the test can restore it exactly.
   const waOriginal = await pool.query("SELECT value FROM settings WHERE key = 'support_whatsapp'");
 
-  // المدير يضبط الرقم من الإعدادات: حفظٌ صحيح يظهر فوراً، والسقوط يبقى سليماً.
+  // Verify that valid WhatsApp settings take effect immediately.
   const waSaveOk = await call('/admin/settings/support-whatsapp', {
     method: 'POST', form: { whatsapp: '0912345678' }, expect: [302]
   });
@@ -976,11 +971,11 @@ async function testStorageLimits() {
   const waBad = await call('/admin/settings/support-whatsapp', {
     method: 'POST', form: { whatsapp: '0912' }, expect: [302]
   });
-  // location يستخدم + بدل المسافة ⇒ نحوّلها قبل الفحص
+  // Decode the redirect URL, where spaces are encoded as plus signs.
   const waBadText = decodeURIComponent((waBad.location || '').replace(/\+/g, ' '));
   check('1G يرفض رقماً ناقصاً برسالة عربية', waBadText.includes('رقم غير صالح'), waBadText.slice(0, 70));
 
-  // نُعيد الرقم كما كان فعلاً عبر المسار نفسه (فيتحدّث كاش الخادم لا القاعدة وحدها)
+  // Restore the original value through the route to refresh the server cache.
   await call('/admin/settings/support-whatsapp', {
     method: 'POST',
     form: { whatsapp: waOriginal.rows[0]?.value || '' },
@@ -998,7 +993,7 @@ async function testStorageLimits() {
   });
   check('1G توكن فارغ/قصير يُرفض برسالة JSON', /"ok":false/.test(shortToken.text), shortToken.text.slice(0, 60));
 
-  // صفحة الإعدادات: لا قسم «بريد المدير» ولا ملاحظة «خطة نجاة» (حُذفا بقرار المنصة).
+  // Verify the settings page no longer shows removed admin-email controls.
   const settingsClean = await call('/admin/settings', { expect: [200] });
   check(
     '1G لا قسم بريد المدير ولا ملاحظته في الإعدادات',
@@ -1011,15 +1006,14 @@ async function testStorageLimits() {
 
   await pool.query('DELETE FROM users WHERE id = $1', [waUser.user.id]);
 
-  // المفاتيح صارت في ملف البيئة فقط ⇒ لا كارت مفاتيح في لوحة الإدارة.
+  // Provider keys now come from environment variables only.
   const settingsPagePush = await call('/admin/settings', { expect: [200] });
   check(
     '1F لا كارت مفاتيح الإشعارات في الإعدادات',
     !settingsPagePush.text.includes('name="apiKey"') && !settingsPagePush.text.includes('name="vapidKey"')
   );
 
-  // المدير يضبط حدود الباقة من صفحة الباقات (المسار الفعلي للنموذج) —
-  // والرابط حاكم: طلب «حجم ملف» أكبر من الحصة يُقتطع إلى الحصة لا يُرفض النموذج.
+  // Save plan limits through the admin form; oversized file limits are capped.
   const freeBefore = (await pool.query(`SELECT * FROM plans WHERE code = 'free_trial'`)).rows[0];
   const planLimitsSave = await call('/admin/plans/free_trial', {
     method: 'POST',
@@ -1047,18 +1041,17 @@ async function testStorageLimits() {
     planLimitsSave.ok && Number(clamped.storage_mb) === 50 && Number(clamped.max_file_mb) === 50,
     JSON.stringify(clamped)
   );
-  // إعادة الباقة كما كانت فوراً حتى لا تتأثر بقية الاختبارات (حصة 500 / ملف 100)
+  // Restore the plan immediately so later tests use the original limits.
   await pool.query(`UPDATE plans SET storage_mb = $1, max_file_mb = $2 WHERE code = 'free_trial'`, [
     Number(freeBefore.storage_mb) || 500,
     Number(freeBefore.max_file_mb) || 100
   ]);
 
-  // باحث يرفع 30MB ثم يحاول تجاوز الحصة الباقية (20MB)
-  // الحصة الآن تأتي من باقته في قاعدة البيانات (plans.storage_mb) لا من الحد العام،
-  // فنُنزّلها لباقة الاختبار نفسها (كما يفعل المدير من صفحة الباقات).
+  // Upload 30 MB, then try to exceed the remaining 20 MB quota.
+  // Quota comes from plans.storage_mb, so lower the test plan's limits.
   const { user, cookie } = await createTestUser();
   const megabytes = (n) => Buffer.alloc(n * 1024 * 1024, 0x41);
-  // ملف PDF وهمي صالح البصمة: نبدأ بتوقيع %PDF- ثم نملأ الباقي (اختبار الحصة لا المحتوى).
+  // Create a signature-valid PDF fixture; these checks cover quotas, not file contents.
   const fakeFile = (name, sizeMb) => ({
     name,
     size: sizeMb * 1024 * 1024,
@@ -1074,8 +1067,7 @@ async function testStorageLimits() {
   const planStorageBefore = await pool.query('SELECT storage_mb, max_file_mb FROM plans WHERE code = $1', [planCode]);
   const defaultsPlanStorage = Number(planStorageBefore.rows[0]?.storage_mb) || 500;
   const defaultsPlanFile = Number(planStorageBefore.rows[0]?.max_file_mb) || 100;
-  // الحدّان الآن من باقة الاختبار نفسها (storage_mb=50 + max_file_mb=30):
-  // تُحذَّف ثم تُستعاد في نهاية الدالة كما يضبطها المدير من صفحة الباقات.
+  // Temporarily set the test plan limits and restore them at the end.
   const savedPlanStorage = await pool.query(
     'UPDATE plans SET storage_mb = 50, max_file_mb = 30 WHERE code = $1 RETURNING storage_mb, max_file_mb',
     [planCode]
@@ -1105,7 +1097,7 @@ async function testStorageLimits() {
   }
   check('1E يرفض ملف أكبر من حد الملف الواحد', sizeBlocked);
 
-  // دقة العرض: ملف صغير يجب ألا يظهر «0 MB» أو شريطاً غير مرئي
+  // Small files should not display as 0 MB or have an invisible usage bar.
   const small = await filesSummary(user.id);
   check(
     '1E الحصة تظهر بالبايت الدقيق (لا 0 MB لملف صغير)',
@@ -1120,20 +1112,20 @@ async function testStorageLimits() {
     flatPage.includes('مساحة ملفاتك') && flatPage.includes('المتاح:') && /من [\d.]+ (MB|GB|KB)/.test(flatPage)
   );
 
-  // الرفع بالحقل بعد خفض حد الملف الواحد للباقة إلى 5MB (كما يضبطه المدير من صفحة الباقات)
+  // Lower the plan's per-file limit and verify uploads use the new limit immediately.
   await pool.query('UPDATE plans SET max_file_mb = 5 WHERE code = $1', [planCode]);
   const form = new FormData();
   form.append('file', new Blob([megabytes(10)], { type: 'application/pdf' }), 'ten.pdf');
   const viaForm = await fetch(`${BASE}/files`, { method: 'POST', headers: { cookie }, body: form, redirect: 'manual' });
   check('1E الحد الجديد يطبَّق فوراً على الرفع', viaForm.status === 303 && (viaForm.headers.get('location') || '').includes('err=file_too_large'));
-  // التنبيه يشرح الحجم وحدّ الباقة الفعلي
+  // The warning should show the actual plan limit.
   const tooLargeFlash = (await call('/files?err=file_too_large', { cookie })).text;
   check(
     '1E تنبيه الحجم يشرح الحد الفعلي',
     tooLargeFlash.includes('أكبر من الحد المسموح') && tooLargeFlash.includes('حتى 5 MB')
   );
 
-  // تنظيف + إعادة الافتراضي (حصة الباقة وحدّ الملف اللذان خفضهما الاختبار)
+  // Remove test uploads and restore the plan defaults.
   const files = await pool.query('SELECT id FROM files WHERE user_id = $1', [user.id]);
   for (const file of files.rows) await deleteFile(user.id, file.id);
   await pool.query('DELETE FROM users WHERE id = $1', [user.id]);
@@ -1152,12 +1144,11 @@ async function testStorageLimits() {
 }
 
 /**
- * اختبارات بطاقة مراجعة اكتمال الخطوة: كشف حتمي بلا لمس المسار ← بطاقة في
- * الشات ← تعديل ⇄ حفظ (الوحيد الذي يحرّك المسار) ⇄ إلغاء. بلا مزوّد ذكاء:
- * نزرع الرسائل بأنفسنا فالكشف حتمي بحت.
+ * Tests the step-review lifecycle: deterministic detection, edit, save, and cancel.
+ * Seeded messages keep detection deterministic without an AI provider.
  */
 async function testStepReview(userId, cookie) {
-  // ١) كشف حتمي: حديث يحمل مؤشرات المنهجية كلها ⇒ بطاقة معلّقة لا شيء غيرها
+  // 1) Detect a review card without changing progress.
   const conv = (
     await pool.query(
       `INSERT INTO conversations (user_id, title, step_key, mode) VALUES ($1, 'مراجعة المنهجية', 'methodology', 'normal') RETURNING id`,
@@ -1182,14 +1173,14 @@ async function testStepReview(userId, cookie) {
   );
   check('مراجعة: الكشف وحده لم يمسّ المسار', !stillNotStarted.rows[0] || stillNotStarted.rows[0].status !== 'done');
 
-  // ٢) البطاقة تظهر في الشات بزرَي تعديل/إلغاء وزر حفظ رئيسي
+  // 2) Render the card with edit, cancel, and save actions.
   const page = await call(`/chat?c=${conv.id}`, { cookie });
   check(
     'مراجعة: البطاقة في الشات مع أزرارها',
     page.ok && page.text.includes('مراجعة اكتمال الخطوة') && page.text.includes('حفظ وإتمام الخطوة') && page.text.includes('تعديل')
   );
 
-  // ٣) التعديل يفتح الحقول فقط (POST round-trip بلا جافاسكربت)
+  // 3) Editing opens the fields through a POST round trip.
   const edit = await call(`/chat/${conv.id}/step-review`, {
     method: 'POST',
     form: { action: 'edit', step: 'methodology', f_method: 'المنهج الوصفي المعتمد' },
@@ -1203,7 +1194,7 @@ async function testStepReview(userId, cookie) {
   const editPage = await call(`/chat?c=${conv.id}`, { cookie });
   check('مراجعة: حقول الإدخال تظهر بقيمها', editPage.text.includes('name="f_method"'));
 
-  // ٤) الحقل الفارغ مرفوض (المسار لا يزال كما هو)
+  // 4) Reject empty fields without changing progress.
   const empty = await call(`/chat/${conv.id}/step-review`, {
     method: 'POST',
     form: { action: 'save', step: 'methodology', f_method: 'المنهج الوصفي المعتمد', f_sample: '', f_tool: 'استبانة' },
@@ -1214,7 +1205,7 @@ async function testStepReview(userId, cookie) {
   const stillPending = await pool.query('SELECT pending_review FROM conversations WHERE id = $1', [conv.id]);
   check('مراجعة: الرفض يبقي البطاقة معلّقة', Boolean(stillPending.rows[0].pending_review));
 
-  // ٥) الحفظ وحده يحرّك المسار كاملًا
+  // 5) Saving alone completes the step and advances progress.
   await addStrike(userId);
   check('مراجعة: تنبيه قبل الإنجاز', (await getStrikes(userId)) >= 1);
   const save = await call(`/chat/${conv.id}/step-review`, {
@@ -1258,7 +1249,7 @@ async function testStepReview(userId, cookie) {
   const journeyAfter = await call('/journey', { cookie });
   check('مراجعة: صفحة المسار تعكس التقدّم الجديد (2 من 9)', journeyAfter.text.includes('2 من 9'));
 
-  // ٦) حفظ ثانٍ بلا بطاقة معلّقة مرفوض — لا ازدواج إنجاز
+  // 6) Reject repeated saves without a pending card.
   const again = await call(`/chat/${conv.id}/step-review`, {
     method: 'POST',
     form: { action: 'save', step: 'methodology' },
@@ -1267,7 +1258,7 @@ async function testStepReview(userId, cookie) {
   });
   check('مراجعة: حفظ بلا بطاقة معلّقة مرفوض', again.location.includes('err=review_missing'), again.location);
 
-  // ٧) الإلغاء يمسح البطاقة ولا يمسّ المسار
+  // 7) Cancel clears the card without changing progress.
   const cancelConv = (
     await pool.query(
       `INSERT INTO conversations (user_id, title, step_key, mode) VALUES ($1, 'مراجعة الكتابة', 'writing', 'normal') RETURNING id`,
@@ -1302,7 +1293,7 @@ async function testStepReview(userId, cookie) {
     afterCancel.rows[0].pending_review === null && (!writingStatus.rows[0] || writingStatus.rows[0].status !== 'done')
   );
 
-  // ٨) كشف سلبي: حديث بلا مؤشرات، ومحادثة بلا خطوة سياق
+  // 8) No card should be created without indicators or a context step.
   const noConv = (
     await pool.query(
       `INSERT INTO conversations (user_id, title, step_key, mode) VALUES ($1, 'بدون مؤشرات', 'analysis', 'normal') RETURNING id`,
@@ -1332,7 +1323,7 @@ async function testStepReview(userId, cookie) {
   });
   check('مراجعة: محادثة بلا خطوة سياق لا تُكشف', noStepCard === null);
 
-  // إن كانت رسالة الشات التجريبية أنتجت بطاقة فعلية فهي تبقى معلّقة (لم نمسّها)
+  // Leave any review card created by the chat smoke test untouched.
   const chatPending = await pool.query(
     `SELECT count(*)::int AS total FROM conversations WHERE user_id = $1 AND pending_review IS NOT NULL`,
     [userId]

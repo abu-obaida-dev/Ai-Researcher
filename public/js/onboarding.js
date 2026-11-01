@@ -1,16 +1,10 @@
-/**
- * فلترة لحظية لحقول صفحة إكمال الملف (onboarding) — تعمل بدون أي مكتبات:
- * 1) اسم المستخدم: حروف فقط (عربي/لاتيني) واسم واحد — تُحذف المسافات والأرقام والرموز فوراً.
- * 2) رقم الواتساب: أرقام فقط، يُقصّ حسب طول الدولة المختارة، وإن لُصق بمفتاح دولته يُقصّ المفتاح.
- *    مع تحديث المفتاح المعروض (+#) ونص التوضيح عند تغيير الدولة.
- * الخادم يعيد التحقق والتطبيع نفسه — هذه الفلترة تمنع الأخطاء قبل الإرسال فقط.
- */
+/** Applies immediate onboarding input normalization; the server validates again. */
 (function () {
   'use strict';
 
   var nameInput = document.getElementById('full_name');
   if (nameInput) {
-    // حذف أي شيء ليس حرفاً (يشمل المسافات) — اسم واحد فقط
+    // Keep one name containing letters only.
     var filterName = function () {
       var cleaned = nameInput.value.replace(/[^\p{L}]/gu, '');
       if (cleaned !== nameInput.value) nameInput.value = cleaned;
@@ -26,7 +20,7 @@
   var hintEl = document.getElementById('wa_hint');
   if (!countrySelect || !numberInput) return;
 
-  /** خصائص الدولة الحالية من خيارات القائمة (data-* مضمّنة في HTML). */
+  /** Reads the selected country's metadata from its option element. */
   function currentCountry() {
     var option = countrySelect.options[countrySelect.selectedIndex];
     if (!option) return { dial: '218', lengths: [9], name: 'ليبيا', sample: '912345678' };
@@ -38,7 +32,7 @@
     };
   }
 
-  /** تطبيع الرقم: أرقام فقط + قصّ المفتاح الملصوق إن وُجد + حذف الأصفار البادئة + حذف الزائد. */
+  /** Normalizes the number and removes a pasted country code when present. */
   function sanitizeNumber(raw, country) {
     var digits = String(raw).replace(/\D/g, '');
     if (digits.slice(0, 2) === '00') digits = digits.slice(2); // صيغة 00
@@ -52,7 +46,7 @@
     return digits;
   }
 
-  /** تحديث المفتاح المعروض + maxlength + placeholder + نص التوضيح حسب الدولة. */
+  /** Updates the displayed calling code and field hints. */
   function syncCountry() {
     var country = currentCountry();
     if (dialBadge) dialBadge.textContent = '+' + country.dial;
@@ -64,7 +58,7 @@
         'الرقم المطلوب لدولة ' + country.name + ': ' + country.lengths.join(' أو ') +
         ' أرقام بعد المفتاح +' + country.dial + (country.sample ? ' (مثال: ' + country.sample + ')' : '') + '.';
     }
-    // إعادة تطبيع القيمة الحالية عند تغيير الدولة (طولها قد يصبح غير صالح)
+    // Revalidate the current number when the selected country changes.
     var cleaned = sanitizeNumber(numberInput.value, country);
     if (cleaned !== numberInput.value) numberInput.value = cleaned;
   }

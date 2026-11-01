@@ -3,12 +3,9 @@ import { FREE_PLAN_CODE } from '../constants.js';
 import { freeTrialTokens } from './plans.js';
 import { isSupervisorEmail, planRoles } from './access.js';
 
-/**
- * كل بيانات المستخدمين تُقرأ وتُكتب في PostgreSQL (جدولا users وprofiles) — لا Firestore.
- * المنطق منقول من النسخة القديمة (src/lib/userService.ts) بعد إسقاط جزء Firestore.
- */
+/** User and research-profile persistence in PostgreSQL. */
 
-/** الملف البحثي الافتراضي لأي حساب جديد (يقابل DEFAULT_PROFILE في النسخة القديمة). */
+/** Default research profile for new accounts. */
 export const DEFAULT_PROFILE = {
   full_name: '',
   age: null,
@@ -29,7 +26,7 @@ export const DEFAULT_PROFILE = {
   whatsapp_number: ''
 };
 
-/** إيميلات مديري المنصة من .env — خطة نجاة ثابتة لا يمكن حذفها من اللوحة. */
+/** Administrator recovery emails from the environment. */
 export function adminEmailsFromEnv() {
   return String(process.env.ADMIN_EMAILS || '')
     .split(/[,;\s]+/)
@@ -37,11 +34,7 @@ export function adminEmailsFromEnv() {
     .filter(Boolean);
 }
 
-/**
- * مصدر صلاحية لوحة الإدارة: ADMIN_EMAILS في .env (خطة نجاة) + جدول admins
- * الذي يعدّله **المدير نفسه** من الإعدادات (إضافة بريده الجديد أو إزالته).
- * لا يستطيع أي مشرف أو باحث لمس هذا الجدول.
- */
+/** Resolves administrators from the environment recovery list and admins table. */
 export async function isAdminEmail(email) {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) return false;
@@ -55,7 +48,7 @@ export async function isAdminEmail(email) {
   }
 }
 
-/** إيميلات المديرين: من .env + جدول admins (لعرضها في الإعدادات). */
+/** Lists administrator emails for settings. */
 export async function adminEmails() {
   const fromEnv = adminEmailsFromEnv();
   try {
@@ -74,30 +67,22 @@ export async function adminEmails() {
   }
 }
 
-/**
- * المدير يغيّر بريده: ينقل دوره admin إلى بريده الجديد ويحدّث الجدول.
- * `oldEmail` بريده الحالي، `newEmail` الجديد. لا تغيير لدور أي حساب آخر.
- */
+/** Moves the administrator role to a new email without changing other accounts. */
 
-/**
- * إنشاء حساب جديد بعد تسجيل الدخول بجوجل (مع منح نقاط التجربة المجانية)
- * أو تحديث الحساب الموجود بنفس البريد — البيانات في PostgreSQL فقط.
- * ملاحظة: الدور يُزامَن مع قائمة المديرين في كل دخول (كما في النسخة القديمة).
- */
+/** Creates or updates a Google-authenticated user and grants initial trial credits. */
 export async function ensureUserFromGoogle({ googleSub, email, name, picture }) {
   const normalizedEmail = String(email || '').trim().toLowerCase();
   if (!normalizedEmail) throw new Error('حساب جوجل لا يحتوي بريداً إلكترونياً.');
 
   const isAdmin = await isAdminEmail(normalizedEmail);
   const isSupervisor = !isAdmin && (await isSupervisorEmail(normalizedEmail));
-  // الدور يُشتق من المصدر: مدير (.env) ← مشرف (جدول supervisors) ← دور الباقة.
-  // أثناء التسجيل فقط تكون الباقة هي المجانية، بعدها يستقر الدور على plans.role_code.
+  // Resolve roles by precedence: administrator, supervisor, then plan.
   let role = 'free';
   if (isAdmin) role = 'admin';
   else if (isSupervisor) role = 'supervisor';
   else role = (await planRoles()).get(FREE_PLAN_CODE) || 'free';
 
-  // حساب المدير لا يحتاج ملفاً بحثياً، فيبدأ الخطوة مكتملة
+  // Administrators do not need a research profile.
   const onboardingComplete = isAdmin;
   const sub = googleSub ? String(googleSub) : null;
   const freeTokens = await freeTrialTokens();
@@ -121,7 +106,7 @@ export async function ensureUserFromGoogle({ googleSub, email, name, picture }) 
 
     return rows[0];
   } catch (error) {
-    // حالة نادرة: نفس حساب جوجل ببريد مختلف — نحدّث السجل المرتبط بـ google_sub
+    // Handle a Google account whose email address changed.
     if (error.code === '23505' && sub) {
       const { rows } = await pool.query(
         `UPDATE users
@@ -142,11 +127,7 @@ export async function ensureUserFromGoogle({ googleSub, email, name, picture }) 
   }
 }
 
-/**
- * يزامن دور الحساب مع مصدره الحقيقي (يُستدعى عند كل تحميل جلسة):
- *   مدير (ADMIN_EMAILS في .env) ← مشرف (جدول supervisors) ← دور باقته.
- * الباقة تربطه بدوره عبر plans.role_code، فتغيير الباقة يغيّر الخدمات المفتوحة فوراً.
- */
+/** Synchronizes the account role from administrator, supervisor, or plan data. */
 export async function syncUserRole(user) {
   if (!user) return null;
 
@@ -163,7 +144,7 @@ export async function syncUserRole(user) {
     expectedRole = map.get(user.plan_code) || 'free';
   }
 
-  // المدير لا يحتاج ملفاً بحثياً، فيبدأ الخطوة مكتملة
+  // Administrators do not need a research profile.
   const completeOnboarding = isAdmin && !user.onboarding_complete;
   if (user.role === expectedRole && !completeOnboarding) return user;
 
@@ -184,23 +165,20 @@ export async function syncUserRole(user) {
   }
 }
 
-/** مستخدم واحد بالمعرّف (تُستخدم عند تحميل الجلسة). */
+/** Loads one user by ID. */
 export async function getUserById(id) {
   if (!id) return null;
   const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
   return rows[0] || null;
 }
 
-/** الملف البحثي للمستخدم (إن لم يُكمل التسجيل بعد يعود null). */
+/** Loads a user's research profile, or null when incomplete. */
 export async function getProfile(userId) {
   const { rows } = await pool.query('SELECT * FROM profiles WHERE user_id = $1', [userId]);
   return rows[0] || null;
 }
 
-/**
- * حفظ الملف البحثي في نهاية خطوة التسجيل (onboarding):
- * upsert في جدول profiles + تعليم المستخدم بأنه أكمل ملفه.
- */
+/** Saves the research profile and marks onboarding complete. */
 export async function saveOnboarding(userId, data) {
   const values = [
     userId,
@@ -262,7 +240,7 @@ export async function saveOnboarding(userId, data) {
   return rows[0];
 }
 
-/** ملخص استهلاك المستخدم لصفحة الحساب (آخر العمليات + الإجماليات). */
+/** Returns recent usage and totals for the account page. */
 export async function getUsageOverview(userId, limit = 8) {
   try {
     const [totals, recent] = await Promise.all([

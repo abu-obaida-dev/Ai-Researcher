@@ -11,20 +11,9 @@ import {
 } from '../constants.js';
 import { permissionsForRoles } from './access.js';
 
-/**
- * باقة/باقات المنصة من PostgreSQL (جدول plans) — بدون أي Firestore.
- * كل الصفحات العامة تقرأ من هنا، والسقوط الآمن هو القيم الافتراضية في src/constants.js
- * حتى تعمل صفحة الهبوط قبل تهيئة قاعدة البيانات.
- *
- * مصدران حقيقيان لبيانات البطاقة:
- *   - role_code   → صلاحيات الدور في role_permissions ⇒ الخدمات المفتوحة فعلياً.
- *   - storage_mb  → حصة التخزين التي يمنحها المدير لهذه الباقة.
- *   - max_file_mb → أقصى حجم للملف الواحد الذي يسمح به مشتركي الباقة.
- * لذلك تُولَّد «المزايا» المعروضة من الصلاحيات نفسها (planFeatures) فلا تُخالف
- * الواجهة ما يفتحه الباحث فعلاً باقته.
- */
+/** Loads plan data and derives visible features from role permissions and storage limits. */
 
-/** يفصل نص المزايا المخزّن بأسطر متعددة إلى قائمة. */
+/** Splits stored multiline features into a list. */
 export function splitFeatures(value) {
   if (Array.isArray(value)) return value;
   return String(value ?? '')
@@ -33,47 +22,43 @@ export function splitFeatures(value) {
     .filter(Boolean);
 }
 
-/** يحوّل أي قيمة إلى ميجابايت صالحة ضمن [0, PLAN_STORAGE_MAX_MB] مع سقوط آمن. */
+/** Clamps storage size to the supported range. */
 export function normalizeStorageMb(value, fallback = PLAN_STORAGE_DEFAULT_MB) {
   const n = Number.parseInt(String(value ?? '').trim(), 10);
   if (!Number.isFinite(n) || n <= 0) return fallback;
   return Math.min(n, PLAN_STORAGE_MAX_MB);
 }
 
-/** يحوّل أي قيمة إلى أقصى حجم ملف (MB) صالح ضمن [1, PLAN_FILE_MAX_MB] مع سقوط آمن. */
+/** Clamps the per-file limit to the supported range. */
 export function normalizeFileMaxMb(value, fallback = PLAN_FILE_DEFAULT_MB) {
   const n = Number.parseInt(String(value ?? '').trim(), 10);
   if (!Number.isFinite(n) || n <= 0) return fallback;
   return Math.min(Math.max(n, 1), PLAN_FILE_MAX_MB);
 }
 
-/** فاصل آلاف بنفس صيغة الواجهة (بدون استيراد views لتفادي دورة). */
+/** Formats numbers without importing view modules. */
 function formatNumber(value) {
   return Number(value || 0).toLocaleString('en-US');
 }
 
-/** 500 → «500 MB» ، 2048 → «2 GB» (للحصة الكبيرة فقط). */
+/** Formats storage quotas in megabytes or gigabytes. */
 export function formatStorageMb(mb) {
   const value = Number(mb) || 0;
   if (value >= 1024 && value % 1024 === 0) return `${value / 1024} GB`;
   return `${formatNumber(value)} MB`;
 }
 
-/** سطر الميزة الخاص بحصة التخزين (يُعرض في بطاقة الباقة). */
+/** Builds the storage-quota feature line. */
 export function storageLabel(mb) {
   return `${formatStorageMb(mb)} مساحة تخزين لملفاتك (رفع · معاينة · تحميل)`;
 }
 
-/** سطر الميزة الخاص بأقصى حجم للملف الواحد (يُعرض في بطاقة الباقة). */
+/** Builds the per-file-limit feature line. */
 export function fileMaxLabel(mb) {
   return `رفع الملفات حتى ${formatStorageMb(mb)} في الملف الواحد`;
 }
 
-/**
- * مزايا الباقة كما تُعرض للباحث: تُولَّد من صلاحيات دورها في قاعدة البيانات
- * (كل خدمة مفتوحة سطر واحد بنصها من PLATFORM_SERVICES.planFeature)،
- * ثم تُضاف الأسطر الاختيارية التي كتبها المدير في plans.features.
- */
+/** Derives displayed plan features from permissions and administrator-defined text. */
 export function planFeaturesFromPermissions(permissions, { extras = [] } = {}) {
   const set = permissions instanceof Set ? permissions : new Set(permissions || []);
   const open = (service) => set.has('*') || set.has(service.permission);
@@ -81,10 +66,7 @@ export function planFeaturesFromPermissions(permissions, { extras = [] } = {}) {
   return [...PLATFORM_SERVICES.filter(open).map((service) => service.planFeature || service.label), ...extras];
 }
 
-/**
- * يقرأ صلاحيات أدوار الباقات دفعة واحدة ثم يبني features + services لكل باقة،
- * فلا يحتاج عرض صفحة الهبوط أكثر من استعلام واحد لكل دور (مع كاش 30 ثانية).
- */
+/** Loads role permissions in batches and caches decorated plans. */
 export async function decoratePlans(plans) {
   const roles = await permissionsForRoles(plans.map((plan) => plan.roleCode));
 
@@ -107,7 +89,7 @@ export async function decoratePlans(plans) {
   });
 }
 
-/** يحوّل صف جدول plans إلى شكل جاهز لعرض بطاقات الأسعار (قبل توليد المزايا). */
+/** Converts a plan row to the public display shape. */
 export function normalizePlan(row) {
   const price = Number(row.price ?? 0);
   const tokens = Number(row.tokens ?? 0);
@@ -127,12 +109,12 @@ export function normalizePlan(row) {
     isActive: row.is_active !== false,
     roleCode: String(row.role_code || '').trim(),
     extraFeatures,
-    //Features تُبنى من الصلاحيات الحقيقية في decoratePlans (القيمة هنا فقط احتياط).
+    // Features are derived from permissions in decoratePlans.
     features: extraFeatures
   };
 }
 
-/** الباقات الافتراضية بنفس شكل صفوف قاعدة البيانات (سقوط آمن). */
+/** Returns default plans when database reads fail. */
 export function fallbackPlans() {
   return decoratePlans(
     DEFAULT_PLANS.map((plan) =>
@@ -155,7 +137,7 @@ export function fallbackPlans() {
   );
 }
 
-/** الباقات المعروضة في الموقع: المجانية أولاً ثم المدفوعة بترتيب العرض. */
+/** Lists public plans with the free plan first. */
 export async function listPublicPlans() {
   try {
     const { rows } = await pool.query(
@@ -173,7 +155,7 @@ export async function listPublicPlans() {
   }
 }
 
-/** باقة واحدة بالكود (مثل الباقة المجانية) مع سقوط آمن على الباقة الافتراضية. */
+/** Loads one plan by code with a defaults fallback. */
 export async function getPlanByCode(code) {
   try {
     const { rows } = await pool.query('SELECT * FROM plans WHERE code = $1', [code]);
@@ -189,10 +171,7 @@ export async function getPlanByCode(code) {
   return fallback || null;
 }
 
-/**
- * حصة التخزين بالبايت لباقة — تُقرأ من plans.storage_mb وتُطبَّق عند رفع الملفات.
- * السقوط المتدرّج: قيمة الباقة ← الحدّ الافتراضي الثابت (PLAN_STORAGE_DEFAULT_MB).
- */
+/** Returns the storage quota for a plan in bytes. */
 export async function planStorageBytes(planCode) {
   const code = String(planCode || '').trim() || FREE_PLAN_CODE;
   try {
@@ -204,11 +183,7 @@ export async function planStorageBytes(planCode) {
   return PLAN_STORAGE_DEFAULT_MB * 1024 * 1024;
 }
 
-/**
- * عدد نقاط التجربة المجانية المعلن في كل صفحات الموقع.
- * المصدر الوحيد: حقل tokens في الباقة المجانية (plans.free_trial) — يغيّره المدير
- * من صفحة الباقات فيسري فوراً على كل النصوص، والسقوط الآمن FREE_TRIAL_TOKENS.
- */
+/** Returns the configured free-trial token grant with a constants fallback. */
 export async function freeTrialTokens() {
   const plan = await getPlanByCode(FREE_PLAN_CODE);
   const value = Number(plan?.tokens);

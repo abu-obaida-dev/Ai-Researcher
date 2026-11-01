@@ -2,28 +2,18 @@ import { pool } from '../db/client.js';
 import { runSupervisor } from './ai.js';
 import { logUsage } from './tokens.js';
 
-/**
- * ذاكرة «المعلم» — منفصلة تماماً عن ذاكرة المشرف (supervisor_memory).
- *
- * قرار صاحب المنتج: لكل شخصية ذاكرته:
- *   - المشرف الذكي → supervisor_memory (ملخص + مهمة + تنبيهات)
- *   - المعلم       → assistant_memory (هذه — ملخص تعليمي + مهمة تعليمية)
- *   - المناقِش     → لا ذاكرة خارج جلسته (رسائل الدردشة وحدها)
- * لا يقرأ هذا الجدول أحد غير خدمات المعلم — العزل على مستوى الجداول لا
- * على مستوى البرومبت فقط. التلخيص استدعاء داخلي رخيص على حساب المنصة
- * (usage_logs بنقاط صفر، مثل تلخيص المشرف تماماً).
- */
+/** Private memory for the teaching assistant; isolated from supervisor and defense state. */
 
-/** أقل عدد رسائل في جلسة تستحق تلخيصاً (وإلا فلا فائدة). */
+/** Minimum conversation length worth summarizing. */
 const MIN_MESSAGES_TO_SUMMARIZE = 4;
 
-/** ذاكرة المعلم: صف واحد لكل مستخدم (تنشأ عند أول كتابة). */
+/** Returns the user's assistant memory. */
 export async function getAssistantMemory(userId) {
   const { rows } = await pool.query('SELECT memory, open_task FROM assistant_memory WHERE user_id = $1', [userId]);
   return { memory: rows[0]?.memory || '', openTask: rows[0]?.open_task || '' };
 }
 
-/** يحفظ الملخّص والمهمة التعليمية (يستبدل المحتوى السابق ولا يمسّ شيئاً آخر). */
+/** Saves the summary and open teaching task. */
 export async function saveAssistantMemory(userId, { memory = '', openTask = '' } = {}) {
   await pool.query(
     `INSERT INTO assistant_memory (user_id, memory, open_task, updated_at)
@@ -34,7 +24,7 @@ export async function saveAssistantMemory(userId, { memory = '', openTask = '' }
   );
 }
 
-/** آخر محادثة تعليمية غنية — لتُلخَّص عند بدء محادثة جديدة (جداول المعلم وحدها). */
+/** Finds the latest substantial assistant conversation. */
 export async function lastRichAssistantConversation(userId, excludeId = null) {
   const { rows } = await pool.query(
     `SELECT c.id FROM assistant_conversations c
@@ -52,7 +42,7 @@ const SUMMARY_SYSTEM = `أنت مُحلِّل جلسات لمعلّم تعليم
 أجيبي بـ JSON فقط: {"memory": ["…","…","…"], "open_task": "…"}.
 لا تضيفي نصاً خارج JSON. لا تكتب شيئاً عن المشرف أو مراحل رحلة البحث — هذه ذاكرة المعلم وحده.`;
 
-/** يحلّل نص JSON آمناً (الموديل قد يغلّفه بـ \`\`\`json). */
+/** Parses model JSON, including fenced JSON responses. */
 function parseJsonLoose(text) {
   const cleaned = String(text || '')
     .replace(/```json/gi, '')
@@ -69,10 +59,7 @@ function parseJsonLoose(text) {
   }
 }
 
-/**
- * تلخيص جلسة تعليمية منتهية: نموذج رخيص → assistant_memory.
- * يفشل بصمت (null) حتى لا يُفشل ختام الجلسة ولا يُكلّف الباحث شيئاً.
- */
+/** Summarizes an earlier assistant session without failing the current request. */
 export async function summarizeAssistantConversation(userId, { messages = [], profile = {} } = {}) {
   const transcript = messages
     .slice(-24)

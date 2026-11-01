@@ -27,6 +27,9 @@ yarn-error.log*
 .env
 .env*.local
 
+# Local credentials and private keys
+/.secrets/
+
 # أسرار OAuth من Google Cloud Console (لا تُرفع للريبو أبداً)
 client_secret_*.json
 

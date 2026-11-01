@@ -7,36 +7,24 @@ import { isValidStepKeyForUser } from './journey.js';
 import { normalizeFileMaxMb, normalizeStorageMb } from './plans.js';
 import { assertContentMatchesExtension } from './upload-guard.js';
 
-/**
- * ملفات الباحث (1E): الميتاداتا في جدول files والبايتات على القرص تحت
- * storage/users/{userId}/files/ كما هو موصوف في storage/README.md.
- * كل عملية تتأكد أن الملف مملوك لصاحب الجلسة، والرفع محدود بـ:
- *   - حجم الملف الواحد  (حدّ يضبطه المدير لكل باقة من صفحة «الباقات»)
- *   - المساحة الكلية للمستخدم (حصة باقته في جدول plans)
- *   - قائمة الأنواع المسموحة (constants.js → FILE_UPLOAD_LIMITS)
- * مع اسم ملف نظيف داخل المجلد.
- */
+/** Stores user file metadata in PostgreSQL and file bytes under storage/users/. */
 
 const STORAGE_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'storage');
 
-/** أقصى حجم نعرضه كنص داخل صفحة المعاينة (كبير كفاية، صغير يحمي المتصفح). */
+/** Maximum text-preview size. */
 const TEXT_PREVIEW_LIMIT = 400 * 1024;
 
-/**
- * هل التخزين المحلي متاح؟ على Vercel/AWS Functions نظام الملفات للقراءة فقط،
- * فكتابة الملفات المرفوعة تفشل دائماً. نكتشف المنصة بمتغيّر بيئة بدل محاولة
- * الكتابة ثم الفشل (والمحاولة تقرأ الملف كله في الذاكرة قبل أن ترفضه).
- */
+/** Detects serverless platforms where local storage is read-only. */
 export function isEphemeralStorage() {
   return Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 }
 
-/** نص الأنواع المسموحة للعرض في الصفحة. */
+/** Formats allowed file extensions for display. */
 export function allowedTypesLabel() {
   return FILE_UPLOAD_LIMITS.allowedExtensions.map((item) => `.${item}`).join(' · ');
 }
 
-/** اسم ملف آمن للتخزين: حروف وأرقام وشرطات فقط، مع الاحتفاظ بالامتداد. */
+/** Sanitizes a filename while preserving its extension. */
 function safeName(name) {
   const base = path.basename(String(name || 'file')).replace(/\.[^.]*$/, '');
   const slug =
@@ -48,13 +36,13 @@ function safeName(name) {
   return slug.replace(/[\\/]/g, '-');
 }
 
-/** الامتداد بحروف صغيرة أو null. */
+/** Returns a lowercase extension or null. */
 function extensionOf(name) {
   const match = /\.([A-Za-z0-9]{1,8})$/.exec(String(name || ''));
   return match ? match[1].toLowerCase() : null;
 }
 
-/** وصف مختصر لنوع الملف بالعرض. */
+/** Returns a short display label for a file type. */
 function kindOf(extension) {
   if (['jpg', 'jpeg', 'png', 'webp'].includes(extension)) return 'صورة';
   if (extension === 'pdf') return 'مستند PDF';
@@ -65,7 +53,7 @@ function kindOf(extension) {
   return 'مستند';
 }
 
-/** صف ملف جاهز للعرض (يُستخدم في القائمة وصفحة المعاينة). */
+/** Normalizes a database file row for rendering. */
 export function normalizeFile(row) {
   const extension = extensionOf(row.file_name);
 
@@ -84,7 +72,7 @@ export function normalizeFile(row) {
   };
 }
 
-/** حجم مقروء للعرض (KB/MB/GB). */
+/** Formats a file size for display. */
 export function formatFileSize(bytes) {
   const size = Number(bytes || 0);
   if (size >= 1073741824) return `${(size / 1073741824).toFixed(2)} GB`;
@@ -93,7 +81,7 @@ export function formatFileSize(bytes) {
   return `${size} بايت`;
 }
 
-/** المسار المطلق للملف على القرص بعد التأكد أنه داخل storage/. */
+/** Resolves a stored path and rejects traversal outside storage/. */
 function absolutePath(storedPath) {
   const absolute = path.resolve(STORAGE_ROOT, String(storedPath || ''));
   if (!absolute.startsWith(path.resolve(STORAGE_ROOT) + path.sep)) {
@@ -104,7 +92,7 @@ function absolutePath(storedPath) {
   return absolute;
 }
 
-/** ملفات الباحث (كلها أو لخطوة معيّنة) — الأحدث أولاً. */
+/** Lists owned files, optionally filtered by step. */
 export async function listFiles(userId, { step = '', limit = 100 } = {}) {
   const stepKey = String(step || '').trim().slice(0, 100);
   const values = [userId];
@@ -128,12 +116,7 @@ export async function listFiles(userId, { step = '', limit = 100 } = {}) {
   return rows.map(normalizeFile);
 }
 
-/**
- * حدود رفع الباحث من باقته في قاعدة البيانات دفعة واحدة
- * (plans.max_file_mb لحجم الملف الواحد + plans.storage_mb للحصة الكلية):
- * استعلام JOIN واحد لكلا الحدّين — فلا تعارض بين قيمتين ولا مساران للقراءة.
- * السقوط المتدرّج: قيمة الباقة ← الحدّين الافتراضيين الثابتين عند أي خلل.
- */
+/** Reads per-file and total-storage limits from the user's plan in one query. */
 export async function userUploadLimits(userId) {
   try {
     const { rows } = await pool.query(
@@ -158,28 +141,17 @@ export async function userUploadLimits(userId) {
   };
 }
 
-/**
- * حصة تخزين الباحث بالبايت: القيمة الحقيقية من باقته في قاعدة البيانات
- * (plans.storage_mb — يضبطها المدير من صفحة الباقات)، مع سقوط آمن على
- * الحدّ الافتراضي الثابت إن تعذّرت القراءة.
- */
+/** Returns the user's storage quota in bytes. */
 export async function userQuotaBytes(userId) {
   return (await userUploadLimits(userId)).quotaBytes;
 }
 
-/** أقصى حجم للملف الواحد بالبايت الذي يسمح به باقته (plans.max_file_mb). */
+/** Returns the per-file size limit in bytes. */
 export async function userFileMaxBytes(userId) {
   return (await userUploadLimits(userId)).fileMaxBytes;
 }
 
-/**
- * ملخّص مساحة الباحث: عدد الملفات + المستخدم + الحصة + المتبقي + نسبة الاستخدام.
- * يُستخدم في شريط المساحة أعلى صفحة «ملفاتى».
- *
- * ملاحظة عن الدقة: مع حصة 500 MB ورفع ملف صغير (18 KB) تكون النسبة 0.04% —
- * لذلك نحتفظ بالبايت الدقيق، ونحسب النسبة بمنزلة عشرية، ونضمن حداً أدنى
- * مرئياً للشريط (1.2%) ما دام المستخدم لم يفرغ، وإلا بدا الشريط معطّلاً.
- */
+/** Summarizes storage use and keeps small uploads visible in the usage bar. */
 export async function filesSummary(userId) {
   const [{ rows }, quotaBytes] = await Promise.all([
     pool.query(
@@ -195,7 +167,7 @@ export async function filesSummary(userId) {
 
   const rawPercent = quotaBytes > 0 ? (usedBytes / quotaBytes) * 100 : 0;
   const percent = Math.min(100, Math.round(rawPercent * 10) / 10);
-  // شريط مرئي دائماً عند وجود استخدام، مهما صغر
+  // Keep the bar visible for any nonzero usage.
   const barWidth = usedBytes > 0 ? Math.max(1.2, percent) : 0;
 
   return {
@@ -210,27 +182,19 @@ export async function filesSummary(userId) {
     barWidth,
     isFull: remainingBytes <= 0,
     isNearFull: rawPercent >= 90,
-    // حقول بالميغابايت للتوافق مع أي استهلاك سابق
+    // Keep megabyte fields for compatibility.
     usedMb: Math.round((usedBytes / (1024 * 1024)) * 10) / 10,
     quotaMb: Math.round(quotaBytes / (1024 * 1024)),
     remainingMb: Math.round((remainingBytes / (1024 * 1024)) * 10) / 10
   };
 }
 
-/**
- * نوع المعاينة المدعومة للمتصفح لهذا الملف:
- * - 'image' → صور (img)
- * - 'pdf'   → PDF (iframe)
- * - 'sheet' → xlsx / xls / csv ⇒ جدول داخل الصفحة (services/spreadsheet.js)
- * - 'text'  → txt و md (نعرضها كنصّ داخل <pre>)
- * - 'none'  → doc / pptx / zip … لا عارض في المتصفح ⇒ تحميل فقط
- * ملاحظة أمنية: 'text' تُقدَّم دائماً كنص عادي مع nosniff — لا HTML مطلقاً.
- */
+/** Determines the supported inline preview type; text is always served as plain text. */
 export function previewKind(fileName = '', mime = '') {
   const ext = extensionOf(fileName);
   if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) return 'image';
   if (ext === 'pdf') return 'pdf';
-  // جداول البيانات: xlsx / xls / csv ⇒ معاينة كجدول (services/spreadsheet.js)
+  // Preview spreadsheets as tables.
   if (['xlsx', 'xls', 'csv'].includes(ext)) return 'sheet';
   if (['txt', 'md'].includes(ext)) return 'text';
   if (mime === 'text/plain' || mime === 'text/markdown') return 'text';
@@ -238,42 +202,33 @@ export function previewKind(fileName = '', mime = '') {
   return 'none';
 }
 
-/** هل لهذا الملف معاينة في المتصفح؟ (لعرض زر «عرض» في الجدول) */
+/** Checks whether a file has an inline preview. */
 export function isPreviewable(file) {
   return previewKind(file?.file_name, file?.mime) !== 'none';
 }
 
-/**
- * محتوى نصّي للمعاينة (بحد أقصى TEXT_PREVIEW_LIMIT بايت لتفادي الصفحات الثقيلة).
- * يعيد string أو null إن لم يكن الملف نصياً أو تجاوز الحد.
- */
+/** Returns bounded text content for inline preview. */
 export function textPreview(buffer, maxBytes = TEXT_PREVIEW_LIMIT) {
   if (!buffer || buffer.length > maxBytes) return null;
 
-  // نتجنّب بايتات NUL (تشيّر على ملف ثنائي حتى لو امتداده نصي)
+  // Reject binary content even when its extension is textual.
   const slice = buffer.subarray(0, 2048);
   if (slice.includes(0)) return null;
 
   return buffer.toString('utf8');
 }
 
-/** صف واحد بملكيته (null إن لم يكن له) — يُستخدم للتحميل والحذف. */
+/** Loads a file row only when owned by the user. */
 export async function getFileRow(userId, fileId) {
-  // حارس: معرّف غير UUID يجعل Postgres يرمي ⇒ بلا هذا يتحوّل الرمي إلى
-  // unhandledRejection داخل معالج async فتنهار عملية الخادم كاملة (DoS).
+  // Reject invalid IDs before querying UUID columns.
   if (!isUuid(fileId)) return null;
   const { rows } = await pool.query('SELECT * FROM files WHERE id = $2 AND user_id = $1', [userId, fileId]);
   return rows[0] || null;
 }
 
-/**
- * رفع ملف: يتحقق من الامتداد وحجم الملف الواحد ونوع المحتوى، ثم يتأكد أن
- * المساحة الكلية للمستخدم تكفي، ثم يكتب البايتات في مجلد الباحث ويسجّل صف
- * metadata. أي فشل بعد الكتابة ينظّف الملف جزئياٌ.
- */
+/** Validates, stores, and records an upload; failed inserts clean up written bytes. */
 export async function saveUpload(userId, { file, title = '', step = '' } = {}) {
-  // منصّات Serverless (Vercel): نظام الملفات للقراءة فقط ⇒ لا مكان لحفظ الملف.
-  // نرفض مبكراً برسالة عربية مفهومة بدل خطأ 500 غامض أو ضياع الملف بعد قراءته.
+  // Reject uploads before reading the body on read-only serverless filesystems.
   if (isEphemeralStorage()) {
     const error = new Error('رفع الملفات غير متاح على هذه المنصة حالياً (نظام الملفات مؤقّت).');
     error.code = 'NO_STORAGE';
@@ -294,7 +249,7 @@ export async function saveUpload(userId, { file, title = '', step = '' } = {}) {
     throw error;
   }
 
-  // الحصة الكلية: نرفض الرفع إن لم تتسع للملف بحجمه المُعلن.
+  // Check the declared size against the remaining quota before reading bytes.
   const usedBefore = await filesSummary(userId);
   if (usedBefore.bytes + Number(file.size || 0) > quotaBytes) {
     const error = new Error(
@@ -326,11 +281,10 @@ export async function saveUpload(userId, { file, title = '', step = '' } = {}) {
     throw error;
   }
 
-  // البصمة الثنائية: نتأكد أن بايتات الملف تطابق امتداده قبل أي كتابة على القرص.
-  // (الامتداد وContent-Type يرسلهما المتصفح ⇒ لا يصلحان كدليل وحدهما).
+  // Verify file signatures; browser-provided extensions and MIME types are untrusted.
   assertContentMatchesExtension(extension, bytes);
 
-  // إعادة الفحص بالحجم الحقيقي (بعد قراءة البايتات) في حال أخبر المتصفح بحجم أقل
+  // Recheck the actual byte count in case the declared size was understated.
   if (usedBefore.bytes + bytes.length > quotaBytes) {
     const error = new Error(
       `مساحتك لا تكفي: المستخدم ${usedBefore.usedMb} MB من ${usedBefore.quotaMb} MB. احذف ملفاً أو احجز مساحة أكبر.`
@@ -365,7 +319,7 @@ export async function saveUpload(userId, { file, title = '', step = '' } = {}) {
 
     return normalizeFile(rows[0]);
   } catch (error) {
-    // لا نُبقي بايتات بلا صف metadata (يتيمة على القرص)
+    // Remove the stored file if its metadata insert fails.
     try {
       await unlink(absolutePath(storedPath));
     } catch (cleanupError) {
@@ -375,7 +329,7 @@ export async function saveUpload(userId, { file, title = '', step = '' } = {}) {
   }
 }
 
-/** قراءة بايتات ملف مملوك للباحث (لتحميله أو عرضه) — null إن لم يوجد. */
+/** Reads an owned file for download or preview. */
 export async function readOwnedFile(userId, fileId) {
   const row = await getFileRow(userId, fileId);
   if (!row) return null;
@@ -388,7 +342,7 @@ export async function readOwnedFile(userId, fileId) {
   }
 }
 
-/** حذف ملف من مراجعات الباحث: البايتات أولاً ثم صف metadata. */
+/** Deletes the file bytes and then its metadata row. */
 export async function deleteFile(userId, fileId) {
   const row = await getFileRow(userId, fileId);
   if (!row) return false;
@@ -403,7 +357,7 @@ export async function deleteFile(userId, fileId) {
   return true;
 }
 
-/** مجلد التخزين على القرص (للتشخيص فقط). */
+/** Returns the storage root for diagnostics. */
 export function storageRoot() {
   return path.resolve(STORAGE_ROOT);
 }

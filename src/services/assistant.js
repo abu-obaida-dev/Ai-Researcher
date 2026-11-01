@@ -1,21 +1,4 @@
-/**
- * «المعلم» — مساعد تعليمي مستقل (صفحة /assistant).
- *
- * جداول خاصة به (assistant_conversations / assistant_messages + assistant_memory)
- * لا تلمس جداول المشرف الذكي ولا خطوات الرحلة — وذاكرته الخاصة (assistant_memory)
- * منفصلة تماماً عن ذاكرة المشرف: لكل شخصية ذاكرته. استقلال كامل.
- *
- * مسار الرسالة (نفس انضباط الشات المالي):
- *   1) تنظيف المدخل + تحميل نصوص الملفات المرفقة (ملكية مُتحقَّقة).
- *   2) كشف المهمة (تعليم / ترجمة / تلخيص) حتمياً من نص الرسالة.
- *   3) في التلخيص: يلخّص فقط ما يرفقه الباحث من ملف/مرجع — المعلم لا يبحث
- *      في المكتبة الخارجية ولا مكتبة المنصة؛ يقترح كلمات مفتاحية للباحث
- *      ليبحث بها في المكتبة بنفسه ثم يرفع ما وجده.
- *   4) حجز الرصيد ذرّياً → نداء المزوّدين (نفس السباق المموّه) → تسوية
- *      على الاستهلاك الحقيقي وردّ الفرق (أو الكامل عند الفشل).
- *
- * الأكواد: EMPTY_ASSISTANT / NO_TOKENS / NO_PROVIDER / PROVIDERS_FAILED / NOT_FOUND.
- */
+/** Independent teaching assistant with isolated conversations and memory. */
 import { pool } from '../db/client.js';
 import { isUuid } from '../constants.js';
 import { runSupervisor } from './ai.js';
@@ -36,17 +19,13 @@ const HISTORY_LIMIT = 20;
 const PROMPT_LIMIT = 8000;
 const TITLE_LIMIT = 120;
 const FILE_MAX = 3;
-/** أقصى مراجع تُقرأ في الرسالة الواحدة (استخراج النص مكلف — نحدّها كما الملفات). */
+/** Maximum number of attached references to extract per message. */
 const REF_MAX = 3;
 
-/** عبارات عربية تعريفية تسبق العبارة الإنجليزية المقترحة — تُحذف عند الاشتقاق. */
+/** Arabic prefixes removed when extracting an English search suggestion. */
 const QUERY_INTRO_PHRASES = /(?:استخدم|استخدام|باستخدام|جرب|جربي|لنبحث|لنبدأ|مثل|مثلاً|مثلا|العبارة|عبارة|كالتالي|التالي|التالية|التالى|وهي|وهو)\s*:?\s*$/i;
 
-/**
- * يستخرج العبارة الإنجليزية الأخيرة التي اقترحها المعلم في سجل المحادثة:
- * سطور مرقمة أو مقتبسة إنجليزية (≥ كلمتين) — الأحدث أولاً.
- * مثال: «1. **AI in Computer Science Education** (الذكاء…)» ⇒ العبارة الإنجليزية.
- */
+/** Extracts the latest multiword English search suggestion from conversation history. */
 export function extractLastSuggestedQuery(history = []) {
   const candidates = [];
   for (const message of [...(history || [])].reverse()) {
@@ -54,14 +33,14 @@ export function extractLastSuggestedQuery(history = []) {
     const text = String(message?.content || '');
     if (!/بحث|عبارة|عباره|كلمات مفتاحية|مقترحة|مقترح|keywords?/i.test(text)) continue;
     for (const line of text.split('\n')) {
-      // سطر مرقم: "1. **AI in CS Education** (…)" أو "1- …" أو "• …"
+      // Match numbered or bulleted suggestions.
       const numbered = line.match(/^\s*(?:\d+[.)\-:]|[-•*])\s*\*{0,2}\s*([A-Za-z][A-Za-z0-9\s\-&:'",/()]{3,80})/);
       if (numbered) {
         const cleaned = numbered[1].replace(QUERY_INTRO_PHRASES, '').replace(/\s*\(.*$/, '').trim();
         if (cleaned.split(/\s+/).length >= 2) candidates.push(cleaned.slice(0, 80));
         continue;
       }
-      // سطر مقتبس: **"Intelligent Tutoring Systems"** أو "…"
+      // Match quoted suggestions.
       const quoted = line.match(/["*“”']([A-Za-z][A-Za-z0-9\s\-&:'",/()]{5,90})["*“”']/);
       if (quoted && quoted[1].split(/\s+/).length >= 2) candidates.push(quoted[1].trim().slice(0, 80));
     }
@@ -70,22 +49,22 @@ export function extractLastSuggestedQuery(history = []) {
   return candidates[0] || '';
 }
 
-/** تنظيف بسيط لنص الباحث (المعلم بلا نظام ضربات). */
+/** Sanitizes user input. */
 function sanitizeText(text) {
   return String(text || '')
     .replace(/\u0000/g, '')
     .replace(/\s+$/, '');
 }
 
-/** عنوان مختصر للمحادثة من أول سؤال. */
+/** Builds a short title from the first prompt. */
 function titleFromPrompt(prompt) {
   const line = String(prompt).split('\n').find((item) => item.trim()) || 'محادثة تعليمية';
   return line.trim().slice(0, 60);
 }
 
-/* ------------------------------ المحادثات ------------------------------ */
+/* Conversations. */
 
-/** محادثات المعلم للباحث (الأحدث أولاً) مع عدد الرسائل. */
+/** Lists the user's assistant conversations. */
 export async function listConversations(userId, { limit = 12 } = {}) {
   const { rows } = await pool.query(
     `SELECT c.id, c.title, c.provider, c.created_at, c.updated_at,
@@ -99,7 +78,7 @@ export async function listConversations(userId, { limit = 12 } = {}) {
   return rows;
 }
 
-/** محادثة واحدة بملكيتها + رسائلها بالترتيب الزمني. */
+/** Loads an owned conversation and its messages. */
 export async function getConversation(userId, conversationId) {
   if (!isUuid(conversationId)) return null;
   const { rows } = await pool.query('SELECT * FROM assistant_conversations WHERE id = $2 AND user_id = $1', [
@@ -116,7 +95,7 @@ export async function getConversation(userId, conversationId) {
   return { ...rows[0], messages };
 }
 
-/** إنشاء محادثة معلم جديدة. */
+/** Creates an assistant conversation. */
 export async function createConversation(userId, { title = '' } = {}) {
   const { rows } = await pool.query('INSERT INTO assistant_conversations (user_id, title) VALUES ($1, $2) RETURNING *', [
     userId,
@@ -125,7 +104,7 @@ export async function createConversation(userId, { title = '' } = {}) {
   return rows[0];
 }
 
-/** إضافة رسالة (وتحديث updated_at لظهور المحادثة في الأعلى). */
+/** Appends a conversation message. */
 export async function appendMessage(conversationId, { role, content, tokensUsed = 0, model = null }) {
   const { rows } = await pool.query(
     `INSERT INTO assistant_messages (conversation_id, role, content, tokens_used, model)
@@ -137,7 +116,7 @@ export async function appendMessage(conversationId, { role, content, tokensUsed 
   return rows[0];
 }
 
-/** حذف محادثة كاملة برسائلها (لا يمسّ النقاط — هي مسجّلة في usage_logs). */
+/** Deletes an assistant conversation without changing recorded usage. */
 export async function deleteConversation(userId, conversationId) {
   if (!isUuid(conversationId)) return false;
   const { rowCount } = await pool.query('DELETE FROM assistant_conversations WHERE id = $2 AND user_id = $1', [
@@ -147,12 +126,9 @@ export async function deleteConversation(userId, conversationId) {
   return rowCount > 0;
 }
 
-/* ------------------------------ الملفات ------------------------------ */
+/* File processing. */
 
-/**
- * نصوص الملفات المرفقة بالرسالة (من ملفات الباحث المرفوعة فقط — الملكية
- * مُتحقَّقة في readOwnedFile). كل ملف بحدّ FILE_TEXT_LIMIT مع وسم القطع.
- */
+/** Extracts text only from user-owned files with a per-file size limit. */
 async function loadFileTexts(userId, fileIds) {
   const ids = (Array.isArray(fileIds) ? fileIds : [fileIds])
     .map((id) => String(id || '').trim())
@@ -179,7 +155,7 @@ async function loadFileTexts(userId, fileIds) {
   return out;
 }
 
-/** كتلة نصوص الملفات كما تُحقن في رسالة المعلم (بيانات لا أوامر). */
+/** Formats extracted file text as untrusted message data. */
 function filesBlock(files) {
   if (!files.length) return '';
   const parts = files.map(
@@ -205,8 +181,7 @@ export async function askAssistant({ userId, prompt, conversationId = null, file
     error.code = 'NOT_FOUND';
     throw error;
   }
-  // محادثة جديدة: نتذكّر السابقة (لتلخيصها في ذاكرة المعلم وحدها) — ثم نقرأ
-  // ذاكرة المعلم الشخصية لتُحقن في موجّهه (لا علاقة لها بذاكرة المشرف).
+  // Load teacher memory independently from supervisor memory.
   let previousId = null;
   if (!conversation) {
     previousId = await lastRichAssistantConversation(userId).catch(() => null);
@@ -215,22 +190,20 @@ export async function askAssistant({ userId, prompt, conversationId = null, file
   }
   const teacherMemory = await getAssistantMemory(userId).catch(() => ({ memory: '', openTask: '' }));
 
-  // ١) الملفات المرفقة + مراجع الباحث المحدّدة + كشف المهمة
+  // Load owned attachments and detect the requested task.
   const files = await loadFileTexts(userId, fileIds);
   const historyForTask = (conversation?.messages || [])
     .slice(-HISTORY_LIMIT)
     .map((message) => ({ role: message.role === 'assistant' ? 'assistant' : 'user', content: message.content }));
   const task = detectAssistantTask({ question, hasFiles: files.length > 0, history: historyForTask });
 
-  // ٢) لا بحث تلقائي للمعلم — المعلم لا يدخل المكتبة الخارجية ولا مكتبة المنصة.
-  //    دوره أن يقترح كلمات مفتاحية للباحث ليبحث بها في المكتبة بنفسه، ثم يرفع
-  //    الملف/المرجع الذي وجده ويرفقه هنا ليعلمه المعلم أو يلخصه.
+  // The assistant does not search; users search the library and attach their selections.
   let sources = null;
   let searchQuery = '';
   let queryOrigin = '';
   let noResultsGuard = '';
 
-  // ٣) بناء الموجّه والرسائل — مع ذاكرة المعلم الشخصية (assistant_memory)
+  // Build the task prompt with the assistant's private memory.
   const system = buildAssistantPrompt({
     task,
     field: String(profile?.research_field || '').slice(0, 80),
@@ -250,7 +223,7 @@ export async function askAssistant({ userId, prompt, conversationId = null, file
 
   const replyCap = ASSISTANT_REPLY_CAPS[task] || ASSISTANT_REPLY_CAPS.teach;
 
-  // ٤) الحجز المسبق ذرّياً — بلا رصيد كافٍ نرفض قبل أي نداء
+  // Reserve credits before making a provider request.
   const reservation = estimateReservation({ system, messages, replyCap });
   if (!(await deductCredits(userId, reservation.credits))) {
     const balance = await balanceOf(userId);
@@ -261,7 +234,7 @@ export async function askAssistant({ userId, prompt, conversationId = null, file
     throw error;
   }
 
-  // ٥) النداء — عند فشل كل المزوّدين يُردّ الحجز كاملاً بلا تسجيل استهلاك
+  // Refund the reservation if every provider fails.
   let reply;
   try {
     reply = await runSupervisor({ userId, system, messages, maxTokens: replyCap });
@@ -271,7 +244,7 @@ export async function askAssistant({ userId, prompt, conversationId = null, file
     throw error;
   }
 
-  // ٦) التسوية على الاستهلاك الحقيقي وردّ الفرق
+  // Settle against actual provider usage.
   const usage = normalizeUsage(reply.usage);
   const charge =
     usage.inputTokens || usage.outputTokens
@@ -280,7 +253,7 @@ export async function askAssistant({ userId, prompt, conversationId = null, file
   const charged = Math.min(charge.credits, reservation.credits);
   if (reservation.credits > charged) await refundCredits(userId, reservation.credits - charged);
 
-  // ٧) الحفظ في جداول المعلم الخاصة
+  // Save messages in the assistant's isolated tables.
   await appendMessage(conversation.id, { role: 'user', content: question, tokensUsed: charged });
   await appendMessage(conversation.id, { role: 'assistant', content: reply.text, model: reply.model });
   await pool.query('UPDATE assistant_conversations SET provider = $2 WHERE id = $1', [conversation.id, reply.provider]);
@@ -328,9 +301,7 @@ export async function askAssistant({ userId, prompt, conversationId = null, file
     summary: `${ASSISTANT_TASK_LABELS[task] || 'تعليم'} — ${titleFromPrompt(question)}`
   });
 
-  // ٨) بدء محادثة جديدة ⇒ تلخيص السابقة في ذاكرة المعلم وحدها
-  // (assistant_memory — لا تمسّ supervisor_memory ولا جلسات المناقشة إطلاقاً).
-  // summarizeAssistantConversation يحفظ ويسجّل usage داخلياً ويفشل بصمت.
+  // Summarize the previous assistant conversation into assistant_memory only.
   if (previousId) {
     try {
       const prev = await getConversation(userId, previousId);
@@ -338,12 +309,12 @@ export async function askAssistant({ userId, prompt, conversationId = null, file
         await summarizeAssistantConversation(userId, { messages: prev.messages, profile });
       }
     } catch {
-      // الفشل الصامت مقصود — لا يُفشل ردّ المعلم
+      // Memory summarization must not fail the current response.
     }
   }
 
 
-  // سجل شفافية: بحث بلا خصم نقاط (نداءات خارجية رخيصة)
+  // Log external source usage when applicable.
   if (sources && (sources.items.length || sources.libraryItems.length)) {
     await logUsage(userId, {
       type: 'sources',

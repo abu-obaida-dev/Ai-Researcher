@@ -1,10 +1,4 @@
-/**
- * منتقي الملف في صفحة «ملفاتى»: يعرض اسم الملف وحجمه بعد الاختيار،
- * ويبرز منطقة الإفلات أثناء السحب، ويرفض مبكراً (قبل الإرسال) الملف
- * بنوع غير مدعوم أو حجم أكبر من حدّ الباقة أو لا يتسع له ما تبقّى
- * من المساحة — برسالة عربية واضحة في موضع الرفض نفسه.
- * ملاحظة: الرفض هنا تحسين تجربة فوري؛ الخادم يعيد التحقق دائماً.
- */
+/** Provides immediate file feedback; the server remains authoritative for validation. */
 (function initFilePicker() {
   var input = document.getElementById('file_input');
   var nameBox = document.getElementById('file-picked-name');
@@ -16,7 +10,7 @@
   var allowed = (input.getAttribute('data-allowed-ext') || '').split(',').filter(Boolean);
   var remaining = Number(input.getAttribute('data-remaining-bytes') || 0);
 
-  /** حجم مقروء: KB / MB. */
+  /** Formats a byte count for display. */
   function humanSize(bytes) {
     if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
     if (bytes >= 1024) return Math.round(bytes / 1024) + ' KB';
@@ -36,7 +30,7 @@
     return index > -1 ? String(name).slice(index + 1).toLowerCase() : '';
   }
 
-  /** يعرض سبب الرفض (إن وُجد) — true = الملف صالح. */
+  /** Validates the selected file and returns whether it can be submitted. */
   function validate(file) {
     if (!file) {
       showError('');
@@ -74,7 +68,7 @@
 
   input.addEventListener('change', showPicked);
 
-  // خط الدفاع الأخير: لا نرسل النموذج بملف مرفوض حتى لو تعطّل سبب آخر.
+  // Prevent submission if client-side validation rejects the selected file.
   if (form) {
     form.addEventListener('submit', function (event) {
       var file = input.files && input.files[0];

@@ -4,32 +4,14 @@ import { degreeOfUser, isValidStepKeyForUser, resolvePathForDegree, setStepStatu
 import { getMemory, resetStrikes, saveMemory } from './supervisor-memory.js';
 import { logUsage } from './tokens.js';
 
-/**
- * مراجعة اكتمال الخطوة (بطاقة الشات): كشف حتمي ⇄ قرار الباحث.
- *
- * القاعدة الذهبية: الكشف لا يمسّ المسار أبداً.
- *   1) specForStep: مواصفة حتمية لكل خطوة (حقول + أنماط لغوية عربية).
- *   2) evaluateStepCompletion: دالة نقافية تفحص نص الحوار وتعيد البطاقة
- *      (تُختبر في unit-tests بلا أي قاعدة بيانات).
- *   3) detectStepCompletion: تُستدعى بعد حفظ رد المشرفة في services/chat.js،
- *      فإن تكتملت المؤشرات تُودع في conversations.pending_review فقط.
- *   4) saveStepReview: هي الوحيدة التي تكتب في المسار — بضغطة «حفظ» من الباحث:
- *      setStepStatus(done) ← تعبئة عنوان البحث ← ترقية الخطوة التالية ← ذاكرة
- *      المشرفة (open_task) ← تصفير التنبيهات ← usage_logs(step_completed)
- *      ← مسح البطاقة ← نص تهنئة يعود للواجهة.
- * أي فشل في الكشف يمرّ بصمت ولا يُفشل رسالة الشات.
- */
+/** Detects step completion without mutating progress until the user explicitly saves. */
 
-/** سقف قيمة حقل واحد في البطاقة (نص سطر واحد). */
+/** Maximum value length for one review field. */
 const FIELD_VALUE_LIMIT = 300;
-/** عدد الرسائل الأخيرة المقروءة في الكشف. */
+/** Number of recent messages inspected. */
 const TRANSCRIPT_LIMIT = 30;
 
-/**
- * مواصفات الخطوات: لكل حقل نمط يتعرّف على المؤشر في نص الحوار.
- * الأنماط مكتوبة بتحمّل للاسماء الشائعة (المنهج/المنهجية، استبانة/استبانه…)
- * وغير حساسة لحالة الأحرف (i). أي مفتاح غير معرّف يسقط على FALLBACK_SPEC.
- */
+/** Per-step fields and text patterns; unknown steps use FALLBACK_SPEC. */
 const STEP_SPECS = {
   topic: {
     title: 'اختيار الموضوع',
@@ -121,7 +103,7 @@ const STEP_SPECS = {
   }
 };
 
-/** سقوط آمن لأي مفتاح غير معرّف: إنجاز معلن + ملخص — لا نخترع حقولاً لخطوة لا نعرفها. */
+/** Fallback for unknown steps requires an explicit completion statement and summary. */
 const FALLBACK_SPEC = {
   title: 'خطوة مسار البحث',
   isFallback: true,
@@ -131,12 +113,12 @@ const FALLBACK_SPEC = {
   ]
 };
 
-/** مواصفة خطوة: معروفة من الجدول أعلاه، وإلا السقوط الآمن. */
+/** Returns the registered or fallback step specification. */
 export function specForStep(stepKey) {
   return STEP_SPECS[String(stepKey || '').trim()] || FALLBACK_SPEC;
 }
 
-/** جملة واحدة حول موضع المطابقة (تُعرض كقيمة الحقل في البطاقة). */
+/** Extracts a single matching sentence for the review card. */
 function excerptAround(text, index, max = 240) {
   const boundaries = '.؟!\n؛;';
   let start = index;
@@ -149,10 +131,7 @@ function excerptAround(text, index, max = 240) {
   return `${slice.slice(0, FIELD_VALUE_LIMIT - 1)}…`;
 }
 
-/**
- * التقييم النقافي: يفحص نص الحوار بمواصفة الخطوة ويعيد البطاقة.
- * بلا قاعدة بيانات وبلا وقت حقيقي — تُختبر في scripts/unit-tests.mjs.
- */
+/** Deterministically evaluates a transcript without database access. */
 export function evaluateStepCompletion({ stepKey = '', transcript = '', stepTitle = '' } = {}) {
   const spec = specForStep(stepKey);
   const text = String(transcript || '');
@@ -180,7 +159,7 @@ export function evaluateStepCompletion({ stepKey = '', transcript = '', stepTitl
   };
 }
 
-/** محادثة مملوكة للبطاقة (أو خطأ NOT_FOUND). */
+/** Loads an owned conversation or throws NOT_FOUND. */
 async function ownedConversation(userId, conversationId) {
   if (!isUuid(conversationId)) {
     const error = new Error('المحادثة غير موجودة.');
@@ -201,7 +180,7 @@ async function ownedConversation(userId, conversationId) {
   return rows[0];
 }
 
-/** تطبيع قيمة حقل: سطر واحد، بلا وسوم، بحد أقصى. */
+/** Normalizes a review field to one bounded line. */
 function sanitizeFieldValue(value) {
   return String(value || '')
     .replace(/[\r\n\t]+/g, ' ')
@@ -210,18 +189,14 @@ function sanitizeFieldValue(value) {
     .slice(0, FIELD_VALUE_LIMIT);
 }
 
-/**
- * الكشف بعد حفظ رد المشرفة: يقرأ آخر رسائل المحادثة، فإن تكتملت مؤشرات
- * الخطوة يُودع في pending_review. لا يغيّر مساراً ولا حالة خطوة إطلاقاً.
- * يعيد البطاقة (عند الاكتمال) أو null (لا كشف / مناقشة / خطوة منجزة).
- */
+/** Stores a pending review when completion signals are found; never updates progress. */
 export async function detectStepCompletion({ userId, conversation }) {
   if (!userId || !conversation?.id) return null;
   if (conversation.mode === 'defense') return null;
 
   const stepKey = String(conversation.step_key || '').trim();
   if (!stepKey) return null;
-  // بطاقة معلّقة تبقى كما هي حتى يقرر الباحث (حفظ أو إلغاء)
+  // Keep the pending card until the user saves or cancels it.
   if (conversation.pending_review) return null;
   if (!(await isValidStepKeyForUser(userId, stepKey))) return null;
 
@@ -265,10 +240,7 @@ export async function detectStepCompletion({ userId, conversation }) {
   return card;
 }
 
-/**
- * وضع التعديل (edit): يفتح الحقول للتعديل دون أي كتابة في المسار.
- * قيم الحقول المُرسلة تُستبدل، وما لم يُرسل يبقى على ما كان.
- */
+/** Updates pending review fields without changing research progress. */
 export async function editStepReview(userId, conversationId, values = {}) {
   const conversation = await ownedConversation(userId, conversationId);
   const card = conversation.pending_review;
@@ -295,12 +267,7 @@ export async function editStepReview(userId, conversationId, values = {}) {
   return updated;
 }
 
-/**
- * إتمام الخطوة (save): الوحيدة التي تكتب في المسار.
- * تحقّق ← setStepStatus(done) ← عنوان البحث ← ترقية التالية ← ذاكرة المشرفة
- * ← تصفير التنبيهات ← usage_logs(step_completed) ← مسح البطاقة ← نص التهنئة.
- * الأكواد: NOT_FOUND / NO_PENDING / BAD_STEP / EMPTY_FIELD.
- */
+/** Saves the review and performs the step-completion transaction. */
 export async function saveStepReview(userId, conversationId, values = {}) {
   const conversation = await ownedConversation(userId, conversationId);
   const card = conversation.pending_review;
@@ -327,11 +294,11 @@ export async function saveStepReview(userId, conversationId, values = {}) {
     return { ...field, value };
   });
 
-  // ١) الحالة «تم» مع مخرجات مكتوبة في ملاحظة الخطوة
+  // Mark the current step complete and save its outputs.
   const outputNote = fields.map((field) => `${field.label}: ${field.value}`).join('\n').slice(0, 4000);
   await setStepStatus(userId, card.stepKey, { status: 'done', outputNote });
 
-  // ٢) عنوان البحث من حقل العنوان إن كان ملفه لا يزال فارغاً
+  // Save the title only if the profile does not already have one.
   const titleValue = fields.find((field) => field.key === 'title')?.value;
   if (titleValue) {
     await pool.query(
@@ -340,7 +307,7 @@ export async function saveStepReview(userId, conversationId, values = {}) {
     );
   }
 
-  // ٣) ترقية الخطوة التالية «لم يبدأ ← جاري» (وإن كانت منجزة يدويًا لا نمسّها)
+  // Start the next step unless it was already completed manually.
   const path = await resolvePathForDegree(await degreeOfUser(userId));
   const index = path.steps.findIndex((item) => item.key === card.stepKey);
   const nextStep = index >= 0 ? path.steps[index + 1] : null;
@@ -357,7 +324,7 @@ export async function saveStepReview(userId, conversationId, values = {}) {
     }
   }
 
-  // ٤) ذاكرة المشرفة: مهمة التالية (يقرؤها السياق في الرسالة القادمة) + تصفير التنبيهات
+  // Update the supervisor's next task and reset strikes.
   const memory = await getMemory(userId).catch(() => ({ memory: '', openTask: '' }));
   await saveMemory(userId, {
     memory: memory.memory,
@@ -365,10 +332,10 @@ export async function saveStepReview(userId, conversationId, values = {}) {
   });
   await resetStrikes(userId);
 
-  // ٥) سجل الاستهلاك (بلا خصم): المنصة ترى الخطوات المنجزة في لوحة الإدارة
+  // Record completion for platform reporting without charging credits.
   await logUsage(userId, { type: 'step_completed', tokens: 0, summary: `اكتملت خطوة: ${card.stepTitle}` });
 
-  // ٦) مسح البطاقة — لا تظهر مرة ثانية
+  // Clear the pending review card.
   await pool.query('UPDATE conversations SET pending_review = NULL WHERE id = $1', [conversationId]);
 
   return {
@@ -381,7 +348,7 @@ export async function saveStepReview(userId, conversationId, values = {}) {
   };
 }
 
-/** إلغاء المراجعة (cancel): يمسح البطاقة فقط، ولا شيء من المسار تغيّر. */
+/** Cancels the pending review without changing progress. */
 export async function cancelStepReview(userId, conversationId) {
   const conversation = await ownedConversation(userId, conversationId);
   if (!conversation.pending_review) {

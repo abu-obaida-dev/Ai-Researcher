@@ -33,22 +33,13 @@ import { ensureUserFromGoogle, getProfile, getUsageOverview, saveOnboarding } fr
 import { notifyUser, unreadCount } from '../services/notifications.js';
 import { renderAccountPage, renderAuthNotice, renderDashboardPage, renderLoginPage, renderOnboardingPage } from '../views/auth.js';
 
-/**
- * صفحات المصادقة والحساب:
- * - /login          صفحة الدخول (زر جوجل)
- * - /auth/google    بدء دخول جوجل (OAuth 2.0 code flow)
- * - /auth/google/callback  معالجة العودة: تحقق من الـ state ثم إنشاء/تحديث المستخدم في PostgreSQL
- * - /logout         إنهاء الجلسة
- * - /onboarding     الملف البحثي: صفحة مستقلة بلا سايدبار قبل الإكمال، وتعديل داخل اللوحة بعده
- * - /account        صفحة الحساب والرصيد داخل لوحة الباحث (area:'app' + سايدبار)
- * - /dashboard      الصفحة الرئيسية للوحة الباحث: الإحصائية (الرصيد + الباقة + آخر العمليات + روابط سريعة)
- */
+/** Authentication, OAuth, onboarding, account, and dashboard routes. */
 
 const router = express.Router();
 const COOKIE_PATH = '/';
 const STATE_TTL_MS = 10 * 60 * 1000;
 
-/** رسائل أخطاء الدخول المعروضة — تُمرَّر بالكود فقط لمنع أي حقن في الصفحة. */
+/** Login errors are passed as codes to prevent HTML injection. */
 const LOGIN_ERRORS = {
   denied: 'تم إلغاء تسجيل الدخول من نافذة جوجل.',
   state: 'انتهت صلاحية محاولة الدخول، أعد المحاولة من جديد.',
@@ -57,7 +48,7 @@ const LOGIN_ERRORS = {
   config: 'الدخول بحساب جوجل غير مُفعّل على هذا الخادم بعد.'
 };
 
-/** يضبط كوكي httpOnly مع عمر محدّد (تُستخدم للجلسة وحالة OAuth). */
+/** Sets an HttpOnly cookie with a bounded lifetime. */
 function setCookie(res, name, value, { maxAgeMs } = {}) {
   const parts = [`${name}=${encodeURIComponent(value)}`, `Path=${COOKIE_PATH}`, 'SameSite=Lax', 'HttpOnly'];
   if (maxAgeMs) parts.push(`Max-Age=${Math.floor(maxAgeMs / 1000)}`);
@@ -65,12 +56,12 @@ function setCookie(res, name, value, { maxAgeMs } = {}) {
   res.append('Set-Cookie', parts.join('; '));
 }
 
-/** يحذف كوكي من المتصفح. */
+/** Clears a browser cookie. */
 function clearCookie(res, name) {
   res.append('Set-Cookie', `${name}=; Path=${COOKIE_PATH}; Max-Age=0; SameSite=Lax; HttpOnly`);
 }
 
-/** يقرأ كوكي معيّنة من ترويسة الطلب. */
+/** Reads a named cookie from the request. */
 function readCookie(req, name) {
   for (const part of String(req.headers.cookie || '').split(';')) {
     const trimmed = part.trim();
@@ -79,20 +70,20 @@ function readCookie(req, name) {
   return '';
 }
 
-/** يقبل المسارات الداخلية فقط في ?next= (منع إعادة التوجيه المفتوحة). */
+/** Allows internal destinations only, preventing open redirects. */
 function safeNextPath(value) {
   const raw = String(value || '').trim();
   if (!raw.startsWith('/') || raw.startsWith('//')) return '';
   return raw.slice(0, 300);
 }
 
-/** الصفحة الرئيسية أو المسار المطلوب بعد الدخول. */
+/** Resolves the post-login destination. */
 function redirectAfterLogin(res, user, nextPath) {
   const target = nextPath && !nextPath.startsWith('/login') ? nextPath : homePathFor(user);
   res.redirect(302, target);
 }
 
-/** صفحة الدخول — إن وُجدت جلسة فعّالة تُحوَّل مباشرة إلى الحساب. */
+/** Redirects authenticated users away from the login page. */
 router.get('/login', rateLimit('login_page', { limit: 60, windowMs: 5 * 60 * 1000 }), async (req, res) => {
   if (req.account) {
     res.redirect(302, homePathFor(req.account));
@@ -113,7 +104,7 @@ router.get('/login', rateLimit('login_page', { limit: 60, windowMs: 5 * 60 * 100
   );
 });
 
-/** بدء دخول جوجل: state عشوائي في كوكي قصير العمر + تحويل إلى شاشة جوجل. */
+/** Starts Google OAuth using a short-lived state cookie. */
 router.get('/auth/google', rateLimit('oauth_start', { limit: 20, windowMs: 5 * 60 * 1000 }), (req, res) => {
   if (!isGoogleAuthConfigured()) {
     res.status(503).type('html').send(
@@ -130,12 +121,12 @@ router.get('/auth/google', rateLimit('oauth_start', { limit: 20, windowMs: 5 * 6
   }
 
   const state = newOAuthState();
-  // نحتفظ بالمسار المطلوب داخل كوكي الحالة حتى نُكمل التوجيه بعد العودة من جوجل
+  // Preserve the requested destination across the OAuth callback.
   setCookie(res, OAUTH_STATE_COOKIE, `${state}|${safeNextPath(req.query.next)}`, { maxAgeMs: STATE_TTL_MS });
   res.redirect(302, buildGoogleAuthUrl(req, state));
 });
 
-/** العودة من جوجل: تحقق من الحالة، ثم إنشاء/تحديث المستخدم في PostgreSQL وفتح جلسة. */
+/** Validates the OAuth state, upserts the user, and opens a session. */
 router.get('/auth/google/callback', rateLimit('oauth_callback', { limit: 30, windowMs: 5 * 60 * 1000 }), async (req, res) => {
   const [expectedState, nextPath = ''] = readCookie(req, OAUTH_STATE_COOKIE).split('|');
   clearCookie(res, OAUTH_STATE_COOKIE);
@@ -158,7 +149,7 @@ router.get('/auth/google/callback', rateLimit('oauth_callback', { limit: 30, win
     const googleProfile = await fetchGoogleProfile(tokens.access_token);
     const user = await ensureUserFromGoogle(googleProfile);
 
-    // إشعار ترحيبي لأي حساب جديد — يُحفظ داخل الموقع فوراً، وpush لو كان هاتفه مفعّلاً
+    // Send an in-app welcome notification and push when enabled.
     if (user.is_new) {
       notifyUser(user.id, {
         title: 'أهلاً بك في Zena AI',
@@ -176,13 +167,13 @@ router.get('/auth/google/callback', rateLimit('oauth_callback', { limit: 30, win
   }
 });
 
-/** إنهاء الجلسة والعودة للصفحة الرئيسية. */
+/** Ends the session and redirects to the home page. */
 router.get('/logout', (_req, res) => {
   clearCookie(res, SESSION_COOKIE_NAME);
   res.redirect(302, '/');
 });
 
-/** يفصل رقم واتساب محفوظاً (بأي صيغة قديمة) إلى رمز الدولة والرقم الوطني. */
+/** Splits a stored WhatsApp number into country code and national number. */
 function splitStoredWhatsapp(stored) {
   const raw = String(stored || '').trim();
   if (!raw) return { country: 'LY', number: '' };
@@ -190,7 +181,7 @@ function splitStoredWhatsapp(stored) {
   let digits = raw.replace(/\D/g, '');
   if (digits.startsWith('00')) digits = digits.slice(2);
 
-  // نجرّب أطول مفتاح دولية أولاً حتى لا يخطئ رقم ليبي يبدأ بـ 91 مثلاً
+  // Try the longest country code first to avoid ambiguous prefixes.
   const sorted = [...WHATSAPP_COUNTRIES].sort((a, b) => b.dial.length - a.dial.length);
   for (const country of sorted) {
     if (!digits.startsWith(country.dial)) continue;
@@ -198,7 +189,7 @@ function splitStoredWhatsapp(stored) {
     if (country.lengths.includes(local.length)) return { country: country.code, number: local };
   }
 
-  // صيغة محلية بدون مفتاح (مثل 0912345678) — ليبيا هي الدولة الافتراضية
+  // Treat numbers without a country code as Libyan local numbers.
   const local = digits.replace(/^0+(?=\d)/, '');
   const ly = WHATSAPP_COUNTRIES.find((country) => country.code === 'LY');
   if (ly.lengths.includes(local.length)) return { country: 'LY', number: local };
@@ -206,7 +197,7 @@ function splitStoredWhatsapp(stored) {
   return { country: 'LY', number: digits };
 }
 
-/** قيم نموذج التسجيل: الملف المحفوظ إن وُجد، ثم اسم الحساب والقيم الافتراضية. */
+/** Builds onboarding values from the saved profile and account defaults. */
 function onboardingValues(profile, account = null) {
   const knownFields = SPECIALIZATIONS.filter((item) => item !== 'أخرى');
   const field = profile?.research_field || '';
@@ -232,12 +223,12 @@ function onboardingValues(profile, account = null) {
   };
 }
 
-/** يقرأ قيم النموذج القادمة من POST بشكل محدود وآمن (لا تُقبل أي قيمة خارج القوائم). */
+/** Reads and bounds POSTed onboarding values. */
 function readValues(body) {
   const pick = (value, allowed, fallback) => (allowed.includes(value) ? value : fallback);
   const text = (value, max = 200) => String(value ?? '').trim().slice(0, max);
 
-  // الدولة تُقبل من القائمة فقط، واسم المستخدم حروف فقط (عربي/لاتيني) بدون مسافات أو رموز
+  // Accept known countries and a single alphabetic name only.
   const waCountryCode = pick(body.wa_country, WHATSAPP_COUNTRIES.map((item) => item.code), 'LY');
   const fullName = text(body.full_name, 100).replace(/\p{M}/gu, '');
 
@@ -256,12 +247,12 @@ function readValues(body) {
     citation_style: pick(body.citation_style, CITATION_STYLES.map((item) => item.value), 'apa7'),
     research_title: text(body.research_title, 250),
     wa_country: waCountryCode,
-    // أرقام فقط: تُنزع علامة + و00، وإن لُصق الرقم بمفتاح دولته يُقصّ المفتاح
+    // Normalize digits and remove a pasted international prefix.
     whatsapp_number: sanitizeWhatsappDigits(body.whatsapp_number, waCountryCode)
   };
 }
 
-/** ينظّف رقم الواتساب إلى أرقام محلية فقط حسب الدولة المختارة. */
+/** Normalizes a WhatsApp number using the selected country. */
 function sanitizeWhatsappDigits(value, countryCode) {
   let digits = String(value ?? '').replace(/\D/g, '');
   if (digits.startsWith('00')) digits = digits.slice(2);
@@ -275,11 +266,11 @@ function sanitizeWhatsappDigits(value, countryCode) {
   return digits.replace(/^0+(?=\d)/, '').slice(0, 15);
 }
 
-/** تحقّق من الحقول الإلزامية (نفس شروط خطوة التسجيل في النسخة القديمة). */
+/** Validates required onboarding fields. */
 function validateValues(values) {
   const errors = [];
 
-  // اسم واحد فقط: حروف عربية أو لاتينية، بلا مسافات أو أرقام أو رموز
+  // Require a single Arabic or Latin name without digits or symbols.
   if (!values.full_name) {
     errors.push('اكتب اسم المستخدم.');
   } else if (/\s/.test(values.full_name)) {
@@ -311,7 +302,7 @@ function validateValues(values) {
   return errors;
 }
 
-/** نموذج إكمال الملف البحثي — يُستخدم أيضاً للتعديل لاحقاً. يحفظ ?next= للعودة بعد الإكمال. */
+/** Saves onboarding data and preserves the requested return destination. */
 router.get('/onboarding', requireAccount, async (req, res) => {
   const profile = await getProfile(req.account.id);
   res
@@ -319,7 +310,7 @@ router.get('/onboarding', requireAccount, async (req, res) => {
     .send(renderOnboardingPage({ account: req.account, profile, values: onboardingValues(profile, req.account), next: safeNextPath(req.query.next) }));
 });
 
-/** حفظ الملف البحثي في PostgreSQL ثم العودة للوجهة المحفوظة (?next=) أو الإحصائية. */
+/** Stores the research profile and returns to the saved destination. */
 router.post('/onboarding', requireAccount, async (req, res) => {
   const values = readValues(req.body || {});
   const errors = validateValues(values);
@@ -337,7 +328,7 @@ router.post('/onboarding', requireAccount, async (req, res) => {
     PROGRESS_LEVELS.find((item) => item.value === values.progress_stage)?.label ||
     RESEARCH_STAGES.find((item) => item.value === values.progress_stage)?.label ||
     '';
-  // يُعاد تركيب الصيغة الدولية الكاملة قبل الحفظ: +218912345678
+  // Rebuild the full international number before saving.
   const waCountry = WHATSAPP_COUNTRIES.find((item) => item.code === values.wa_country) || WHATSAPP_COUNTRIES[0];
 
   await saveOnboarding(req.account.id, {
@@ -360,21 +351,21 @@ router.post('/onboarding', requireAccount, async (req, res) => {
   res.redirect(302, backTarget || '/dashboard');
 });
 
-/** الإحصائية — الصفحة الرئيسية للوحة الباحث بعد الدخول. */
+/** Renders the user's dashboard. */
 router.get('/dashboard', requireAccount, async (req, res) => {
-  // المدير له لوحته الخاصة — لا يدخل إحصائية الباحث
+  // Administrators use the admin dashboard.
   if (req.account.role === 'admin') {
     res.redirect(302, '/admin');
     return;
   }
 
-  // من لم يُكمل ملفه يُوجَّه لإكماله أولاً (حماية إضافية فوق requireOnboarding)
+  // Redirect incomplete profiles to onboarding.
   if (req.account.onboarding_complete !== true) {
     res.redirect(302, '/onboarding');
     return;
   }
 
-  // الملف البحثي أولاً لأن درجته هي التي تختار مسار البحث المعروض في الإحصائية
+  // Ensure the profile exists before loading degree-specific progress.
   const profile = await getProfile(req.account.id);
   const [plan, usage, journey, unread, stats] = await Promise.all([
     getPlanByCode(req.account.plan_code || FREE_PLAN_CODE),
@@ -397,7 +388,7 @@ router.get('/dashboard', requireAccount, async (req, res) => {
   );
 });
 
-/** صفحة الحساب: البيانات + الباقة + الرصيد + آخر العمليات. */
+/** Renders account details, plan, balance, and recent activity. */
 router.get('/account', requireAccount, async (req, res) => {
   const [profile, plan, usage, unread] = await Promise.all([
     getProfile(req.account.id),

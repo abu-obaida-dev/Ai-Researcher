@@ -1,9 +1,6 @@
 /**
- * اختبارات وحدة للخدمات الحرجة (بلا خادم وبلا طلبات شبكة):
- *   node --test scripts/unit-tests.mjs
- * تغطي: حساب النقاط وتوحيد استهلاك المزوّدين · عملة المنصة · التحقّق من المدخلات
- * · تطبيع النص العربي (أساس ترشيح المراجع) · التحقّق من رقم واتساب الدعم.
- * اختبار الدخان الحيّ (scripts/smoke-phase1.mjs) يغطّي ما يحتاج قاعدة بيانات.
+ * Unit tests for critical services; no server or network access required.
+ * Run with: node --test scripts/unit-tests.mjs
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -30,13 +27,14 @@ import {
   relevanceScore
 } from '../src/services/literature.js';
 import { LIBRARY_SOURCES, SOURCE_GROUPS, assertPublicUrl, normalizeYearRange, sourceGroup } from '../src/services/library-sources.js';
-import { loadSupportWhatsapp, saveSupportWhatsapp } from '../src/services/settings.js';
+import { currentSupportWhatsapp, loadSupportWhatsapp, saveSupportWhatsapp } from '../src/services/settings.js';
 import { assertContentMatchesExtension, contentMatchesExtension } from '../src/services/upload-guard.js';
 import { safeEqual } from '../src/middleware/security.js';
 import { needsOnboarding, requireCoreOnboarding } from '../src/middleware/auth.js';
 import { renderOnboardingPage } from '../src/views/auth.js';
 import { buildSystemPrompt } from '../src/services/supervisor-prompt.js';
 import { PROVIDERS, classifyFailure } from '../src/services/ai.js';
+import { defenseGradeInput } from '../src/services/defense-grading.js';
 import {
   INPUT_BUDGETS,
   MODEL_INPUT_BUDGETS,
@@ -48,16 +46,20 @@ import {
 import {
   applyQuestionToState,
   defenseProgress,
+  extractAnswerCorrectness,
   extractDefenseFinalTag,
   extractQuestionFromReply,
+  parseDefenseGrade,
+  reconcileDefenseState,
   maxQuestionsFor,
   nextPendingPart,
-  planParts
+  planParts,
+  stripAnswerCorrectnessTag
 } from '../src/services/defense.js';
+import { renderDefenseGradeNotice, renderDefenseStats, renderThesisCard } from '../src/views/defense-parts.js';
 import { evaluateStepCompletion, specForStep } from '../src/services/step-review.js';
-// ملاحظة (إصلاح C1): وظائف «ترتيب المصادر» و«دفائف البحث» و«اشتقاق العبارة من السجل»
-// أُزيلت عمداً من assistant.js في commit 54d0d51 — المعلم لم يعد يبحث في المكتبة
-// نيابةً عن الباحث (الباحث يبحث بنفسه)، فحُذفت اختباراتها هنا لتطابق التصميم الجديد.
+// Search ranking, batching, and history-derived queries were removed from the
+// teaching assistant; it no longer searches the library on the researcher's behalf.
 import { extractLastSuggestedQuery } from '../src/services/assistant.js';
 import {
   ASSISTANT_REPLY_CAPS,
@@ -65,10 +67,38 @@ import {
   detectAssistantTask,
   isExplicitSearchRequest
 } from '../src/services/assistant-prompt.js';
-import { isUuid } from '../src/constants.js';
+import { isUuid, SUPPORT_EMAIL, SUPPORT_WHATSAPP } from '../src/constants.js';
 import { SESSION_TTL_MS, createSessionCookie } from '../src/auth/google.js';
+import { renderLandingPage } from '../src/views/landing.js';
+import { whatsappLink } from '../src/views/layout.js';
+import { firebaseWebConfig } from '../src/services/firebase.js';
 
-/* ------------------------------- النقاط ------------------------------- */
+test('Firebase web configuration matches the supplied project', () => {
+  const config = firebaseWebConfig();
+  assert.equal(config.apiKey, 'AIzaSyDwrVoVdykaGbU9ScPvZJDgdy5kQ0sgbHg');
+  assert.equal(config.authDomain, 'zena-ai-e5164.firebaseapp.com');
+  assert.equal(config.projectId, 'zena-ai-e5164');
+  assert.equal(config.storageBucket, 'zena-ai-e5164.firebasestorage.app');
+  assert.equal(config.messagingSenderId, '725694405420');
+  assert.equal(config.appId, '1:725694405420:web:e0510342dac2fa235f2a89');
+  assert.equal(config.measurementId, 'G-8LP5JXKHG2');
+  assert.equal(config.vapidKey, 'BNhSRvfEaEa4q1Tl8raRJub-xjZjlOtLsgqRfhwxwZvQKoQRwCeiVWl4sWuvqR8DA2rr0v4YIO-Ec6Ncb0QdVOs');
+  assert.equal(config.configured, true);
+  assert.equal(config.vapidReady, true);
+});
+
+test('public support contacts use the configured Libyan contact details', () => {
+  const html = renderLandingPage({ plans: [], freeTokens: 10000 });
+
+  assert.ok(html.includes(`mailto:${SUPPORT_EMAIL}`));
+  assert.ok(html.includes(SUPPORT_EMAIL));
+  assert.ok(html.includes(SUPPORT_WHATSAPP));
+  assert.equal(currentSupportWhatsapp(), SUPPORT_WHATSAPP);
+  assert.ok(html.includes('https://wa.me/218930108734?text='));
+  assert.equal(whatsappLink().startsWith('https://wa.me/218930108734?text='), true);
+});
+
+/* ------------------------------- Token usage ------------------------------- */
 
 test('estimateTokens: تقدير سريع وعامل 2.6', () => {
   assert.equal(estimateTokens(''), 0);
@@ -92,7 +122,7 @@ test('normalizeUsage: يوحّد OpenAI وGemini ويضمّ نقاط التفك�
   const openai = normalizeUsage({ prompt_tokens: 100, completion_tokens: 20 });
   assert.deepEqual(openai, { inputTokens: 100, outputTokens: 20 });
 
-  // نقاط التفكير خارج candidates ⇒ تُحتسب إخراجاً (وإلا خسرنا 10% من الاستخدام)
+  // Count thoughts tokens as output because they are excluded from candidates.
   const gemini = normalizeUsage({ promptTokenCount: 10, candidatesTokenCount: 5, thoughtsTokenCount: 100 });
   assert.deepEqual(gemini, { inputTokens: 10, outputTokens: 105 });
 
@@ -112,7 +142,7 @@ test('chargeUsage: خصم صحيح ومعامل الباقة وسقف أدنى 1
   assert.equal(chargeUsage({ inputTokens: -50, multiplier: 1 }).inputTokens, -50, 'لا نغيّر الأرقام السالبة (الخصم يتولّاها)');
 });
 
-/* ------------------------------- الدفع ------------------------------- */
+/* ------------------------------- Payments ------------------------------- */
 
 test('normalizeCurrency: يقبل المدعوم ويُرجع الافتراضي لغيره', () => {
   assert.equal(normalizeCurrency('lyd'), 'LYD');
@@ -122,7 +152,7 @@ test('normalizeCurrency: يقبل المدعوم ويُرجع الافتراضي
   assert.equal(normalizeCurrency(null), 'LYD');
 });
 
-/* --------------------------- تطبيع النص العربي --------------------------- */
+/* ---------------------------- Arabic normalization ---------------------------- */
 
 test('normalizeArabic: يوحّد الهمزات والتاء المربوطة ويزيل التشكيل', () => {
   assert.equal(normalizeArabic('أسماء'), normalizeArabic('اسماء'));
@@ -134,9 +164,9 @@ test('normalizeArabic: يوحّد الهمزات والتاء المربوطة �
 
 test('extractTopic: يحذف عبارة الطلب ولا يقطع الكلمات', () => {
   assert.ok(!extractTopic('اقترحلي مراجع').includes('مراجع'));
-  // كان الحذف يقطع الكلمات: «لي» من «التعليم» و«مع» من «معالجة»
+  // Ensure stopword removal does not split words such as "التعليم" or "معالجة".
   assert.ok(extractTopic('التعلم الآلي في التعليم العالي').includes('التعليم'));
-  // extractTopic مطبَّع (ة→ه) ⇒ نقارن بصيغته المطبَّعة لا الأصلية
+  // extractTopic normalizes ة to ه, so compare normalized forms.
   assert.ok(extractTopic('معالجة اللغة الطبيعية').includes(normalizeArabic('معالجة')));
 });
 
@@ -150,21 +180,21 @@ test('buildSearchQuery: يضيف المقابل الإنجليزي للمصطل�
   const q = buildSearchQuery({ topic: 'التعلم العميق' });
   assert.ok(q.includes('deep learning'), q);
 
-  // «الطبيعيه» ليست «الطب» ⇒ لا نضيف medicine خطأً
+  // "الطبيعية" must not be mistaken for "الطب".
   assert.ok(!buildSearchQuery({ topic: 'اللغة الطبيعية' }).includes('medicine'));
 });
 
 test('normalizeYearRange: فلتر سنة الإصدار — قلب المعكوس ورفض الشاذ واستقلال الطرفين', () => {
-  // من > إلى يُقلَبان بدل رفض البحث
+  // Swap reversed bounds instead of rejecting the search.
   assert.deepEqual(normalizeYearRange('2020', '2015'), { from: 2015, to: 2020 });
-  // بلا قيم أو بقيم شاذة ⇒ بلا ترشيح (0)
+  // Empty or invalid bounds disable filtering.
   assert.deepEqual(normalizeYearRange('', ''), { from: 0, to: 0 });
   assert.deepEqual(normalizeYearRange('منذ', 4000), { from: 0, to: 0 });
   assert.deepEqual(normalizeYearRange('abc', '20x4'), { from: 0, to: 0 });
-  // طرف واحد يكفي (من-بدون-إلى / إلى-بدون-من)
+  // Either bound can be provided independently.
   assert.deepEqual(normalizeYearRange(2019, ''), { from: 2019, to: 0 });
   assert.deepEqual(normalizeYearRange('', '2024'), { from: 0, to: 2024 });
-  // المدى السليم يبقى كما هو
+  // Preserve a valid range.
   assert.deepEqual(normalizeYearRange('2010', '2024'), { from: 2010, to: 2024 });
 });
 
@@ -174,7 +204,7 @@ test('LIBRARY_SOURCES: كل المصدر مسجّل ببيانات مكتملة 
     assert.ok(entry, `المصدر مفقود: ${id}`);
     assert.ok(entry.label && entry.hint, `بيانات ناقصة: ${id}`);
   }
-  // كل المصدر (بما فيه القديمة) له مجموعة في SOURCE_GROUPS — وإلا اختفى من القائمة المنسدلة
+  // Every source must belong to a group to appear in the dropdown.
   for (const item of LIBRARY_SOURCES) {
     const group = sourceGroup(item.id);
     assert.ok(SOURCE_GROUPS.some((entry) => entry.id === group), `مجموعة ناقصة: ${item.id}`);
@@ -406,23 +436,23 @@ test('المشرف: أول رد يستعمل سياق الـ onboarding ويقو
 
   const first = buildSystemPrompt({ ...ctx, isFirstMessageEver: true });
 
-  // بيانات الملف تصل السياق كاملاً (الهدف + الحالة إلى جانب الدرجة والتخصص)
+  // Profile context includes the goal and progress alongside degree and field.
   assert.ok(first.includes('الدرجة: باحث ماجستير'));
   assert.ok(first.includes('الهدف الحالي من إنجاز البحث: اختيار فكرة أو موضوع البحث'));
   assert.ok(first.includes('حالة تقدّمه في مشروعه: لم أبدأ بعد'));
 
-  // سلوك الترحيب: يقود للخطوة التالية ولا يسأل سؤالاً عاماً
+  // The greeting guides the researcher to the next step without a generic question.
   assert.ok(first.includes('# الترحيب والبداية (أول رسالة في تاريخه)'));
   assert.ok(first.includes('نقطة الانطلاق المناسبة لهدفه'), 'يقترح أول خطوة تناسب هدفه');
   assert.ok(first.includes('لا تقترحي له موضوعاً أو عنواناً جاهزاً'), 'لا تكتب الموضوع للباحث');
   assert.ok(first.includes('سؤال واحد في الرد كله'), 'قاعدة السؤال الواحد محفوظة');
   assert.ok(!first.includes('اسأليه عما يريد إنجازه اليوم'), 'لا سؤال عام بعد');
 
-  // بلا هدف مطابق للقوائم: يبقى توجيه عام بخطوة واحدة بدل فقدان التوجيه
+  // An unmatched goal still receives one general next step.
   const noKey = buildSystemPrompt({ ...ctx, researchGoalKey: '', isFirstMessageEver: true });
   assert.ok(noKey.includes('اختاري أول خطوة منطقية من مساره الحالية'));
 
-  // بعد أول رسالة: لا ترحيب ولا قسم ترحيب إطلاقاً
+  // Later messages omit the greeting section.
   const later = buildSystemPrompt({ ...ctx, isFirstMessageEver: false });
   assert.ok(later.includes('لا ترحيب إطلاقاً'));
   assert.ok(!later.includes('# الترحيب والبداية (أول رسالة في تاريخه)'));
@@ -462,11 +492,11 @@ test('المشرف في خطوة topic: تستخرج المشكلة بالأسئ
   assert.ok(atTopic.includes('بأسئلة إرشادية، سؤالاً واحداً في كل رد'), 'الاستخلاص بأسئلة وسؤال واحد');
   assert.ok(atTopic.includes('ناقشين قابليتها للقياس والاختبار'), 'الفرضيات نقاش لا اقتراح جاهز');
 
-  // قاعدة الطلب الصريح: رفض بلا صياغة بديلة وبلا مثال قريب + سؤال واحد فقط
+  // Explicit requests must be refused without substitute text or examples.
   assert.ok(atTopic.includes('لا تكتبي أي صياغة بديلة، ولا تضعي مثالاً قريباً من موضوعه'), 'لا صياغة بديلة ولا مثال قريب');
   assert.ok(atTopic.includes('اسأليه سؤالاً إرشادياً واحداً فقط في هذا الرد'), 'سؤال إرشادي واحد فقط');
 
-  // سلوك الرد: لا سؤال مزدوج ولا اقتراحات/أمثلة غير مطلوبة مع السؤال الإرشادي
+  // Do not combine questions or add unrequested examples.
   assert.ok(atTopic.includes('لا تذكري سؤالاً ثانياً إلى جانب السؤال الإرشادي'), 'ممنوع السؤال الثاني في الرد');
   assert.ok(atTopic.includes('لا تجمعي سؤالين معاً'), 'ممنوع جمع سؤالين في سؤال واحد');
   assert.ok(
@@ -474,7 +504,7 @@ test('المشرف في خطوة topic: تستخرج المشكلة بالأسئ
     'لا أمثلة أو خيارات من عندك بلا طلب صريح'
   );
 
-  // اقتراح الباحث مشكلة أو فرضية: تصور أولي لا اعتماد نهائي
+  // Treat a proposed problem or hypothesis as preliminary, not final.
   assert.ok(atTopic.includes('لا تصفيها بأنها «مشكلة بحثية مؤكدة» أو «فرضية جيدة»'), 'لا اعتماد صريح للاقتراح');
   assert.ok(atTopic.includes('تصوراً أولياً يحتاج إلى اختبار وتحديد'), 'الاقتراح تصور أولي');
   assert.ok(
@@ -482,22 +512,24 @@ test('المشرف في خطوة topic: تستخرج المشكلة بالأسئ
     'عبارات الرد المقترحة الثلاث'
   );
 
-  // المراجع ممنوعة كلياً في topic: تسجيل موضوع عام وحده لا يكفي
-  assert.ok(atTopic.includes('المراجع ممنوعة تماماً في هذه المرحلة'), 'ممنوع المراجع في topic');
-  assert.ok(atTopic.includes('وتسجيله وحده لا يكفي'), 'العنوان العام لا يفتح المراجع');
-  assert.ok(atTopic.includes('قبل البحث عن المراجع نحتاج أولاً إلى تحديد المشكلة'), 'رفض لطيف ثم سؤال الحدود');
-  assert.ok(atTopic.includes('سؤال إرشادي واحد فقط يستكمل به تحديد المشكلة'), 'سؤال إرشادي واحد في الرد');
-  const registered = buildSystemPrompt({ ...base, topicRecorded: 'الذكاء الاصطناعي في التعليم' }, { references: 5 });
-  assert.ok(registered.includes('المراجع ممنوعة تماماً'), 'المسجَّل العام لا يرفع المنعية');
-  assert.ok(!registered.includes('# أداة المراجع (نتائج حقيقية من قواعد البيانات)'), 'لا يُحقن قسم الأداة في topic');
+  // Do not search or direct the researcher to the library while on the topic step.
+  assert.ok(atTopic.includes('البحث عن المراجع وتقديمها مؤجلان تماماً'), 'البحث مؤجل في topic');
+  assert.ok(atTopic.includes('ولا توجّهيه إلى المكتبة'), 'لا إحالة للمكتبة قبل اكتمال الخطوة');
+  assert.ok(atTopic.includes('ارفضي بلطف بجملة واحدة ثم اطرحي سؤالاً إرشادياً واحداً فقط'), 'رفض لطيف ثم سؤال الحدود');
+  const registered = buildSystemPrompt(base, { recordedTopic: 'الذكاء الاصطناعي في التعليم' });
+  assert.ok(registered.includes('البحث عن المراجع وتقديمها مؤجلان تماماً'), 'الموضوع المسجّل لا يرفع المنع');
+  assert.ok(!registered.includes('# طلب المصادر: توجيه إلى مكتبة المنصة'), 'توجيه المكتبة لا يتجاوز منع topic');
   assert.ok(registered.includes('لا تكتبي أي صياغة بديلة'), 'قاعدة الرفض تبقى بعد التسجيل');
 
-  // خارج الخطوة: لا القسم (حتى لو كانت الرسالة في مرحلة أخرى) — وقسم الأداة يعود
-  const later = buildSystemPrompt({ ...base, currentStepKey: 'proposal' }, { references: 5 });
+  // After the topic step, direct the researcher to the library without searching.
+  const later = buildSystemPrompt({ ...base, currentStepKey: 'proposal' });
   assert.ok(!later.includes('# مرحلة المشكلة والفرضيات'), 'يسقط بعد topic');
   assert.ok(!later.includes('لا تذكر أمثلة أو خيارات أو اقتراحات من عندك'), 'القاعدة الجديدة تسقط مع القسم خارج topic');
   assert.ok(!later.includes('تصوراً أولياً يحتاج إلى اختبار وتحديد'), 'قاعدة «تصور أولي» تسقط مع القسم خارج topic');
-  assert.ok(later.includes('# أداة المراجع (نتائج حقيقية من قواعد البيانات)'), 'خارج topic يُحقن قسم الأداة');
+  assert.ok(later.includes('# طلب المصادر: توجيه إلى مكتبة المنصة'), 'خارج topic يوجّه إلى المكتبة');
+  assert.ok(later.includes('لا تبحثي في قواعد البيانات أو مكتبة المنصة'), 'المشرفة لا تبحث نيابةً عن الباحث');
+  assert.ok(later.includes('3-5 كلمات أو عبارات بحث دقيقة'), 'المشرفة تقترح كلمات بحث فقط');
+  assert.ok(!later.includes('نتائج حقيقية من قواعد البيانات'), 'لا تُحقن نتائج بحث');
 
   // وضع المناقشة يستثناه (لا تُحقن فيه أقسام الرحلة)
   const def = buildSystemPrompt({ ...base, mode: 'defense' });
@@ -540,20 +572,20 @@ test('بوابة الانتقال بين المراحل: التزام بـ curre
   assert.ok(atTopic.includes('سؤالاً واحداً فقط يعينه على إكمال خطوته الحالية'), 'الرد سؤال واحد يخدم الحالية');
   assert.ok(atTopic.includes('ما زلنا في مرحلة تحديد المشكلة والفرضيات'), 'مثال الرد يحمل مرحلته ديناميكياً');
 
-  // عامة: تعمل في منتصف المسار أيضاً — ليست من topic وحدها
+  // The transition rules also apply midway through the journey.
   const mid = buildSystemPrompt({ ...base, currentStepKey: 'methodology', currentStage: 'المنهجية وعينة البحث' });
   assert.ok(mid.includes('# قواعد الانتقال بين المراحل'), 'تعمل عند أي خطوة');
   assert.ok(mid.includes('ما زلنا في مرحلة المنهجية وعينة البحث'), 'اسم المرحلة يتبع currentStage');
   assert.ok(!mid.includes('# مرحلة المشكلة والفرضيات'), 'قسم topic يبقى خاصاً به');
 
-  // تسقط: وضع المناقشة (قواعدها الخاصة) وعند اكتمال المسار (لا خطوة حالية)
+  // Omit these rules in defense mode and after journey completion.
   const defPrompt = buildSystemPrompt({ ...base, mode: 'defense' });
   assert.ok(!defPrompt.includes('# قواعد الانتقال بين المراحل'), 'غائبة في وضع المناقشة');
   const finished = buildSystemPrompt({ ...base, currentStepKey: '', journeyCompleted: true });
   assert.ok(!finished.includes('# قواعد الانتقال بين المراحل'), 'غائبة بلا خطوة حالية');
 });
 
-/* -------- بطاقة مراجعة اكتمال الخطوة: الكشف الحتمي (نقافي بلا قاعدة بيانات) -------- */
+/* -------- Step completion review: deterministic checks -------- */
 
 test('specForStep: مواصفة حتمية لكل خطوة معروفة وسقوط آمن للمجهول', () => {
   for (const key of ['topic', 'proposal', 'literature', 'methodology', 'data', 'analysis', 'writing', 'discussion', 'defense']) {
@@ -611,7 +643,7 @@ test('evaluateStepCompletion: السقوط الآمن لخطوة غير معرّ
   const notDone = evaluateStepCompletion({ stepKey: 'brand-new-step', transcript: 'ما رأيك في الطقس اليوم؟' });
   assert.equal(notDone.complete, false, 'حديث بلا إنجاز لا يولّد بطاقة');
 });
-/* ------------------------------- المعلم ------------------------------- */
+/* ------------------------------- Teaching assistant ------------------------------- */
 
 test('detectAssistantTask: كشف حتمي للمهمة (تعليم/ترجمة/تلخيص)', () => {
   assert.equal(detectAssistantTask({ question: 'أريد أن أتعلم كيف أهيكل بحثي' }), 'teach');
@@ -620,7 +652,7 @@ test('detectAssistantTask: كشف حتمي للمهمة (تعليم/ترجمة/�
   assert.equal(detectAssistantTask({ question: 'translate the attached file' }), 'translate');
   assert.equal(detectAssistantTask({ question: 'لخص لي مراجع عن التسويق الرقمي' }), 'summarize');
   assert.equal(detectAssistantTask({ question: 'ابحث لي في المكتبة عن مصادر' }), 'summarize');
-  // الترجمة تتقدّم على التلخيص لو جاءتا معاً (الملف هو المقصد)
+  // Translation takes precedence when both tasks are requested.
   assert.equal(detectAssistantTask({ question: 'ترجم ولخص هذا الملف' }), 'translate');
 });
 
@@ -635,18 +667,17 @@ test('متابعة البحث عند المعلم: «نعم/الأولى» بع�
   assert.equal(detectAssistantTask({ question: 'نعم اعد البحث باستخدام اول كلمه', history }), 'summarize');
   assert.equal(detectAssistantTask({ question: 'الأولى', history }), 'summarize');
   assert.equal(detectAssistantTask({ question: '2', history }), 'summarize');
-  // موضوع جديد صريح ⇒ تلخيص عبر الرسالة نفسها لا عبر السجل
+  // Explicit search requests are detected from the current message.
   assert.ok(isExplicitSearchRequest('ابحث عن التعلم العميق'), 'طلب صريح يُكتشف');
   assert.ok(!isExplicitSearchRequest('نعم اعد البحث'), 'المتابعة ليست طلباً صريحاً');
 
-  // (حُذف اشتقاق العبارة من السجل extractQueryFromHistory — لم يعد المعلم يبحث
-  //  بنفسه بعد الالتزام بالتصميم الجديد؛ الاختبار يغطي دالة الاشتقاق الباقية.)
+  // The teacher no longer searches directly; test the remaining suggestion helper.
   assert.equal(
     extractLastSuggestedQuery(history),
     'AI in Computer Science Education',
     'آخر عبارة مقترحة هي الأولى ترتيباً (الأحدث في السرد)'
   );
-  // سؤال تعليمي حقيقي بعد البحث ⇒ تعليم لا تلخيص
+  // A new instructional question starts a teaching task.
   assert.equal(detectAssistantTask({ question: 'ما هو الإطار النظري؟', history }), 'teach');
 });
 
@@ -672,14 +703,16 @@ test('buildAssistantPrompt: قواعد المعلم حسب المهمة (تفص�
   assert.ok(translate.includes('الترجمة'), 'مهمة الترجمة معروفة');
 
   const summarize = buildAssistantPrompt({ task: 'summarize' });
-  // حدّ التلخيص الجديد (commit 54d0d51): تلخيص مرفق الباحث فقط — لا بحث نيابةً عنه.
+  // Summarize only researcher-provided attachments; do not search on their behalf.
   assert.ok(summarize.includes('تلخّص ما وُفّر من الباحث فقط'), 'التلخيص يقيَّد بما وُفّر من الباحث');
   assert.ok(summarize.includes('لا تبحث بنفسك'), 'المعلم لا يبحث في المكتبة نيابةً عن الباحث');
+  assert.ok(summarize.includes('لا تستخدم أداة بحث'), 'المنع يسري على كل مهام المعلم');
+  assert.ok(summarize.includes('وجّهه إلى مكتبة المنصة'), 'المعلم يوجّه إلى مكتبة المنصة');
+  assert.ok(summarize.includes('3-5 كلمات مفتاحية'), 'المعلم يقترح كلمات مفتاحية');
 });
 
 test('ASSISTANT_REPLY_CAPS: سقف الترجمة أطول من التعليم والتلخيص (حدّ واحد لكل مهمة)', () => {
-  // (استُبدل هذا الاختبار باختبار assistantSourceBatches المحذوف — المعلم لم يعد
-  //  يبحث في المكتبة خارجياً بعد قرار التصميم الجديد، فأُلغيت دفائف المصادر.)
+  // The teacher no longer searches external libraries.
   assert.equal(ASSISTANT_REPLY_CAPS.translate > ASSISTANT_REPLY_CAPS.teach, true, 'سقف الترجمة أطول');
   assert.equal(ASSISTANT_REPLY_CAPS.translate > ASSISTANT_REPLY_CAPS.summarize, true, 'الترجمة أطول من التلخيص');
   assert.ok(
@@ -689,10 +722,10 @@ test('ASSISTANT_REPLY_CAPS: سقف الترجمة أطول من التعليم �
 });
 
 test('حارس SSRF الموسّع (H2): يرفض الداخلية والخاصة والصيغ الرقمية ويقبل العامة', () => {
-  // عامة مقبولة
+  // Public URLs are allowed.
   assert.doesNotThrow(() => assertPublicUrl('https://api.openalex.org/works?search=test'));
   assert.doesNotThrow(() => assertPublicUrl('http://lx2.loc.gov:210/lcdb?version=1.1'));
-  // داخلية كلاسيكية
+  // Common private and local URLs are rejected.
   for (const bad of [
     'http://localhost:3000/x',
     'http://127.0.0.1/',
@@ -707,10 +740,10 @@ test('حارس SSRF الموسّع (H2): يرفض الداخلية والخاص�
   ]) {
     assert.throws(() => assertPublicUrl(bad), /شبكة داخلية|غير صالح/, `مرفوض: ${bad}`);
   }
-  // (H2) صيغ بديلة وتوجيه-مموّهة: عشرية كاملة وسداسية وCGNAT وIPv6 خاصة
+  // H2: Reject alternate numeric encodings, CGNAT, and private IPv6.
   for (const bad of [
-    'http://2130706433/', // 127.0.0.1 عشرية
-    'http://0x7f000001/', // 127.0.0.1 سداسية
+    'http://2130706433/',     // Decimal encoding of 127.0.0.1.
+    'http://0x7f000001/',     // Hexadecimal encoding of 127.0.0.1.
     'http://100.64.0.1/', // CGNAT
     'http://[fc00::1]/',
     'http://[fe80::1]/'
@@ -731,7 +764,7 @@ test('مرجع الهياكل الأكاديمية: الأنواع السبعة 
   };
   const prompt = buildSystemPrompt(ctx);
 
-  // الأنواع السبعة كلها موجودة
+  // All seven academic formats are included.
   for (const marker of [
     'هيكلية ورقة العمل (Working Paper)',
     'هيكلية الورقة البحثية (Research Paper)',
@@ -745,19 +778,19 @@ test('مرجع الهياكل الأكاديمية: الأنواع السبعة 
     assert.ok(prompt.includes(marker), `النوع مفقود: ${marker}`);
   }
 
-  // أسلوب التفصيل: كل جزء باسمه ووظيفته (عيّنة من ثلاث هيئات)
+  // Verify section purpose across representative formats.
   assert.ok(prompt.includes('الملخص — نبذة مختصرة'), 'شرح وظيفة الملخص في ورقة العمل');
   assert.ok(prompt.includes('مراجعة الأدبيات): أوسع وأكثر نقداً من ماجستير'), 'تمييز أطروحة الدكتوراه');
   assert.ok(prompt.includes('الإطار النظري المختصر'), 'خصوصية الدبلوم');
 
-  // حدود: شرح بنية فقط — لا كتابة محتوى
+  // Verify that the prompt explains structure without writing content.
   assert.ok(prompt.includes('ولا تكتبي محتوى أي قسم من بحثه'), 'الهيكلية لا تعني كتابة المحتوى');
 });
 
-/* ------------- جلسة المناقشة: لا «فخ» المراجع (تشخيص رسالة ١٥ أكتوبر) ------------- */
+/* ------------- Defense session: avoid false reference prompts ------------- */
 
 test('askedForReferenceTitle: سؤال المناقشة «بعنوان… ومراجعات…؟» لا يُعدّ سؤال مراجع', () => {
-  // الرسالة الواقعية التي أطلقت البوابة زوراً في جلسة defense:
+  // Reproduce the message that incorrectly triggered the reference gate.
   const exam = [
     {
       role: 'assistant',
@@ -769,7 +802,7 @@ test('askedForReferenceTitle: سؤال المناقشة «بعنوان… ومر
   ];
   assert.equal(askedForReferenceTitle(exam), false, 'سؤال أكاديمي فيه «مراجعات» لا يُفعّل البوابة');
 
-  // أسئلة المراجع الحقيقية ما تزال تعمل:
+  // Genuine reference questions must still be detected.
   assert.equal(
     askedForReferenceTitle([{ role: 'assistant', content: 'في أي عنوان بالتحديد تريد المراجع؟' }]),
     true,
@@ -818,9 +851,9 @@ test('جلسة المناقشة: الموجّه بلا قواعد مراجع و�
     currentStepKey: ''
   };
 
-  const def = buildSystemPrompt(base, { references: 5 });
+  const def = buildSystemPrompt(base);
   assert.ok(def.includes('# المناقشة الأكاديمية المستقلة'), 'قسم المناقشة موجود');
-  assert.ok(!def.includes('# أداة المراجع (نتائج حقيقية من قواعد البيانات)'), 'لا يُحقن قسم نتائج الأداة في defense');
+  assert.ok(!def.includes('# طلب المصادر: توجيه إلى مكتبة المنصة'), 'لا توجيه للمكتبة في المناقشة');
   assert.ok(!def.includes('العنوان الذي يريد مراجع عنه'), 'قاعدة «عنوان المراجع» غائبة في defense');
   assert.ok(def.includes('# هوية المناقِش: مستقل عن المشرفين'), 'هوية المناقِش المستقل موجودة');
   assert.ok(def.includes('[[defense-final]]'), 'وسم ختام الجلسة في قواعد المناقِش');
@@ -831,16 +864,31 @@ test('جلسة المناقشة: الموجّه بلا قواعد مراجع و�
   assert.ok(def.includes('المراجع خارج هذه الجلسة تماماً'), 'تنبيه defenseSection للمراجع موجود');
 
   // خارج المناقشة: كل ما سبق يبقى كما هو
-  const normal = buildSystemPrompt({ ...base, mode: 'normal', currentStepKey: 'literature' }, { references: 3 });
-  assert.ok(normal.includes('# أداة المراجع (نتائج حقيقية من قواعد البيانات)'), 'قسم الأداة يبقى في الوضع العادي');
-  assert.ok(normal.includes('العنوان الذي يريد مراجع عنه'), 'قاعدة «عنوان المراجع» تبقى في الوضع العادي');
-  assert.ok(normal.includes('أجيبيه بأداة المراجع'), 'قاعدة الطبقة الثانية للوضع العادي تبقى');
+  const normal = buildSystemPrompt({ ...base, mode: 'normal', currentStepKey: 'literature' });
+  assert.ok(normal.includes('# طلب المصادر: توجيه إلى مكتبة المنصة'), 'الوضع العادي يوجّه إلى المكتبة');
+  assert.ok(normal.includes('لا تبحثي في قواعد البيانات أو مكتبة المنصة'), 'المشرفة لا تبحث');
+  assert.ok(normal.includes('3-5 كلمات أو عبارات بحث دقيقة'), 'المشرفة تقترح كلمات بحث');
+  assert.ok(!normal.includes('نتائج حقيقية من قواعد البيانات'), 'الوضع العادي لا يعرض نتائج بحث');
   assert.ok(normal.includes('المشرفة البحثية الذكية'), 'الوضع العادي يبقي هوية المشرفة Zena');
 });
 
-/* ------------------ ميزانية الإدخال (تفادي 413 في المناقشة) ------------------ */
+test('المشرف لا يستدعي أداة بحث أثناء المحادثة', () => {
+  const chatSource = readFileSync(new URL('../src/services/chat.js', import.meta.url), 'utf8');
+  assert.ok(!chatSource.includes('literatureToolFor'), 'لا استدعاء لأداة الأدبيات في محادثة المشرف');
+  assert.ok(!chatSource.includes('wantsLiterature'), 'لا كشف طلب مراجع لتشغيل بحث آلي');
+  assert.ok(!chatSource.includes('references?.'), 'لا بقايا من متغير نتائج البحث المحذوف');
+  assert.ok(!chatSource.includes('foundReferences'), 'لا بناء أو حفظ نتائج مصادر في مسار المشرف');
+});
 
-/** موجّه مناقشة نموذجي: تعليمات + كتلة ملف + تعليمات ذيل (كما يبنيه المناقِش). */
+test('chat-send: لا يمسح SVG زر الإرسال بعد اكتمال الطلب', () => {
+  const sendSource = readFileSync(new URL('../public/js/chat-send.js', import.meta.url), 'utf8');
+  assert.ok(!sendSource.includes('restoreLabel'), 'لا يستعيد نصاً فارغاً فوق الأيقونة');
+  assert.ok(!sendSource.includes('button.textContent ='), 'لا يستبدل محتوى زر الإرسال');
+});
+
+/* ------------------ Input budget: avoid 413 errors in defense mode ------------------ */
+
+/** Builds a representative defense prompt with an attached file. */
 function defenseLikeSystem({ fileChars = 12000, extra = '' } = {}) {
   return [
     '# هوية المناقِش: مستقل عن المشرفين',
@@ -860,27 +908,25 @@ function defenseLikeSystem({ fileChars = 12000, extra = '' } = {}) {
 }
 
 test('payload-budget: تقدير الرموز متناسب مع الطول ومتناسق', () => {
-  // معامل payload-budget = 2.1 حرفاً/رمز (أدقّ من 2.6 في tokens.js لعربي)
+  // The 2.1 character ratio is more accurate for Arabic than tokens.js's 2.6.
   assert.equal(measurePayloadTokens('', []), 0);
   assert.equal(measurePayloadTokens(null, []), 0);
   assert.equal(measurePayloadTokens('abcd', []), Math.ceil(4 / 2.1), 'المعامل 2.1 حرفاً/رمز');
   assert.equal(measurePayloadTokens('س'.repeat(210), []), 100, '210 حرفاً = 100 رمز');
-  // الرسائل تُحتسب مع الـsystem لا بدلها
+  // Count messages in addition to the system prompt.
   assert.equal(
     measurePayloadTokens('س'.repeat(210), [{ role: 'user', content: 'س'.repeat(210) }]),
     200,
     'الرسائل تُضاف إلى الـsystem'
   );
-  // التقدير متناسب (لاقفزات) — مع هامش التقريب
+  // Token estimates should scale linearly within rounding tolerance.
   const one = measurePayloadTokens('س'.repeat(210), []);
   const twenty = measurePayloadTokens('س'.repeat(4200), []);
   assert.ok(Math.abs(twenty - one * 20) <= 2, `العلاقة خطّية تقريباً (${one} ⇒ ${twenty})`);
 });
 
 test('payload-budget: ميزانية كل نموذج على حدة وأضيق من ميزانية المزوّد', () => {
-  // gpt-oss-20b: حدّ TPM 8000 ⇒ 4000 · qwen3.8-27b: حدّ ITPM 7000 ⇒ 3600
-  // allam-2-7b: سياق 4096 فقط ⇒ 2800
-  // (الأرقام بهامش أمان تحت حدود Groq الفعلية — انظر payload-budget.js)
+  // Keep model budgets below their provider limits with a safety margin.
   assert.equal(MODEL_INPUT_BUDGETS['openai/gpt-oss-20b'], 4000);
   assert.equal(MODEL_INPUT_BUDGETS['qwen/qwen3.8-27b'], 3600);
   assert.equal(MODEL_INPUT_BUDGETS['allam-2-7b'], 2800);
@@ -889,16 +935,16 @@ test('payload-budget: ميزانية كل نموذج على حدة وأضيق م
   assert.equal(budgetForModel('qwen/qwen3.8-27b', 'groq'), 3600);
   assert.equal(budgetForModel('allam-2-7b', 'groq'), 2800);
 
-  // نموذج مجهول: نأخذ أضيق ميزانية معروفة (أأمن) لا أعرضها
+  // Unknown models use the narrowest known budget for safety.
   const unknown = budgetForModel('some/new-model', 'groq');
   assert.ok(unknown <= INPUT_BUDGETS.groq, 'النموذج المجهول لا يتجاوز ميزانية المزوّد');
   assert.ok(unknown >= 2000, 'ميزانية النموذج المجهول ليست بلا فائدة');
 
-  // ميزانية كل نموذج على حدة ولا تتجاوز ميزانية المزوّد العام
+  // Each model budget must stay within the provider budget.
   for (const [model, budget] of Object.entries(MODEL_INPUT_BUDGETS)) {
     assert.ok(budget <= INPUT_BUDGETS.groq, `${model} لا يتجاوز ميزانية Groq العامة`);
   }
-  // ولكل نموذج حدّه الخاص (أضيق أو مساوٍ)
+  // Verify each model-specific limit.
   assert.ok(
     MODEL_INPUT_BUDGETS['qwen/qwen3.8-27b'] <= MODEL_INPUT_BUDGETS['openai/gpt-oss-20b'],
     'qwen3.8 أضيق من gpt-oss-20b'
@@ -1126,14 +1172,14 @@ test('ai (Groq): 413 المعدّل (ITPM) لا يُعيد المحاولة بح
           maxTokens: 500
         }),
       (error) => {
-        // خطأ معدّل = مؤقّت (يُعاد لاحقاً)، لا خطأ طول دائم
+        // Rate-limit errors are temporary, not persistent length errors.
         assert.equal(error.status, 429, `خطأ معدّل مؤقّت (${error.status})`);
         assert.equal(error.reason, 'rate_limit', 'السبب مُعلَن: حدّ معدّل');
         assert.notEqual(error.reason, 'length', 'ليس خطأ طول');
         return true;
       }
     );
-    // لم نُعد المحاولة بحمولة أضيق: تضييق الميزانية لا يُصلح خطأ المعدّل
+    // Do not retry with a smaller payload; that cannot resolve a rate limit.
     assert.equal(calls, 1, `لا إعادة محاولة على خطأ معدّل (${calls})`);
   } finally {
     globalThis.fetch = originalFetch;
@@ -1392,8 +1438,88 @@ test('applyQuestionToState: لا يُكسر العدّاد ولا يفسد ال�
   assert.equal(state.asked, 5, 'العدّاد يزيد على الحالة الموجودة');
   assert.equal(state.done, false, 'بقية الحالة محفوظة');
   const empty = applyQuestionToState(undefined, {});
-  assert.equal(empty.asked, 1, 'حالة فارغة ⇒ عدّاد من 1');
+  assert.equal(empty.asked, 0, 'تقييم بلا سؤال لا يزيد العدّاد');
   assert.deepEqual(empty.askedQuestions, [], 'بلا نصّ سؤال ⇒ قائمة فارغة');
+});
+
+test('applyQuestionToState: يسجل التقييم دون عدّ سؤال إضافي', () => {
+  let state = applyQuestionToState({ asked: 2 }, { isCorrect: true });
+  assert.equal(state.asked, 2, 'التقييم بلا سؤال لا يزيد عدد الأسئلة');
+  assert.equal(state.correctCount, 1, 'الإجابة الصحيحة تُحتسب');
+  assert.equal(state.wrongCount, 0, 'لا تُحتسب كإجابة خاطئة');
+
+  state = applyQuestionToState(state, { question: 'ما منهجك؟', partKey: 'method', isCorrect: false });
+  assert.equal(state.asked, 3, 'السؤال الجديد يزيد العدّاد مرة واحدة');
+  assert.equal(state.correctCount, 1);
+  assert.equal(state.wrongCount, 1, 'الإجابة الخاطئة تُحتسب مع السؤال التالي');
+});
+
+test('parseDefenseGrade: يتحقق من تقييم منظم ويرفض النتائج الناقصة', () => {
+  assert.deepEqual(parseDefenseGrade('{"verdict":"partial","feedback":"أجبت عن جزء من السؤال."}'), {
+    verdict: 'partial',
+    feedback: 'أجبت عن جزء من السؤال.'
+  });
+  assert.deepEqual(parseDefenseGrade('{"verdict":"صحيحة جزئياً","feedback":"الإجابة أصابت جانباً واحداً."}'), {
+    verdict: 'partial',
+    feedback: 'الإجابة أصابت جانباً واحداً.'
+  });
+  assert.deepEqual(parseDefenseGrade('{"verdict":"خاطئة","reason":"الإجابة لا تتناول السؤال."}'), {
+    verdict: 'incorrect',
+    feedback: 'الإجابة لا تتناول السؤال.'
+  });
+  assert.equal(parseDefenseGrade('{"verdict":"unknown","feedback":"غير واضح"}'), null);
+  assert.equal(parseDefenseGrade('ليس JSON'), null);
+});
+
+test('defenseGradeInput: يحدّ طول كل حقل لتفادي تجاوز سياق المزوّد', () => {
+  const input = JSON.parse(defenseGradeInput({
+    question: 'س'.repeat(1000),
+    answer: 'ج'.repeat(3000),
+    examinerReply: 'ر'.repeat(1000),
+    thesisContext: 'ب'.repeat(2000)
+  }));
+  assert.equal(input.question.length, 500);
+  assert.equal(input.answer.length, 1200);
+  assert.equal(input.examinerReply.length, 400);
+  assert.equal(input.thesisContext.length, 500);
+  assert.ok(defenseGradeInput({
+    question: 'س'.repeat(1000),
+    answer: 'ج'.repeat(3000),
+    examinerReply: 'ر'.repeat(1000),
+    thesisContext: 'ب'.repeat(2000)
+  }).length < 3000);
+});
+
+test('applyQuestionToState: يحفظ الإجابة الجزئية ضمن تقييمات السؤال', () => {
+  const state = applyQuestionToState({ asked: 2 }, {
+    grade: { verdict: 'partial', feedback: 'ذكرت المنهج ولم تذكر سبب اختياره.' }
+  });
+  assert.equal(state.asked, 2);
+  assert.equal(state.partialCount, 1);
+  assert.equal(state.correctCount, 0);
+  assert.equal(state.wrongCount, 0);
+  assert.equal(state.answerGrades[0].verdict, 'partial');
+});
+
+test('applyQuestionToState: يحدّث كل عدّاد من دون استثناء', () => {
+  const correct = applyQuestionToState({ asked: 1 }, {
+    grade: { verdict: 'correct', feedback: 'أجبت بدقة.' }
+  });
+  const incorrect = applyQuestionToState({ asked: 1 }, {
+    grade: { verdict: 'incorrect', feedback: 'الإجابة لا تطابق السؤال.' }
+  });
+  assert.equal(correct.correctCount, 1);
+  assert.equal(incorrect.wrongCount, 1);
+});
+
+test('applyQuestionToState: يحتفظ بسبب تعذّر التقييم حتى تظهر الإحصائيات النهائية', () => {
+  const state = applyQuestionToState({ asked: 3 }, {
+    question: 'ما النتيجة؟',
+    gradeIssue: 'PROVIDERS_FAILED'
+  });
+  assert.equal(state.asked, 4);
+  assert.equal(state.gradeIssue, 'PROVIDERS_FAILED');
+  assert.equal(defenseProgress(state).ungradedCount, 4);
 });
 
 test('nextPendingPart: يختار أول جزء غير مغطّى ثم ينتهي', () => {
@@ -1424,20 +1550,101 @@ test('extractQuestionFromReply: يستخرج السؤال ولا يعدّ الر
     'ما معامل R2 في النموذج؟',
     'السؤال يُستخرج من آخر جملة استفهامية'
   );
+  assert.equal(
+    extractQuestionFromReply('إجابة دقيقة. السؤال التالي: ما معامل R2 في النموذج?'),
+    'ما معامل R2 في النموذج?',
+    'السؤال يُستخرج أيضاً بعلامة الاستفهام الإنجليزية'
+  );
   assert.equal(extractQuestionFromReply('إجابة نموذجية بلا أي سؤال.'), '', 'ردّ بلا استفهام ⇒ لا يُسجَّل');
   assert.equal(extractQuestionFromReply(''), '', 'ردّ فارغ ⇒ لا يُسجَّل');
 });
 
+test('reconcileDefenseState: يعيد احتساب سؤال محفوظ بعلامة استفهام إنجليزية', () => {
+  const messages = Array.from({ length: 24 }, (_, index) => ({
+    role: 'assistant',
+    content: `السؤال ${index + 1}${index === 23 ? '?' : '؟'}`
+  }));
+  const state = reconcileDefenseState({ asked: 23 }, messages);
+  assert.equal(state?.asked, 24, 'إعادة المزامنة تضمّ السؤال الذي لم يتعرف عليه العداد القديم');
+});
+
+test('reconcileDefenseState: لا يعدّ سؤالاً عارضاً في تقرير الإنهاء', () => {
+  const messages = [
+    { role: 'assistant', content: 'السؤال الأول؟' },
+    { role: 'assistant', content: 'السؤال الثاني؟' },
+    { role: 'assistant', content: 'السؤال الثالث؟' },
+    { role: 'assistant', content: 'التقييم النهائي: راجع المنهج. هل ستراجع النتائج؟' }
+  ];
+  const state = reconcileDefenseState({
+    done: true,
+    asked: 4,
+    parts: [],
+    askedQuestions: ['السؤال الأول؟', 'السؤال الثاني؟', 'السؤال الثالث؟', 'هل ستراجع النتائج؟']
+  }, messages);
+  assert.equal(state?.asked, 3);
+  assert.equal(state?.askedQuestions.length, 3);
+});
+
+test('وسم تقييم المناقشة: استخراج الصواب وحذف الوسم الداخلي من النص', () => {
+  const reply = 'إجابتك صحيحة.\n[[correct]]';
+  assert.equal(extractAnswerCorrectness(reply), 'correct');
+  assert.equal(stripAnswerCorrectnessTag(reply), 'إجابتك صحيحة.');
+  assert.equal(extractAnswerCorrectness('إجابة غير دقيقة.\n[[incorrect]]'), 'incorrect');
+  assert.equal(extractAnswerCorrectness('إجابة صحيحة.\n[[correct]]\nالسؤال التالي: ما النتيجة?'), 'correct');
+  assert.equal(extractAnswerCorrectness('إجابة صحيحة. [[ correct ]]'), 'correct');
+  assert.equal(stripAnswerCorrectnessTag('إجابة صحيحة. [[ correct ]]'), 'إجابة صحيحة.');
+  assert.equal(extractAnswerCorrectness('نص مقتبس [[correct]] بلا وسم ختامي'), null);
+  assert.equal(extractAnswerCorrectness('رد بلا تقييم'), null);
+});
+
 test('defenseProgress: يعرض السقف والباقي (لم يعد null)', () => {
   const parts = planParts(THESIS_SAMPLE);
-  const progress = defenseProgress({ asked: 3, parts, coveredParts: ['intro'], thesisFileId: 'file-1' });
+  const progress = defenseProgress({
+    asked: 3,
+    correctCount: 2,
+    wrongCount: 1,
+    parts,
+    coveredParts: ['intro'],
+    thesisFileId: 'file-1'
+  });
   assert.equal(progress.total, maxQuestionsFor(parts), 'السقف معروض');
   assert.equal(progress.remaining, maxQuestionsFor(parts) - 3, 'الباقي محسوب');
   assert.equal(progress.asked, 3, 'العدد المعروض');
+  assert.equal(progress.correctCount, 2, 'عدد الإجابات الصحيحة معروض');
+  assert.equal(progress.partialCount, 0, 'عدد الإجابات الجزئية معروض');
+  assert.equal(progress.wrongCount, 1, 'عدد الإجابات الخاطئة معروض');
+  assert.equal(progress.gradedCount, 3, 'عدد الإجابات المقيمة محسوب');
+  assert.equal(progress.ungradedCount, 0, 'لا توجد أسئلة غير مقيمة في الجلسة المكتملة');
+  assert.equal(progress.successRate, 67, 'نسبة النجاح مقربة إلى أقرب عدد صحيح');
   assert.equal(progress.currentPart?.key, 'problem', 'الجزء التالي معروض');
   assert.ok(progress.stageHint.includes('باقي'), 'التلميح يذكر المتبقي');
   const finished = defenseProgress({ asked: 8, parts, thesisFileId: 'file-1' });
   assert.equal(finished.remaining, 0, 'لا متبقي بعد بلوغ السقف');
+  assert.equal(finished.ungradedCount, 8, 'الأسئلة بلا تقييم تُعرض عند غياب التقييمات');
+  assert.equal(finished.successRate, null, 'لا تُختلق نسبة عند غياب الإجابات المقيمة');
+});
+
+test('renderDefenseStats: الإحصائيات تظهر بعد الإنهاء فقط', () => {
+  assert.equal(renderDefenseStats({ done: false, asked: 2 }), '', 'لا تظهر الإحصائيات قبل التقرير النهائي');
+  const html = renderDefenseStats({ done: true, asked: 3, correctCount: 2, wrongCount: 1, successRate: 67 });
+  assert.ok(html.includes('الأسئلة المطروحة'), 'يعرض عدد الأسئلة');
+  assert.ok(html.includes('إجابات صحيحة') && html.includes('إجابات صحيحة جزئياً') && html.includes('إجابات خاطئة'), 'يعرض الصحيح والجزئي والخاطئ');
+  assert.ok(html.includes('67%'), 'يعرض نسبة النجاح');
+});
+
+test('renderDefenseGradeNotice: يظهر سبب الفشل المحفوظ قبل إنهاء المناقشة', () => {
+  const html = renderDefenseGradeNotice({ gradeIssue: 'PROVIDERS_FAILED' });
+  assert.ok(html.includes('تعذّرت خدمة الذكاء الاصطناعي'));
+  assert.equal(renderDefenseGradeNotice({ gradeIssue: null }), '');
+});
+
+test('renderThesisCard: نموذج الرفع يوفّر حالة انتظار مفهومة', () => {
+  const html = renderThesisCard({ id: 'defense-id' }, { done: false, thesisFileId: null }, []);
+  assert.ok(html.includes('defense-thesis-form'), 'نموذج المناقشة مميز لحالة الرفع');
+  assert.ok(html.includes('data-upload-status') && html.includes('aria-live="polite"'), 'رسالة الانتظار قابلة للإعلان');
+  const shell = readFileSync(new URL('../public/js/app-shell.js', import.meta.url), 'utf8');
+  assert.ok(shell.includes('data-submitting'), 'الإرسال المتكرر ممنوع');
+  assert.ok(shell.includes('جارٍ تجهيز المناقشة'), 'الزر يوضح حالة الانتظار');
 });
 
 test('المناقشة: المناقِش يعرف الخطة والسقف في موجّهه (لا يسأل بلا نهاية)', () => {
@@ -1456,6 +1663,18 @@ test('المناقشة: المناقِش يعرف الخطة والسقف في �
   assert.ok(prompt.includes('المشكلة البحثية والأهداف'), 'الجزء المطلوب معروف');
   assert.ok(prompt.includes('ما مشكلة البحث؟'), 'أسئلته السابقة معروضة له فلا يكرّرها');
   assert.ok(prompt.includes('لا تتجاوز سقف'), 'قاعدة عدم تجاوز السقف');
+  assert.ok(prompt.includes('قيّمي الإجابة السابقة بوضوح'), 'تعليمات تقييم كل إجابة مفهومة');
+  assert.ok(!prompt.includes('[[correct]]') && !prompt.includes('[[incorrect]]'), 'لا يعتمد تقييم الإجابة على وسوم نصية');
+  const finalPrompt = buildSystemPrompt({
+    mode: 'defense',
+    defenseParts: parts,
+    defenseTotal: maxQuestionsFor(parts),
+    defenseCurrentPart: { key: 'problem', label: 'المشكلة البحثية والأهداف' },
+    defenseFinalRequested: true
+  });
+  assert.ok(finalPrompt.includes('هذه رسالة إنهاء صريحة من النظام'), 'طلب الإنهاء الصريح له أولوية');
+  assert.ok(finalPrompt.includes('لا تشترطي تغطية أجزاء الخطة'), 'لا يُرفض التقييم النهائي بسبب الأجزاء المتبقية');
+  assert.ok(!finalPrompt.includes('الجزء التالي المطلوب الآن'), 'توجيه الجزء التالي لا يعارض التقييم النهائي');
 });
 
 test('المناقشة: لا خطة ⇒ لا قسم خطة (وضع المشرف لا يتأثر)', () => {
@@ -1469,6 +1688,8 @@ test('المناقشة: عدّاد حقيقي في المسار (لا يبقى �
   const routeSrc = readFileSync(new URL('../src/routes/defense.js', import.meta.url), 'utf8');
   assert.ok(routeSrc.includes('recordDefenseQuestion'), 'المسار يسجّل السؤال في defense_state');
   assert.ok(routeSrc.includes('extractQuestionFromReply'), 'المسار يستخرج نصّ السؤال من الرد');
+  assert.ok(routeSrc.includes('defenseFinalRequested: true'), 'طلب الإنهاء يفعّل تعليمات التقييم النهائي');
+  assert.ok(routeSrc.includes('if (result.defenseEnded) await finishDefense'), 'التقرير الموسوم ينهي الجلسة');
   assert.ok(routeSrc.includes('buildDefensePlanForFile'), 'المسار يبني الخطة عند تثبيت الملف');
   const chatSrc = readFileSync(new URL('../src/services/chat.js', import.meta.url), 'utf8');
   assert.ok(!chatSrc.includes('asked +'), 'chat.js لا يزيد العدّاد بنفسه (المسار وحده)');
@@ -1682,4 +1903,3 @@ test('أرقام الواتساب: تُحمَّل الثلاثة عند إقلا
   assert.ok(adminSrc.includes('loadVoiceWhatsappMale()'), 'الإعدادات تقرأ رقم الشباب من settings قبل العرض');
   assert.ok(adminSrc.includes('loadVoiceWhatsappFemale()'), 'الإعدادات تقرأ رقم البنات من settings قبل العرض');
 });
-

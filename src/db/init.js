@@ -11,15 +11,9 @@ dotenv.config();
 
 const { Pool } = pg;
 
-/**
- * مخطط قاعدة البيانات — Node.js + PostgreSQL فقط للدخول والبيانات.
- * Firebase يُستخدم حصرياً لقناة إشعارات الدفع (FCM) — لا مصادقة Firebase ولا Firestore.
- * مستمد من النسخة السابقة للمنصة (Firestore): مستند UserDoc في مجموعة users
- * + المجموعة الفرعية للاستهلاك + الباقات + إعدادات المنصة وقائمة المديرين
- * + المجموعة الفرعية للإشعارات ونقطةات أجهزة FCM.
- */
+/** PostgreSQL schema for application data and authentication. Firebase is used only for push delivery. */
 
-/** جدول المستخدمين: الهوية من جوجل + الدور + الحالة + الرصيد. */
+/** User identity, role, account state, and balance. */
 const USERS_TABLE = `
   CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -43,7 +37,7 @@ const USERS_TABLE = `
   );
 `;
 
-/** الملف البحثي لكل مستخدم (علاقة واحد لواحد مع users) — يقابل حقل profile في UserDoc. */
+/** One-to-one research profile for each user. */
 const PROFILES_TABLE = `
   CREATE TABLE IF NOT EXISTS profiles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -71,9 +65,7 @@ const PROFILES_TABLE = `
   );
 `;
 
-/** الباقات المتاحة — تُدار من جدول plans كما كانت تُدار من مجموعة plans في Firestore.
- *  storage_mb = حصة التخزين التي يمنحها المدير لهذه الباقة،
- *  max_file_mb = أقصى حجم للملف الواحد — كلاهما يُضبط من صفحة الباقات فقط. */
+/** Plans and administrator-managed storage limits. */
 const PLANS_TABLE = `
   CREATE TABLE IF NOT EXISTS plans (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -95,7 +87,7 @@ const PLANS_TABLE = `
   );
 `;
 
-/** أدوار النظام + صلاحياتها (P2 يفعّل requireRole — هنا البنية فقط). */
+/** System roles and their permissions. */
 const ROLES_TABLE = `
   CREATE TABLE IF NOT EXISTS roles (
     code VARCHAR(50) PRIMARY KEY,
@@ -115,7 +107,7 @@ const ROLE_PERMISSIONS_TABLE = `
   );
 `;
 
-/** مسارات البحث: مسار واحد لكل درجة (بكالوريوس/ماجستير/دكتوراه/دبلوم/باحث مستقل). */
+/** One research path per degree level. */
 const RESEARCH_PATHS_TABLE = `
   CREATE TABLE IF NOT EXISTS research_paths (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -127,7 +119,7 @@ const RESEARCH_PATHS_TABLE = `
   );
 `;
 
-/** خطوات كل مسار — cost_type يطابق TOKEN_COSTS في constants.js (chat/translate/outline/sources/review). */
+/** Research-path steps; cost_type must match TOKEN_COSTS. */
 const RESEARCH_PATH_STEPS_TABLE = `
   CREATE TABLE IF NOT EXISTS research_path_steps (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -144,7 +136,7 @@ const RESEARCH_PATH_STEPS_TABLE = `
   );
 `;
 
-/** مسار الباحث الحالي (صف واحد لكل مستخدم). */
+/** Current research path for each user. */
 const USER_PATHS_TABLE = `
   CREATE TABLE IF NOT EXISTS user_paths (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -155,12 +147,7 @@ const USER_PATHS_TABLE = `
   );
 `;
 
-/**
- * تقدم الباحث في كل خطوة (لم يبدأ/جاري/تم + ملاحظة المخرجات).
- * step_key هو المعرّف الدلالي للخطوة ('topic'، 'proposal'، …) لأنه يبقى ثابتاٌ سواء
- * جاءت الخطوات من قاعدة البيانات (بعد db:seed) أو من التعريفات في src/data/research-paths.js،
- * فيبقى تقدّم الباحث صحيحاٌ في الحالتين. step_id يبقى اختيارياٌ للخطوات المخزّنة.
- */
+/** Per-user progress keyed by stable step_key, with optional database step_id. */
 const USER_STEP_PROGRESS_TABLE = `
   CREATE TABLE IF NOT EXISTS user_step_progress (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -174,7 +161,7 @@ const USER_STEP_PROGRESS_TABLE = `
   );
 `;
 
-/** المكتبة العلمية المركزية — يرفعها المدير مرة واحدة ويشير إليها كل باحث. */
+/** Shared scientific library. */
 const LIBRARY_ITEMS_TABLE = `
   CREATE TABLE IF NOT EXISTS library_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -193,7 +180,7 @@ const LIBRARY_ITEMS_TABLE = `
   );
 `;
 
-/** ترقيات آمنة لجدول المكتبة (ملف الكتاب + مصدر الاستيراد) — idempotent. */
+/** Idempotent library schema upgrades. */
 const LIBRARY_EXTRA_COLUMNS = `
   ALTER TABLE library_items ADD COLUMN IF NOT EXISTS file_name TEXT;
   ALTER TABLE library_items ADD COLUMN IF NOT EXISTS mime VARCHAR(100);
@@ -201,12 +188,11 @@ const LIBRARY_EXTRA_COLUMNS = `
   ALTER TABLE library_items ADD COLUMN IF NOT EXISTS external_url TEXT;
   ALTER TABLE library_items ADD COLUMN IF NOT EXISTS source_system VARCHAR(50) NOT NULL DEFAULT 'upload';
   ALTER TABLE library_items ADD COLUMN IF NOT EXISTS subjects TEXT;
-  -- نصّ بحث مطبَّع (بلا همزات/تاء مربوطة) ليجد الباحث العنصر بأي إملاء:
-  -- «اداره التغير» و«إدارة التغيير» و«ادارة التغيير» كلها تُطابق.
+  -- Normalized search text supports common Arabic spelling variants.
   ALTER TABLE library_items ADD COLUMN IF NOT EXISTS search_text TEXT NOT NULL DEFAULT '';
 `;
 
-/** مراجع الباحث: رابط لعنصر المكتبة أو مرجع يدوي — مع حالة القراءة وربط اختياري بخطوة. */
+/** User references linked to library items or entered manually. */
 const USER_REFERENCES_TABLE = `
   CREATE TABLE IF NOT EXISTS user_references (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -223,7 +209,7 @@ const USER_REFERENCES_TABLE = `
   );
 `;
 
-/** مفكرة الباحث: ملاحظات شخصية مع تثبيت ووسوم وربط اختياري بخطوة أو مرجع. */
+/** User notes with optional step and reference links. */
 const NOTES_TABLE = `
   CREATE TABLE IF NOT EXISTS notes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -239,7 +225,7 @@ const NOTES_TABLE = `
   );
 `;
 
-/** ملفات الباحث: الميتاداتا في PostgreSQL والبايتات في storage/users/. */
+/** User file metadata; file bytes are stored under storage/users/. */
 const FILES_TABLE = `
   CREATE TABLE IF NOT EXISTS files (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -255,7 +241,7 @@ const FILES_TABLE = `
   );
 `;
 
-/** محادثات المشرف الذكي + رسائلها (تكلفة النقاط تُسجَّل في usage_logs). */
+/** Supervisor conversations; usage is recorded in usage_logs. */
 const CONVERSATIONS_TABLE = `
   CREATE TABLE IF NOT EXISTS conversations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -269,12 +255,12 @@ const CONVERSATIONS_TABLE = `
   );
 `;
 
-/** ترقية جدول المحادثات: نتائج أداة المراجع (JSONB) لعرضها تحت الرد. */
+/** Adds stored reference results to existing conversations. */
 const CONVERSATIONS_REFERENCES_UPGRADE = `
   ALTER TABLE conversations ADD COLUMN IF NOT EXISTS references_found JSONB;
 `;
 
-/** ترقية بطاقة مراجعة اكتمال الخطوة (1F): تُملأ كشفياً بعد الرد ولا تُكتب في المسار إلا بحفظ الباحث. */
+/** Stores pending step reviews until the user accepts them. */
 const CONVERSATIONS_PENDING_REVIEW_UPGRADE = `
   ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pending_review JSONB;
 `;
@@ -291,11 +277,7 @@ const MESSAGES_TABLE = `
   );
 `;
 
-/**
- * جداول «المعلم» — مساعد تعليمي مستقل تماماً عن المشرف الذكي:
- * جداول منفصلة (لا تلمس conversations/messages ولا خطوات الرحلة ولا الذاكرة).
- * مهمته: تعليم الباحث كيف يهيكل بحثه + ترجمة ملفاته + تلخيص من نتائج بحث حقيقية.
- */
+/** Separate conversation and message tables for the teaching assistant. */
 const ASSISTANT_CONVERSATIONS_TABLE = `
   CREATE TABLE IF NOT EXISTS assistant_conversations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -328,12 +310,7 @@ const ASSISTANT_INDEXES = `
   ALTER TABLE assistant_conversations ADD COLUMN IF NOT EXISTS last_task VARCHAR(50);
 `;
 
-/**
- * ذاكرة «المعلم» الخاصة — منفصلة تماماً عن ذاكرة المشرف (supervisor_memory).
- * قرار صاحب المنتج: لكل شخصية ذاكرته — المشرف يقرأ supervisor_memory، والمعلم
- * يقرأ هذه، والمناقش لا يقرأ أي ذاكرة خارج جلسته. لا تُسجَّل هنا جلسات المشرف
- * أو المناقشة إطلاقاً (العزل على مستوى الجداول لا البرومبت فقط).
- */
+/** Separate teaching-assistant memory; supervisor and defense sessions are never stored here. */
 const ASSISTANT_MEMORY_TABLE = `
   CREATE TABLE IF NOT EXISTS assistant_memory (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -343,7 +320,7 @@ const ASSISTANT_MEMORY_TABLE = `
   );
 `;
 
-/** مراقبة مزودي الذكاء الاصطناعي (زمن الاستجابة والحالة والأخطاء). */
+/** AI-provider latency and error monitoring. */
 const AI_REQUESTS_TABLE = `
   CREATE TABLE IF NOT EXISTS ai_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -367,7 +344,7 @@ const USAGE_LOGS_TABLE = `
   );
 `;
 
-/** إعدادات المنصة القابلة للتحرير (اسم المنصة، الدعم، وضع الصيانة، الإعلان). */
+/** Administrator-managed platform settings. */
 const SETTINGS_TABLE = `
   CREATE TABLE IF NOT EXISTS settings (
     key VARCHAR(100) PRIMARY KEY,
@@ -376,24 +353,7 @@ const SETTINGS_TABLE = `
   );
 `;
 
-/**
- * Firebase للإشعارات فقط — الدخول يبقى Google OAuth والبيانات في PostgreSQL.
- *
- * توضيح مهم: Firebase هنا = Cloud Messaging (FCM) لإرسال إشعارات الدفع فقط.
- * لا نستخدم Firebase Authentication ولا Firestore إطلاقاً: الدخول يتم عبر
- * Google OAuth 2.0 من Google Cloud Console، وكل بيانات المستخدمين في PostgreSQL.
- *
- * إعدادات الواجهة (مكتبة Firebase JS للإشعارات فقط، لا Auth ولا Firestore):
- *   FIREBASE_API_KEY / FIREBASE_AUTH_DOMAIN / FIREBASE_PROJECT_ID
- *   FIREBASE_STORAGE_BUCKET / FIREBASE_MESSAGING_SENDER_ID / FIREBASE_APP_ID
- *   FIREBASE_VAPID_KEY (اختياري — مفتاح Web Push من Cloud Messaging)
- *
- * الإرسال من الخادم عبر Firebase Admin SDK (FCM):
- *   FCM_PROJECT_ID + FCM_CLIENT_EMAIL + FCM_PRIVATE_KEY (من Service Account)
- * الاعتماد firebase-admin اختياري: بدونه تُحفظ الإشعارات داخل الموقع فقط.
- *
- * إشعارات داخل التطبيق لكل مستخدم (بديل مجموعة users/{uid}/notifications في النسخة القديمة).
- */
+/** In-app notifications; Firebase Cloud Messaging is optional and used only for push delivery. */
 const NOTIFICATIONS_TABLE = `
   CREATE TABLE IF NOT EXISTS notifications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -407,7 +367,7 @@ const NOTIFICATIONS_TABLE = `
   );
 `;
 
-/** نقطةات أجهزة الإشعارات (FCM) — بديل حقل fcmTokens الذي كان في مستند Firestore. */
+/** Registered push-notification device tokens. */
 const DEVICE_TOKENS_TABLE = `
   CREATE TABLE IF NOT EXISTS device_tokens (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -421,22 +381,19 @@ const DEVICE_TOKENS_TABLE = `
   );
 `;
 
-/** ترقية تفضيل الإشعارات على جدول users (يقابل notificationsEnabled في النسخة القديمة). */
+/** Adds notification preferences to existing users. */
 const USERS_NOTIFICATIONS_COLUMN = `
   ALTER TABLE users ADD COLUMN IF NOT EXISTS notifications_enabled BOOLEAN NOT NULL DEFAULT false;
 `;
 
-/** فهارس الإشعارات والنقطةات — تُنشأ مرة واحدة فقط (idempotent). */
+/** Idempotent notification indexes. */
 const NOTIFICATION_INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id) WHERE read = false;
   CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(user_id) WHERE enabled = true;
 `;
 
-/**
- * إيميلات المديرين (يعدّلها المدير بنفسه من الإعدادات فقط).
- * تُقرأ مع ADMIN_EMAILS من .env (خطة نجاة ثابتة لا تُحذف).
- */
+/** Database-managed administrators; ADMIN_EMAILS remains the recovery path. */
 const ADMINS_TABLE = `
   CREATE TABLE IF NOT EXISTS admins (
     email VARCHAR(255) PRIMARY KEY,
@@ -445,11 +402,7 @@ const ADMINS_TABLE = `
   );
 `;
 
-/**
- * طرق الدفع اليدوية — يضيفها المدير ويعدّلها من صفحة الإعدادات.
- * كل طريقة تحمل عملتها (LYD/USD) وتفاصيل التحويل (رقم الحساب/الIBAN) التي
- * يراها الباحث عند تقديم طلب الدفع، والمدير عند التأكيد.
- */
+/** Administrator-managed manual payment methods. */
 const PAYMENT_METHODS_TABLE = `
   CREATE TABLE IF NOT EXISTS payment_methods (
     code VARCHAR(50) PRIMARY KEY,
@@ -463,10 +416,7 @@ const PAYMENT_METHODS_TABLE = `
   );
 `;
 
-/**
- * طلبات الدفع: الباحث يطلب باقة ويدفع خارج المنصة (يدوي)، والمدير يؤكد.
- * عند التأكيد: يُنقل الب researcher إلى باقته وتُضاف نقاطها (من services/plans).
- */
+/** Manual payment requests awaiting administrator review. */
 const PAYMENT_REQUESTS_TABLE = `
   CREATE TABLE IF NOT EXISTS payment_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -488,18 +438,14 @@ const PAYMENT_REQUESTS_TABLE = `
   );
 `;
 
-/** فهارس لطلبات الدفع (أحدث الطلبات + الطلبات المعلّقة للمراجعة). */
+/** Indexes for recent and pending payment requests. */
 const PAYMENT_INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_payment_requests_user ON payment_requests (user_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_payment_requests_status ON payment_requests (status, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_payment_requests_reference_code ON payment_requests (reference_code);
 `;
 
-/**
- * حماية قاعدة بيانات لحساب المدير (طبقة أخيرة — لا تعتمد على الكود وحده):
- * يمنع إيقاف/تعطيل أي مستخدم دوره admin حتى لو مرّ استعلام مباشر على القاعدة.
- * مُطبَّق كـ trigger على users. آمن للتشغيل المتكرر (إذا كان غير موجود).
- */
+/** Database triggers prevent administrator accounts from being disabled or deleted. */
 const ADMIN_ACCOUNT_GUARD = `
 DO $$
 BEGIN
@@ -538,8 +484,7 @@ BEGIN
 END $$;
 `;
 /**
- * يوحّد الهمزات والتاء المربوطة ويزيل التشكيل — نفس التطبيع الذي تستخدمه
- * خدمة المراجع، حتى يتطابق نصّ البحث المخزَّن مع ما يكتبه الباحث.
+ * Uses the same Arabic normalization as the literature service so stored and queried text match.
  */
 function normalizeArabic(text) {
   return String(text || '')
@@ -552,7 +497,7 @@ function normalizeArabic(text) {
     .toLowerCase();
 }
 
-/** يبني نصّ البحث المطبَّع لعنصر مكتبة (يُخزَّن في library_items.search_text). */
+/** Backfills normalized search text for older library items. */
 async function backfillLibrarySearchText(pool) {
   const { rows } = await pool.query(
     `SELECT id, title, authors, source, subjects, field, external_url
@@ -570,19 +515,14 @@ async function backfillLibrarySearchText(pool) {
   console.log(`   · تم تحديث نصّ البحث لـ ${rows.length} عنصر مكتبة.`);
 }
 
-/** مفتاح عملة الموقع في جدول settings (يضبطه المدير من الإعدادات). */
+/** Default site-currency seed. */
 const SETTINGS_CURRENCY_SEED = `
   INSERT INTO settings (key, value, updated_at)
   VALUES ('site_currency', 'LYD', NOW())
   ON CONFLICT (key) DO NOTHING;
 `;
 
-/**
- * المشرفون الأكاديميون — بديل صفحة «المديرين».
- * يُضاف بريد المشرف من صفحة الإعدادات، ويأخذ دور supervisor وصلاحياته في
- * جدول role_permissions (يضبطها المدير مثل أي باحث). لا يوجد «مدير» إلا
- * إيميلات ADMIN_EMAILS في .env كخطة نجاة واحدة.
- */
+/** Academic supervisors and their separately managed permissions. */
 const SUPERVISORS_TABLE = `
   CREATE TABLE IF NOT EXISTS supervisors (
     email VARCHAR(255) PRIMARY KEY,
@@ -591,7 +531,7 @@ const SUPERVISORS_TABLE = `
   );
 `;
 
-/** فهارس مساعدة لتسريع الاستعلامات الأكثر استخداماً. */
+/** Indexes for frequently queried tables. */
 const INDEXES = `
   CREATE INDEX IF NOT EXISTS usage_logs_user_id_created_at_idx
     ON usage_logs (user_id, created_at DESC);
@@ -613,10 +553,7 @@ const INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_logs(user_id);
 `;
 
-/**
- * ترقية آمنة لقواعد البيانات القائمة (أُنشئت قبل توسيع المخطط):
- * كل عبارة idempotent — تُنفَّذ فقط إن كان العمود/القيد ناقصاً.
- */
+/** Idempotent upgrades for existing databases. */
 const USERS_EXTRA_COLUMNS = `
   ALTER TABLE users ADD COLUMN IF NOT EXISTS photo_url TEXT;
   ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub VARCHAR(255);
@@ -640,7 +577,7 @@ const USERS_GOOGLE_SUB_UNIQUE = `
   END $$;
 `;
 
-/** ترقية جدول الباقات: أعمدة العرض التي تُبنى منها بطاقات الأسعار في الموقع. */
+/** Adds plan-display fields to existing schemas. */
 const PLANS_EXTRA_COLUMNS = `
   ALTER TABLE plans ADD COLUMN IF NOT EXISTS tagline TEXT;
   ALTER TABLE plans ADD COLUMN IF NOT EXISTS period VARCHAR(100) DEFAULT 'شهرياً';
@@ -656,7 +593,7 @@ const PLANS_EXTRA_COLUMNS = `
   ALTER TABLE plans ADD COLUMN IF NOT EXISTS period_days INTEGER;
 `;
 
-/** ترحيل آمن لجدول طلبات الدفع: كود التفعيل الستة أرقام ورقم الواتساب وقت الطلب. */
+/** Adds activation-code and WhatsApp fields to existing payment requests. */
 const PAYMENT_REQUESTS_EXTRA_COLUMNS = `
   ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS reference_code VARCHAR(6);
   ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(20);
@@ -664,7 +601,7 @@ const PAYMENT_REQUESTS_EXTRA_COLUMNS = `
   UPDATE payment_methods SET is_active = false WHERE code NOT IN ('bank_transfer', 'cash_office');
 `;
 
-/** ترقية جدول الملف البحثي: بقية حقول نموذج التسجيل (onboarding). */
+/** Adds remaining onboarding profile fields. */
 const PROFILES_EXTRA_COLUMNS = `
   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS full_name VARCHAR(255);
   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS age INTEGER;
@@ -681,7 +618,7 @@ const PROFILES_EXTRA_COLUMNS = `
   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS wa_country VARCHAR(2);
 `;
 
-/** تعبئة رجعية لعمود wa_country من مفتاح الرقم الدولي المحفوظ (للملفات القديمة فقط). */
+/** Backfills country codes for legacy WhatsApp numbers. */
 const WA_COUNTRY_BACKFILL = `
   UPDATE profiles SET wa_country = CASE
     WHEN whatsapp_number LIKE '+218%' THEN 'LY'
@@ -711,7 +648,7 @@ const WA_COUNTRY_BACKFILL = `
   WHERE (wa_country IS NULL OR wa_country = '') AND whatsapp_number IS NOT NULL AND whatsapp_number <> '';
 `;
 
-/** ربط plan_code بجدول الباقات — يُضاف مرة واحدة فقط (idempotent). */
+/** Adds the plan foreign key when missing. */
 const USERS_PLAN_FOREIGN_KEY = `
   DO $$
   BEGIN
@@ -723,12 +660,7 @@ const USERS_PLAN_FOREIGN_KEY = `
   END $$;
 `;
 
-/**
- * ترقية المرحلة الأولى: ربط التقدم والملاحظات والمراجع والملفات بـ step_key
- * (المعرّف الدلالي للخطوة) بدل step_id وحده، حتى يعمل «مسار البحث» من
- * التعريفات البرمجية في src/data/research-paths.js بدون الحاجة إلى البذرة.
- * كل عبارة idempotent وتعمل على قاعدة قائمة أو جديدة.
- */
+/** Adds stable step_key links for seeded and runtime-defined research paths. */
 const STEP_KEY_UPGRADE = `
   ALTER TABLE research_path_steps ADD COLUMN IF NOT EXISTS step_key VARCHAR(100);
   ALTER TABLE user_references ADD COLUMN IF NOT EXISTS step_key VARCHAR(100);
@@ -756,14 +688,7 @@ const STEP_KEY_UPGRADE = `
   END $$;
 `;
 
-/**
- * ذاكرة المشرف الذكي لكل باحث (صف واحد لكل مستخدم).
- * ما تُخزَّن هنا لا يحسبه البرومبت بل الكود فقط:
- *   memory         → {{memory_summary}} ملخّص ما استقرّ في جلسات سابقة
- *   open_task      → {{open_task}} المهمة المتفق عليها للمرة القادمة
- *   strikes        → {{strikes}} عدّاد التنبيهات على الخروج عن النطاق/الاستهجار
- *   strikes_updated_at → لتصفير العدّاد بعد فترة هدوء
- */
+/** One supervisor-memory row per user. */
 const SUPERVISOR_MEMORY_TABLE = `
   CREATE TABLE IF NOT EXISTS supervisor_memory (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -775,12 +700,7 @@ const SUPERVISOR_MEMORY_TABLE = `
   );
 `;
 
-/**
- * ترقية المشرف الذكي:
- * - usage_logs: تفصيل الاستهلاك الحقيقي (إدخال/إخراج/مزوّد/نموذج/معامل السعر)
- *   لأن السعر صار متغيّراً حسب الاستهلاك الفعلي لا سعراً ثابتاً لكل رسالة.
- * - conversations: وضع الجلسة (normal/defense) + حالة المناقشة (عدّاد الأسئلة).
- */
+/** Adds usage details and independent defense-session state. */
 const SUPERVISOR_UPGRADE = `
   ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS input_tokens INTEGER;
   ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS output_tokens INTEGER;
@@ -796,13 +716,13 @@ const SUPERVISOR_UPGRADE = `
   DELETE FROM settings WHERE key = 'ai_custom_links';
 `;
 
-/** فهارس المشرف الذكي (استعلامات الذاكرة تكرّر مع كل رسالة). */
+/** Indexes for supervisor memory queries. */
 const SUPERVISOR_INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_usage_logs_user_created ON usage_logs(user_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at DESC);
 `;
 
-/** فهارس المرحلة الأولى على المفاتيح الجديدة. */
+/** Indexes for stable step keys. */
 const STEP_KEY_INDEXES = `
   CREATE UNIQUE INDEX IF NOT EXISTS uq_path_steps_key ON research_path_steps(path_id, step_key) WHERE step_key IS NOT NULL;
   CREATE INDEX IF NOT EXISTS idx_user_refs_step_key ON user_references(user_id, step_key);
@@ -811,10 +731,7 @@ const STEP_KEY_INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_conversations_step_key ON conversations(user_id, step_key);
 `;
 
-/**
- * ينشئ قاعدة البيانات المستهدفة إن لم تكن موجودة.
- * يتصل بقاعدة الصيانة postgres، وإذا فشل الاتصال بها نُكمل ونترك الخطأ يظهر عند الاتصال بالقاعدة الهدف.
- */
+/** Creates the target database when missing, then initializes its schema. */
 async function ensureDatabaseExists(target) {
   const adminPool = new Pool({
     connectionString: adminConnectionString(target.connectionString),
@@ -881,7 +798,7 @@ async function initializeDatabase() {
     await pool.query(PAYMENT_METHODS_TABLE);
     await pool.query(PAYMENT_REQUESTS_TABLE);
     await pool.query(SUPERVISOR_MEMORY_TABLE);
-    // ترقيات آمنة لقواعد البيانات القائمة (كل عبارة idempotent)
+    // Apply idempotent upgrades to existing databases.
     await pool.query(USERS_EXTRA_COLUMNS);
     await pool.query(USERS_NOTIFICATIONS_COLUMN);
     await pool.query(PROFILES_EXTRA_COLUMNS);
@@ -903,7 +820,7 @@ async function initializeDatabase() {
     await pool.query(ASSISTANT_INDEXES);
     await pool.query(PAYMENT_INDEXES);
 
-    // بذرة خفيفة: عملة الموقع + طرق الدفع الافتراضية (مرة واحدة، ولا نلمس تعديلات المدير)
+    // Seed defaults without overwriting administrator-managed settings.
     await pool.query(SETTINGS_CURRENCY_SEED);
     for (const [index, method] of DEFAULT_PAYMENT_METHODS.entries()) {
       await pool.query(
@@ -914,8 +831,7 @@ async function initializeDatabase() {
       );
     }
 
-    // تعبئة نصّ البحث المطبَّع للعناصر القديمة (مرة واحدة لكل عنصر):
-    // «اداره التغير» يجب أن تجد «إدارة التغيير» — بحث ResearchGate/المنصة متسامح مع الإملاء.
+    // Backfill normalized search text for older library items.
     await backfillLibrarySearchText(pool);
 
     console.log(`Database initialized successfully on ${target.host}:${target.port}/${target.database}.`);

@@ -1,30 +1,15 @@
 import { pool } from '../db/client.js';
 import { TOKEN_RATES, priceMultiplier } from '../constants.js';
 
-/**
- * تسعير واستهلاك رصيد الباحث (السعر صار متغيّراً بحسب الاستهلاك الفعلي).
- *
- * المسار في كل رسالة:
- *   1) حجز:  estimateReservation() → deductTokens()  (يتركّب مع شرط الرصيد)
- *   2) نداء:  runSupervisor() يرجع usage الحقيقي من المزوّد
- *   3) تسوية: chargeUsage() يحسب الفعلي، والفرق يُردّ بـ refundTokens()
- *   4) فشل:  refundTokens() تردّ الحجز كاملة ولا يُكتب anything للباحث.
- *
- * كل خطوة ذرّية في جملة SQL واحدة (UPDATE … WHERE balance >= x) فلا يمكن
- * أن يخصم رصيداً سالباً مع رسالتين متزامنتين.
- */
+/** Reserves credits before provider calls and settles against actual usage atomically. */
 
-/** تقدير النقاط من النص: العربية/الإنجليزية ≈ ٢.٦ حرفاً للنقطة. */
+/** Estimates tokens from text length. */
 export function estimateTokens(text) {
   const length = String(text || '').length;
   return Math.ceil(length / 2.6);
 }
 
-/**
- * الحجز المسبق: أقصى ما قد تكلّفه الرسالة = نقاط الإدخال التقديرية بسعر
- * الإدخال + سقف الرد بسعر الإخراج، مع هامش أمان صغير. كل ما يُحجز يُردّ
- * بعد الرد، فالفارق بين الحجز والفعلي لا يكلّف الباحث شيئاً.
- */
+/** Reserves the maximum estimated cost; unused credits are refunded after the response. */
 export function estimateReservation({ system = '', messages = [], replyCap = 900 } = {}) {
   const inputTokens = estimateTokens(system) + messages.reduce((sum, message) => sum + estimateTokens(message.content), 0);
   const inCredits = (inputTokens / 1000) * TOKEN_RATES.inputPer1k;
@@ -36,10 +21,7 @@ export function estimateReservation({ system = '', messages = [], replyCap = 900
   };
 }
 
-/**
- * التسعير الفعلي من usage الذي يرجعه المزوّد. السعران منفصلان لأن سعر
- * الإدخال يختلف عن الإخراج؛ والمعامل يغطي التكلفة + الهامش.
- */
+/** Calculates the charge from provider-reported input and output usage. */
 export function chargeUsage({ inputTokens = 0, outputTokens = 0, multiplier = priceMultiplier() } = {}) {
   const inCredits = (Number(inputTokens) / 1000) * TOKEN_RATES.inputPer1k;
   const outCredits = (Number(outputTokens) / 1000) * TOKEN_RATES.outputPer1k;
@@ -52,13 +34,7 @@ export function chargeUsage({ inputTokens = 0, outputTokens = 0, multiplier = pr
   };
 }
 
-/**
- * يوحّد أسماء حقول الاستهلاك بين المزوّدين (OpenAI/Grok مقابل Gemini).
- *
- * ملاحظة مهمة: نماذج Gemini المفكّرة (مثل 3.8-flash) تُرجع نقاط التفكير في
- * thoughtsTokenCount **خارج** candidatesTokenCount، وتحتسب على الباحث كإخراج.
- * نضمّها هنا حتى لا نحتسب 10% فقط من الاستهلاك الفعلي.
- */
+/** Normalizes provider usage fields, including Gemini thought tokens. */
 export function normalizeUsage(usage) {
   if (!usage || typeof usage !== 'object') return { inputTokens: 0, outputTokens: 0 };
 
@@ -74,7 +50,7 @@ export function normalizeUsage(usage) {
   };
 }
 
-/** يخصم رصيداً بحدّ أدنى من الرصيد: ذرّي تماماً. false = رصيد غير كافٍ. */
+/** Atomically deducts credits only when the balance is sufficient. */
 export async function deductCredits(userId, credits) {
   const amount = Math.max(0, Math.ceil(Number(credits) || 0));
   if (!amount) return true;
@@ -89,7 +65,7 @@ export async function deductCredits(userId, credits) {
   return rows.length > 0;
 }
 
-/** يردّ رصيداً (فرق الحجز، أو كامل الحجز عند فشل المزوّدين). */
+/** Refunds unused or failed-request reservations. */
 export async function refundCredits(userId, credits) {
   const amount = Math.max(0, Math.ceil(Number(credits) || 0));
   if (!amount) return;
@@ -100,11 +76,7 @@ export async function refundCredits(userId, credits) {
   );
 }
 
-/**
- * تسجيل الاستهلاك بتفصيله: نقاط الإدخال/الإخراج + المزوّد + النموذج + معامل
- * السعر. هذا هو السجل الذي نحتاجه لأي اعتراض من العميل عن الفاتورة.
- * يفشل بصمت حتى لا يعطّل الرد.
- */
+/** Records detailed usage for billing review; logging failures do not block responses. */
 export async function logUsage(userId, {
   type,
   tokens = 0,
@@ -137,7 +109,7 @@ export async function logUsage(userId, {
   }
 }
 
-/** رصيد الباحث الحالي (لرسالة الرفض قبل الإرسال). */
+/** Returns the current account balance. */
 export async function balanceOf(userId) {
   const { rows } = await pool.query('SELECT tokens_balance FROM users WHERE id = $1', [userId]);
   return Number(rows[0]?.tokens_balance || 0);

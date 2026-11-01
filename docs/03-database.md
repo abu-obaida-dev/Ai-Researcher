@@ -1,70 +1,70 @@
-# 03 — قاعدة البيانات
+# 03 — Database
 
-## الفلسفة
-- **PostgreSQL فقط**: علاقات حقيقية + ذرّية + معاملات. كل بيانات المستخدمين هنا — لا Firestore.
-- **Idempotent**: كل عبارة `IF NOT EXISTS` / `ON CONFLICT DO NOTHING` — شغّل `db:init` و`db:seed` بأمان أي عدد من المرات.
-- **سقوط آمن**: الكود يعمل قبل البذرة (مسارات من `research-paths.js`، باقات من `DEFAULT_PLANS`، صلاحيات من `DEFAULT_ROLES`).
+## Philosophy
+- **PostgreSQL only:** Real relationships, atomicity, and transactions. All user data lives here — no Firestore.
+- **Idempotent:** Every statement uses `IF NOT EXISTS` / `ON CONFLICT DO NOTHING` — run `db:init` and `db:seed` safely any number of times.
+- **Safe fallback:** The code works before seeding (paths from `research-paths.js`, plans from `DEFAULT_PLANS`, permissions from `DEFAULT_ROLES`).
 
-## الجداول (20 جدولاً)
+## Tables (20 total)
 
-### الهوية والملف
-| الجدول | الأعمدة المفتاحية | الدور |
+### Identity and Profile
+| Table | Key Columns | Role |
 |---|---|---|
-| `users` | `id uuid`, `email unique`, `google_sub unique`, `role`, `plan_code → plans.code`, `tokens_balance/used/granted`, `onboarding_complete`, `is_active/disabled/deleted` | الحساب + الرصيد + الباقة |
-| `profiles` | `user_id unique → users`, `full_name`, `research_field/title`, `degree_level`, `university/faculty`, `research_stage`, `methodology`, `citation_style` | الملف البحثي (واحد لواحد) |
+| `users` | `id uuid`, `email unique`, `google_sub unique`, `role`, `plan_code → plans.code`, `tokens_balance/used/granted`, `onboarding_complete`, `is_active/disabled/deleted` | Account + balance + plan |
+| `profiles` | `user_id unique → users`, `full_name`, `research_field/title`, `degree_level`, `university/faculty`, `research_stage`, `methodology`, `citation_style` | Research profile (one-to-one) |
 
-### الباقات والأدوار
-| الجدول | المفتاح | ملاحظة |
+### Plans and Roles
+| Table | Key | Notes |
 |---|---|---|
-| `plans` | `code unique` | `tokens` = نقاط الباقة، `storage_mb` = حصتها، `role_code` = دورها، `features` نص بأسطر |
-| `roles` | `code pk` | أدوار النظام (admin/supervisor/researcher/free…) |
-| `role_permissions` | `(role_code, permission)` | صلاحية واحدة لكل صف |
-| `admins` | `email unique` | مديرون من اللوحة (إضافة لـ `ADMIN_EMAILS`) |
-| `supervisors` | `email unique` | مشرفون بشريون — دورهم `supervisor` |
+| `plans` | `code unique` | `tokens` = plan credits, `storage_mb` = storage allowance, `role_code` = assigned role, `features` = newline-delimited text |
+| `roles` | `code pk` | System roles (admin/supervisor/researcher/free…) |
+| `role_permissions` | `(role_code, permission)` | One permission per row |
+| `admins` | `email unique` | Admins from the panel (in addition to `ADMIN_EMAILS`) |
+| `supervisors` | `email unique` | Human supervisors — their role is `supervisor` |
 
-### المسار والتقدم
-| الجدول | العلاقة |
+### Journey and Progress
+| Table | Relationship |
 |---|---|
-| `research_paths` | `degree_level unique` — مسار لكل درجة |
-| `research_path_steps` | `path_id → paths` + `(path_id, step_no)` unique + `step_key` الدلالي |
+| `research_paths` | `degree_level unique` — one path per degree |
+| `research_path_steps` | `path_id → paths` + `(path_id, step_no)` unique + semantic `step_key` |
 | `user_step_progress` | `(user_id, step_key)` unique + `status` + `output_note` + `completed_at` |
 
-> **لماذا `step_key` دلالي؟** لأن ترتيب الخطوات قد يتغير — التقدم مربوط بالمعنى (`topic`, `literature`…) لا بالرقم. يُستخدم أيضاً في `notes.step_key` و`user_references.step_key` و`files.step_key` للربط بالمسار.
+> **Why is `step_key` semantic?** Because step order can change — progress is tied to meaning (`topic`, `literature`…), not to a number. It is also used in `notes.step_key`, `user_references.step_key`, and `files.step_key` to link them to the journey.
 
-### المحادثات والذاكرة
-| الجدول | المحتوى |
+### Conversations and Memory
+| Table | Contents |
 |---|---|
-| `conversations` | `user_id`, `title`, `step_key`, `mode` (normal/defense), `defense_state jsonb {asked}`, `references_found jsonb`, `pending_review jsonb` (بطاقة مراجعة اكتمال الخطوة)، `provider` |
+| `conversations` | `user_id`, `title`, `step_key`, `mode` (normal/defense), `defense_state jsonb {asked}`, `references_found jsonb`, `pending_review jsonb` (step-completion review card), `provider` |
 | `messages` | `conversation_id → conversations`, `role` (user/assistant), `content`, `tokens_used`, `model` |
-| `supervisor_memory` | `user_id unique`, `memory` (≤1500 حرف), `open_task` (≤300), `strikes`, `strikes_updated_at` |
-| `ai_requests` | كل محاولة مزوّد: `provider/model/latency/status/error` — للتشخيص |
-| `usage_logs` | كل استهلاك: `type/tokens_used/input_tokens/output_tokens/provider/model/multiplier/summary` — للفوترة والاعتراضات |
+| `supervisor_memory` | `user_id unique`, `memory` (≤1500 characters), `open_task` (≤300), `strikes`, `strikes_updated_at` |
+| `ai_requests` | Each provider attempt: `provider/model/latency/status/error` — for diagnostics |
+| `usage_logs` | Each usage event: `type/tokens_used/input_tokens/output_tokens/provider/model/multiplier/summary` — for billing and disputes |
 
-> **ازدواج مصطلح:** الواجهة تقول «نقاط» والقاعدة تقول `tokens_*` — المقصود شيء واحد (رصيد الاستهلاك)، و`tokens` هنا ليس توكنات نموذج لغوي بل عملة المنصة.
+> **Terminology note:** The interface says “credits” while the database says `tokens_*` — both refer to the same thing (usage balance). Here, `tokens` are platform currency, not language-model tokens.
 
-### مساحة العمل
-| الجدول | المحتوى |
+### Workspace
+| Table | Contents |
 |---|---|
-| `library_items` | المكتبة المركزية: `title/authors/year/venue/doi/external_url/stored_path/search_text` |
-| `user_references` | مراجع الباحث: `library_item_id?` أو حقول يدوية `custom_*` + `status` (to_read/reading/read/cited — أربع حالات) + `step_key` |
+| `library_items` | Central library: `title/authors/year/venue/doi/external_url/stored_path/search_text` |
+| `user_references` | Researcher references: `library_item_id?` or manually entered `custom_*` fields + `status` (to_read/reading/read/cited — four states) + `step_key` |
 | `notes` | `title/body/tags/pinned/step_key/reference_id?` |
-| `files` | `title/file_name/stored_path/mime/size_bytes/source/step_key` — البايتات على القرص |
+| `files` | `title/file_name/stored_path/mime/size_bytes/source/step_key` — bytes stored on disk |
 
-### المدفوعات والإشعارات والإعدادات
-| الجدول | المحتوى |
+### Payments, Notifications, and Settings
+| Table | Contents |
 |---|---|
-| `payment_methods` | `code/label/note/details/currency/is_active/display_order` — يضبطها المدير |
+| `payment_methods` | `code/label/note/details/currency/is_active/display_order` — configured by the admin |
 | `payment_requests` | `user_id/plan_code/amount/method_code/txn_ref/status(pending/confirmed/rejected)/admin_note/handled_by` |
-| `notifications` | إشعارات داخلية لكل مستخدم |
-| `device_tokens` | توكنات FCM للهاتف |
-| `settings` | `key/value` نصية — عملة الموقع، حدود التخزين، واتساب الدعم، اسم المنصة |
+| `notifications` | In-app notifications for each user |
+| `device_tokens` | FCM tokens for mobile devices |
+| `settings` | Text `key/value` pairs — site currency, storage limits, support WhatsApp, platform name |
 
-## السكربتات
-- `npm run db:init` → `src/db/init.js`: ينشئ القاعدة إن غابت + كل الجداول + الترقيات + الفهارس + بذرة العملة وطرق الدفع.
-- `npm run db:seed` → `src/db/seed.js`: الباقات + الإعدادات + الأدوار وصلاحياتها + المسارات وخطواتها. لا يمس `is_active` ولا `is_default` — لا يلغي قرار المدير.
-- `npm run db:reset` → init + seed معاً.
+## Scripts
+- `npm run db:init` → `src/db/init.js`: creates the database if missing + all tables + migrations + indexes + currency and payment-method seeds.
+- `npm run db:seed` → `src/db/seed.js`: plans + settings + roles and their permissions + paths and their steps. Does not touch `is_active` or `is_default` — it does not override the admin’s decisions.
+- `npm run db:reset` → init + seed together.
 
-## الفهارس المهمة
-- `usage_logs(user_id, created_at)` — للإحصاءات السريعة.
-- `messages(conversation_id, created_at)` — لتاريخ المحادثة.
-- `library_items(search_text)` — للبحث العربي المتسامح (انظر 08).
+## Important Indexes
+- `usage_logs(user_id, created_at)` — for fast statistics.
+- `messages(conversation_id, created_at)` — for conversation history.
+- `library_items(search_text)` — for tolerant Arabic search (see 08).

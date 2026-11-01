@@ -3,68 +3,40 @@ import { currentSupportWhatsapp } from '../services/settings.js';
 import { formatNumber } from './format.js';
 import { icon } from './icons.js';
 import { homePathFor, needsOnboarding } from '../middleware/auth.js';
+import { firebaseWebConfig } from '../services/firebase.js';
 
-/**
- * قالب HTML مشترك لكل الصفحات المولَّدة على الخادم — بدون أي إطار عمل للواجهة.
- *
- * كل التنسيقات هنا مستخرجة من ملف الهوية الموجود في المجلد public:
- * «Zena AI — الهوية البصرية» + zena-ai-icon.svg + logo1.webp + logo2.webp.
- *
- * الألوان المعتمدة (لوحة الهوية):
- *   Ink Navy   #102A43  اللون الأساسي، العناوين، الشعار
- *   Sea Teal   #0D8E93  الأزرار، الروابط، الحالات النشطة
- *   Fresh Teal #19B5A5  الإبرازات، الأيقونات، الرسومات المساعدة
- *   Mist       #D8F3EF  الخلفيات الخفيفة، البطاقات، الحدود
- *   Paper      #F7FBFC  الخلفية الأساسية
- *   Apricot    #F4A261  الشرارة ونقاط الانتباه (استخدام محدود جداً)
- *   Slate      #526777  النصوص الثانوية
- * النسب المقترحة في الدليل: 55% Paper / 25% Ink Navy / 12% Mist / 6% Teal / 2% Apricot.
- *
- * الخطوط: Manrope (400..800) للحروف اللاتينية والواجهة، وIBM Plex Sans Arabic (400..700)
- * للنص العربي. الخطّان مستضافان محلياً في public/fonts مع تعريفات public/fonts.css
- * (تنزيلهما مرة واحدة بـ node scripts/fetch-fonts.mjs) لتعمل الواجهة بدون أي CDN خارجي.
- */
+/** Shared server-rendered layout and application styles. */
 
 const APP_NAME = 'Zena AI';
 const APP_TAGLINE = 'المشرف البحثي الذكي';
 
-/**
- * نطاق الموقع العام — لازم لوسوم المشاركة (og:url) وملف sitemap.xml.
- * من البيئة، ونستعمل مضيف الطلب إن لم يُضبط (sitemap لا يقبل مسارات نسبية).
- */
+/** Optional public origin used for metadata and sitemap URLs. */
 const SITE_URL = String(process.env.SITE_URL || '').replace(/\/+$/, '');
 
-/**
- * يحوّل مساراً داخلياً إلى رابط لوسوم المشاركة.
- * مع `SITE_URL` ⇒ رابط مطلق (وهو ما تتطلبه Facebook وWhatsApp وSlack).
- * بدونه ⇒ مسار نسبي (لا يكسر الصفحة، ويصبح مطلقاً فور ضبط النطاق في البيئة).
- */
+/** Builds an absolute metadata URL when SITE_URL is configured. */
 export function absoluteUrl(pathname = '/') {
   const path = String(pathname || '/').startsWith('/') ? String(pathname || '/') : `/${pathname}`;
   return `${SITE_URL}${path}`;
 }
 
-/** رابط sitemap/robots مطلق دائماً — يشتقّ من الطلب عند غياب SITE_URL. */
+/** Returns the public origin, falling back to the current request. */
 export function siteOrigin(req) {
   if (SITE_URL) return SITE_URL;
   if (!req) return '';
   return `${req.protocol}://${req.get('host')}`.replace(/\/+$/, '');
 }
 
-/** ملفات الشعار والخطوط كما هي في مجلد public — تُقدَّم كملفات ثابتة من server.js. */
+/** Static brand assets served by server.js. */
 const BRAND = {
-  icon: '/zena-ai-icon.svg', // أيقونة التطبيق والـ favicon (الأيقونة الأساسية)
-  mark: '/logo2.webp', // الشعار الأساسي: كتاب مفتوح + شرارة + فقاعة حوار
-  roundMark: '/logo1.webp', // نسخة دائرية تُستخدم لأيقونة التطبيق
-  touchIcon: '/apple-touch-icon.png', // أيقونة لمس بصيغة PNG (المتصفحات لا تدعم webp للأيقونات)
-  shareImage: '/logo2.webp', // صورة المشاركة (og:image)
-  fonts: '/fonts.css' // تعريفات خطوط الهوية
+  icon: '/zena-ai-icon.svg',
+  mark: '/logo2.webp',
+  roundMark: '/logo1.webp',
+  touchIcon: '/apple-touch-icon.png',
+  shareImage: '/logo2.webp',
+  fonts: '/fonts.css'
 };
 
-/**
- * روابط السايدبار في لوحة الإدارة (area: 'admin') — مجموعات بأيقونات:
- * الإشراف (نظرة عامة/باحثون/مديرون/أدوار) · المنصة (باقات/استهلاك/مزوّدون) · النظام (إعدادات).
- */
+/** Admin navigation grouped by permission area. */
 const ADMIN_NAV = [
   {
     label: 'الإشراف',
@@ -85,17 +57,13 @@ const ADMIN_NAV = [
   {
     label: 'النظام',
     items: [
-      // الإعدادات (حدود التخزين + المشرفون) للمدير وحده — لا تُمنح للمشرف بالمعطيات
+      // Settings remain admin-only.
       { href: '/admin/settings', label: 'الإعدادات', key: 'settings', icon: 'edit', adminOnly: true }
     ]
   }
 ];
 
-/**
- * روابط الشريط الجانبي في لوحة الباحث (area: 'app').
- * المصدر الواحد لأدوات المستخدم: الإحصائية، مسار البحث، المكتبة (بحث خارجي + المنصة)، المراجع، المفكرة، ملفاتى، المناقشة.
- * المفتاح service يربط الرابط بخدمة من PLATFORM_SERVICES — ما لا تسمح به باقة الحساب لا يظهر.
- */
+/** User navigation; service-gated links are filtered against the account plan. */
 const APP_NAV = [
   { href: '/dashboard', label: 'الإحصائية', key: 'dashboard', icon: 'coins' },
   { href: '/journey', label: 'مسار البحث', key: 'journey', icon: 'graduation', service: 'journey' },
@@ -105,28 +73,25 @@ const APP_NAV = [
   { href: '/payments', label: 'الاشتراك والدفع', key: 'payments', icon: 'coins' }
 ];
 
-/** رابط المشرف الذكي منفصلاً: يُعرض أسفل القائمة وفوق سجل الجلسات (ChatGPT/Claude). */
+/** Separate supervisor link shown above its conversation list. */
 const APP_CHAT_NAV = { href: '/chat', label: 'المشرف الذكي', key: 'chat', icon: 'message', service: 'chat' };
 
-/** رابط «المعلم» — مساعد تعليمي مستقل (تعليم · ترجمة · تلخيص من المكتبة). */
+/** Link to the independent teaching assistant. */
 const APP_ASSISTANT_NAV = { href: '/assistant', label: 'المعلم', key: 'assistant', icon: 'sparkles', service: 'chat' };
 
-/** رابط «المناقشة الصوتية» — واتساب حسب نوع الباحث (شاب/بنت). */
+/** Voice-defense link. */
 const APP_VOICE_NAV = { href: '/voice', label: 'مناقشة صوتية', key: 'voice', icon: 'phone', service: 'voice' };
 
-/** رابط «محاكاة المناقشة» — دردشة مناقشة مستقلة بملف بحث ثابت (ظاهر دائماً بلا بوابة باقة). */
+/** Defense simulation link, available regardless of plan. */
 const APP_DEFENSE_NAV = { href: '/defense', label: 'محاكاة المناقشة', key: 'defense', icon: 'graduation' };
 
-/**
- * روابط الحساب (legacy): لم تعد تُستخدم في السايدبار — الحساب/الملف البحثي/الخروج
- * في قائمة صورة الحساب بالشريط العلوي (renderUserMenu). تُبقى مُصدَّرة للتوافق فقط.
- */
+/** Legacy account links retained for compatibility. */
 const APP_ACCOUNT_NAV = [
   { href: '/account', label: 'حسابى والرصيد', key: 'account', icon: 'user' },
   { href: '/onboarding', label: 'ملفي البحثى', key: 'onboarding', icon: 'searchCheck' }
 ];
 
-/** يمنع حقن HTML عند طباعة أي قيمة قادمة من قاعدة البيانات أو من المستخدم. */
+/** Escapes untrusted values before inserting them into HTML. */
 export function escapeHtml(value) {
   if (value === null || value === undefined) return '';
   return String(value)
@@ -138,7 +103,7 @@ export function escapeHtml(value) {
 }
 
 const STYLES = `
-/* ==== متغيرات الهوية: الألوان المعتمدة أولاً ثم درجات مشتقة منها (تفتيح/تعتيم فقط) ==== */
+/* Design tokens. */
 :root {
   --ink:#102a43; --sea:#0d8e93; --fresh:#19b5a5; --mist:#d8f3ef;
   --paper:#f7fbfc; --apricot:#f4a261; --slate:#526777;
@@ -153,14 +118,14 @@ const STYLES = `
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
-/* قاعدة ذهبية للهاتف: لا سكرول عرضي أبداً — أي عنصر يتجاوز العرض يُقصّ داخلياً */
+/* Prevent horizontal scrolling on narrow screens. */
 html, body { max-width: 100%; overflow-x: clip; }
 @supports not (overflow: clip) { html, body { overflow-x: hidden; } }
 img, video, canvas, svg, iframe, table { max-width: 100%; }
 pre, code { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; max-width: 100%; }
 body {
   margin: 0; background: var(--paper); color: var(--slate);
-  /* Manrope أولاً للاتيني والواجهة، وIBM Plex Sans Arabic يتولى الحروف العربية تلقائياً */
+  /* IBM Plex Sans Arabic provides Arabic glyphs after Manrope. */
   font-family: "Manrope", "IBM Plex Sans Arabic", "Noto Sans Arabic", system-ui, sans-serif;
   font-size: 14px; font-weight: 400; line-height: 1.7;
 }
@@ -171,7 +136,7 @@ a:hover { color: var(--sea-deep); }
 :focus-visible { outline: 2px solid var(--fresh); outline-offset: 2px; }
 ::selection { background: var(--mist); color: var(--ink); }
 
-/* ==== الترويسة: كحلي الحبر (دور الشريط الجانبي في الدليل) مع شرارة مشمشية رفيعة ==== */
+/* Top navigation. */
 .topbar { background: var(--ink); color: #fff; border-bottom: 3px solid var(--apricot); }
 .topbar-inner {
   max-width: 1100px; margin: 0 auto; padding: 14px 20px;
@@ -179,7 +144,7 @@ a:hover { color: var(--sea-deep); }
 }
 .brand { display: flex; align-items: center; gap: 12px; color: #fff; text-decoration: none; }
 .brand:hover, .brand:visited { color: #fff; }
-/* الأيقونة موضوعة على وسادة بلون Paper للحفاظ على مساحة الأمان ووضوحها فوق الكحلي */
+/* Keep the brand mark legible against the dark header. */
 .brand-mark {
   display: grid; place-items: center; flex: 0 0 auto;
   width: 44px; height: 44px; padding: 5px; border-radius: 13px;
@@ -198,13 +163,13 @@ a:hover { color: var(--sea-deep); }
 .nav a:hover { background: var(--fresh-20); color: #fff; }
 .nav a.active { background: var(--sea); color: #fff; font-weight: 700; }
 
-/* ==== التخطيط العام ==== */
+/* Base layout. */
 .page { max-width: 1100px; margin: 0 auto; padding: 24px 20px 44px; }
 .page-head { margin-bottom: 18px; }
 .page-head h1 { font-size: 22px; }
 .page-head p { margin-top: 6px; font-size: 12.5px; color: var(--slate); }
 
-/* ==== البطاقات: أبيض على Paper مع حدود Mist ==== */
+/* Cards. */
 .card {
   background: #fff; border: var(--line); border-radius: var(--radius);
   padding: 18px; margin-bottom: 16px; box-shadow: var(--shadow);
@@ -219,16 +184,17 @@ a:hover { color: var(--sea-deep); }
 }
 .stat-label { font-size: 11px; font-weight: 500; color: var(--slate); }
 .stat-value { margin-top: 4px; font-size: 23px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; }
-/* ==== الجداول ==== */
-/* auto layout + كسر الكلمات يكفيان لمنع الانتشار: min-content يصبح صغيراً فيتفعّل width:100% */
+/* Tables. */
+/* Allow long table content to wrap instead of expanding the page. */
 table { width: 100%; max-width: 100%; border-collapse: collapse; }
+.data-table { max-width: none; }
 th, td { text-align: right; padding: 10px; border-bottom: 1px solid var(--mist); font-size: 12.5px; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; min-width: 0; }
 th { background: var(--mist-soft); color: var(--ink); font-size: 11px; font-weight: 700; }
 tbody tr:hover { background: var(--paper); }
 .muted { color: var(--slate); font-size: 11px; }
 .strong { font-weight: 800; color: var(--ink); }
 
-/* ==== الشارات: Mist للنجاح/الخطة، كحلي مخفف للموقوف، والمشمشي للمدير فقط ==== */
+/* Status badges. */
 .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 10px; font-weight: 700; }
 .badge-active { background: var(--mist); color: var(--sea-deep); }
 .badge-off { background: var(--ink-05); color: var(--slate); }
@@ -238,7 +204,7 @@ tbody tr:hover { background: var(--paper); }
 .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
 .small { font-size: 12px; }
 
-/* ==== عناصر التحكم ==== */
+/* Controls. */
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
 input[type=search], input[type=text], input[type=number] {
   padding: 8px 12px; border: var(--line); border-radius: var(--radius-sm);
@@ -246,7 +212,7 @@ input[type=search], input[type=text], input[type=number] {
 }
 input::placeholder { color: var(--slate); opacity: .7; }
 input[type=search]:focus, input[type=text]:focus, input[type=number]:focus { border-color: var(--fresh); box-shadow: 0 0 0 3px var(--fresh-12); }
-/* القوائم المنسدلة: مظهر موحّد (سهم مرسوم + حدود + تركيز واضح) بدل الشكل الافتراضي للعنصر */
+/* Consistent select styling and focus states. */
 select {
   appearance: none; -webkit-appearance: none;
   padding: 8px 32px 8px 12px; border: var(--line); border-radius: var(--radius-sm);
@@ -261,7 +227,7 @@ select:hover { border-color: var(--fresh); }
 select:focus { border-color: var(--fresh); box-shadow: 0 0 0 3px var(--fresh-12); }
 select option { color: var(--ink); background: #fff; font-weight: 500; }
 select:disabled { background-color: var(--mist-soft); color: var(--slate); cursor: not-allowed; }
-/* حقول البحث المرفقة بتسمية داخل شريط الأدوات */
+/* Search fields inside toolbars. */
 .toolbar .field { margin: 0; flex: 1 1 220px; min-width: 0; }
 .toolbar .field label { font-size: 11.5px; margin-bottom: 5px; }
 .toolbar .field input[type=search], .toolbar .field input[type=text] { width: 100%; padding: 10px 13px; border: 1px solid var(--mist); border-radius: 12px; font-size: 13px; }
@@ -276,7 +242,7 @@ select:disabled { background-color: var(--mist-soft); color: var(--slate); curso
 .btn-primary { background: var(--sea); border-color: var(--sea); color: #fff; font-weight: 700; }
 .btn-primary:hover { background: var(--sea-deep); border-color: var(--sea-deep); color: #fff; }
 
-/* ==== الرسائل والتنبيهات: خلفية بيضاء مع شرارة مشمشية على الطرف ==== */
+/* Notices and alerts. */
 .notice {
   border: var(--line); border-inline-start: 4px solid var(--apricot);
   border-radius: var(--radius); background: #fff; padding: 16px 18px; color: var(--slate);
@@ -288,12 +254,33 @@ select:disabled { background-color: var(--mist-soft); color: var(--slate); curso
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   direction: ltr; text-align: left; white-space: pre-wrap;
 }
+.push-prompt {
+  display: flex; align-items: center; gap: 14px; margin-bottom: 16px; padding: 14px 16px;
+  border: 1px solid var(--mist); border-inline-start: 4px solid var(--fresh);
+  border-radius: var(--radius); background: linear-gradient(110deg, #fff 60%, var(--mist-soft));
+  box-shadow: 0 5px 18px rgba(16, 42, 67, .05);
+}
+.push-prompt[hidden] { display: none; }
+.push-prompt-icon { display: grid; place-items: center; flex: 0 0 40px; width: 40px; height: 40px; border-radius: 12px; background: var(--mist); color: var(--sea); }
+.push-prompt-icon .icon { width: 20px; height: 20px; }
+.push-prompt-copy { flex: 1; min-width: 0; }
+.push-prompt-copy b { display: block; margin-bottom: 3px; color: var(--ink); font-size: 13px; }
+.push-prompt-copy p { margin: 0; color: var(--slate); font-size: 12px; line-height: 1.7; }
+.push-prompt-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.push-prompt-dismiss { padding: 7px 9px; border: 0; background: transparent; color: var(--slate); font: inherit; font-size: 11.5px; cursor: pointer; }
+.push-prompt-dismiss:hover { color: var(--ink); }
+@media (max-width: 640px) {
+  .push-prompt { align-items: flex-start; gap: 10px; padding: 12px; }
+  .push-prompt-icon { flex-basis: 34px; width: 34px; height: 34px; }
+  .push-prompt-actions { flex-direction: column; align-items: stretch; }
+  .push-prompt-actions .btn { justify-content: center; white-space: nowrap; }
+}
 .empty {
   border: 1px dashed var(--mist); background: var(--paper); border-radius: var(--radius-sm);
   padding: 18px; text-align: center; font-size: 12.5px; color: var(--slate);
 }
 
-/* ==== التذييل ==== */
+/* Footer. */
 .footer {
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   border-top: 1px solid var(--mist); background: #fff; padding: 18px 20px;
@@ -302,7 +289,7 @@ select:disabled { background-color: var(--mist-soft); color: var(--slate); curso
 .footer-brand { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 800; color: var(--ink); }
 .footer-brand img { display: block; width: 18px; height: 18px; }
 
-/* ==== الواجهة التعريفية: الشعار + الجملة الافتتاحية ==== */
+/* Landing page. */
 .hero { background: #fff; border: var(--line); border-radius: 20px; padding: 30px; box-shadow: var(--shadow); }
 .hero-top { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; }
 .hero-logo { display: block; flex: 0 0 auto; width: 116px; height: 116px; object-fit: contain; }
@@ -311,7 +298,7 @@ select:disabled { background-color: var(--mist-soft); color: var(--slate); curso
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 0; padding: 0; list-style: none; }
 .chips li { background: var(--mist); color: var(--ink); border-radius: 999px; padding: 5px 12px; font-size: 11.5px; font-weight: 600; }
 .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
-/* الاقتباسات والمراجع: خلفية Mist كما في الدليل */
+/* Quotes and references. */
 .quote { margin-top: 16px; padding: 13px 15px; border-radius: var(--radius-sm); background: var(--mist); color: var(--ink); font-size: 12.5px; font-weight: 500; }
 
 code {
@@ -321,16 +308,16 @@ code {
 ul { margin: 0; padding-inline-start: 20px; }
 li { font-size: 12.5px; color: var(--slate); }
 
-/* مسافات مساعدة تُغني عن الأنماط المضمّنة */
+/* Spacing utilities. */
 .mt-12 { margin-top: 12px; }
 .mt-16 { margin-top: 16px; }
 hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 
-/* ==== الأيقونات المضمّنة ==== */
+/* Inline icons. */
 .icon { width: 20px; height: 20px; flex: 0 0 auto; }
 .icon-sm { width: 15px; height: 15px; flex: 0 0 auto; }
 
-/* ==== ترويسة وتذييل الصفحة العامة ==== */
+/* Public page header and footer. */
 .site-header {
   position: sticky; top: 0; z-index: 50;
   background: rgba(255, 255, 255, .93); backdrop-filter: blur(8px);
@@ -350,13 +337,12 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .link-quiet { padding: 8px 10px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; color: var(--slate); }
 .link-quiet:hover { background: var(--mist-soft); color: var(--sea-deep); }
 
-/* ==== زر القائمة (هامبرغر) للهاتف — بلا JavaScript ==== */
-/* checkbox مخفي بصرياً لكنه قابل للتركيز بلوحة المفاتيح، و<label> هو الزر الظاهر */
+/* CSS-only mobile menu; the checkbox remains keyboard-focusable. */
 .nav-toggle-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .nav-toggle-btn { display: none; }
 .nav-scrim { display: none; }
 @keyframes nav-drop { from { opacity: 0; transform: translateY(-6px); } }
-/* نسخة الشريط الكحلي المشتركة بين شريط الباحث ولوحة الإدارة */
+/* Shared dark application header. */
 .app-top .nav-toggle-btn, .admin-top .nav-toggle-btn {
   width: 36px; height: 36px; border-radius: 12px; place-items: center; cursor: pointer; font-family: inherit;
   border: 1px solid rgba(216, 243, 239, .26); background: rgba(255, 255, 255, .07); color: #fff;
@@ -381,7 +367,7 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
   display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 18px;
 }
 .footer-copy { font-size: 11px; opacity: .72; }
-/* شارة حالة الخدمة في أسفل الفوتر — تشير إلى صفحة /status */
+/* Service-status footer link. */
 .status-chip {
   display: inline-flex; align-items: center; gap: 7px; padding: 4px 12px;
   border-radius: 999px; background: rgba(216, 243, 239, .12);
@@ -391,17 +377,17 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .status-chip:hover { background: rgba(216, 243, 239, .22); color: #fff; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #3ddc97; box-shadow: 0 0 0 3px rgba(61, 220, 151, .22); }
 
-/* ترويسة الموقع على الشاشات الصغيرة: صفّان فقط — (العلامة + الأزرار) ثم روابط قابلة للتمرير */
+/* Compact public header on small screens. */
 @media (max-width: 700px) {
   .site-header-inner { gap: 6px 10px; padding: 10px 16px; }
-  /* زر الهامبرغر يحلّ محل صفّ الروابط الأفقي القابل للتمرير */
+  /* Replace the horizontal navigation row with the menu toggle. */
   .nav-toggle-btn {
     display: inline-grid; place-items: center; width: 38px; height: 38px;
     border-radius: 12px; border: 1px solid var(--mist); background: #fff; color: var(--ink); cursor: pointer;
   }
   .nav-toggle-btn:active { background: var(--mist-soft); }
   .nav-toggle-input:focus-visible ~ .site-header-inner .nav-toggle-btn { outline: 2px solid var(--fresh); outline-offset: 2px; }
-  /* «تسجيل الدخول» و«لوحتي» مكرّران مع زر البدء وقائمة الحساب — نُخفيهما لتنفس الصفّ */
+  /* Avoid duplicate account actions in the compact header. */
   .site-actions .link-quiet { display: none; }
   .site-nav { display: none; }
   .nav-toggle-input:checked ~ .site-header-inner .site-nav {
@@ -412,13 +398,13 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
   }
   .site-nav a { white-space: normal; padding: 12px 14px; border-radius: 10px; font-size: 14px; background: var(--mist-soft); }
   .site-nav a:hover { background: var(--mist); color: var(--sea-deep); }
-  /* حجاب خلف القائمة: ضغطة في أي مكان تُغلقها */
+  /* Close the menu when the backdrop is clicked. */
   .nav-toggle-input:checked ~ .nav-scrim {
     display: block; position: fixed; inset: 0; z-index: 1; background: rgba(16, 42, 67, .4);
   }
 }
 
-/* ==== أقسام الصفحة العامة ==== */
+/* Public page sections. */
 .slab { padding: 58px 0; background: #fff; border-bottom: 1px solid var(--mist); }
 .slab-alt { background: var(--mist-soft); }
 .slab-inner { max-width: 1100px; margin: 0 auto; padding: 0 20px; }
@@ -428,7 +414,7 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .section-title { margin-top: 10px; font-size: 26px; }
 .section-lead { margin-top: 12px; font-size: 13.5px; line-height: 1.95; color: var(--slate); }
 
-/* ==== القسم البطولي ==== */
+/* Landing hero. */
 .landing-hero { position: relative; overflow: hidden; background: #fff; border-bottom: 1px solid var(--mist); }
 .landing-hero::after {
   content: ""; position: absolute; inset-inline-end: -140px; top: -150px; width: 340px; height: 340px;
@@ -446,7 +432,7 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .hero-copy .lead { margin-top: 16px; max-width: 56ch; font-size: 14.5px; line-height: 1.95; color: var(--slate); }
 .hero-actions { margin-top: 24px; display: flex; flex-wrap: wrap; gap: 10px; }
 .accent { color: var(--sea); }
-/* تدرّج تركوازي للكلمة المفتاحية في العنوان (مع بقاء لون احتياطي إن لم يُدعم background-clip) */
+/* Keep the fallback text color when background-clip is unsupported. */
 @supports ((-webkit-background-clip: text) or (background-clip: text)) {
   .accent {
     background: linear-gradient(120deg, var(--sea) 5%, var(--fresh) 95%);
@@ -461,9 +447,7 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
   background: var(--mist); color: var(--sea-deep); font-size: 11px; font-weight: 800;
 }
 
-/* ==== بطاقة المحادثة التوضيحية في الهيرو ==== */
-/* الأسماء مسبوقة بـ hero- حصراً حتى لا تتقاطع مع قواعد شات التطبيق (.chat-card/.chat-body/.bubble)
-   التي تُعرَّف لاحقاً وتسبّبت بارتفاع بطاقة تساوي 70vh على الموبايل وتبديل ألوان الفقاعات. */
+/* Hero chat preview; hero-prefixed selectors avoid conflicts with the app chat. */
 .hero-visual { position: relative; }
 .hero-visual::before {
   content: ""; position: absolute; z-index: 0;
@@ -496,7 +480,7 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 
 .hero-stats { position: relative; border-top: 1px solid var(--mist); background: var(--paper); }
 .hero-stats-inner { max-width: 1100px; margin: 0 auto; padding: 22px 20px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-/* بطاقات الأرقام الثلاث — نمط البطاقات نفسه المستخدم في لوحة التحكم */
+/* Hero statistics. */
 .stat-cell {
   background: #fff; border: 1px solid var(--mist); border-radius: 16px;
   padding: 16px 14px; text-align: center; box-shadow: var(--shadow);
@@ -506,7 +490,7 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .stat-cell b { display: block; font-size: 24px; font-weight: 800; color: var(--sea); }
 .stat-cell span { font-size: 12px; font-weight: 600; color: var(--slate); }
 
-/* ==== بطاقات المميزات والخطوات ==== */
+/* Feature and step cards. */
 .feature-grid { margin-top: 34px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); }
 .feature-card {
   background: #fff; border: 1px solid var(--mist); border-radius: 18px; padding: 22px;
@@ -518,12 +502,12 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
   display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px;
   background: var(--mist-soft); color: var(--sea);
 }
-/* تنوع لوني بين رقائق الأيقونات: زوجي = مشمشي ناعم بدل التركوازي المتكرر */
+/* Alternate icon-chip colors to avoid a single-hue row. */
 .feature-card:nth-child(even) .feature-icon { background: var(--apricot-soft); color: var(--ink); }
 .feature-card h3 { margin-top: 14px; font-size: 15px; }
 .feature-card p { margin-top: 8px; font-size: 12.5px; line-height: 1.95; color: var(--slate); }
 
-/* ==== إضافات الصفحة الرئيسية: شعار الهيرو + الشعار النصي + الخدمات + بطاقات الجمهور ==== */
+/* Landing-page services and audience cards. */
 .hero-logo { display: block; height: 52px; width: auto; margin-bottom: 18px; }
 .hero-slogan { margin-top: 12px; font-size: 15px; font-weight: 800; color: var(--sea-deep); }
 .service-grid { margin-top: 34px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); }
@@ -549,7 +533,7 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 
 .steps-grid { margin-top: 40px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); }
 .step-card { position: relative; background: #fff; border: 1px solid var(--mist); border-radius: 18px; padding: 26px 22px 22px; box-shadow: var(--shadow); }
-/* شارة الرقم في خطوات «كيف تعمل» — مسبوقة بـ step- بدل step-number المتصادمة مع شارة رحلة المستخدم */
+/* Use step-badge to avoid colliding with the journey step badge. */
 .step-badge {
   position: absolute; top: -15px; inset-inline-end: 22px; display: grid; place-items: center;
   width: 32px; height: 32px; border-radius: 50%; background: var(--sea); color: #fff; font-size: 13px; font-weight: 800;
@@ -558,14 +542,14 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .step-card h3 { margin-top: 14px; font-size: 15px; }
 .step-card p { margin-top: 8px; font-size: 12.5px; line-height: 1.95; color: var(--slate); }
 
-/* ==== بطاقات الباقات ==== */
+/* Plan cards. */
 .plans { margin-top: 36px; display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); }
 .plan {
   position: relative; display: flex; flex-direction: column; background: #fff;
   border: 1px solid var(--mist); border-radius: 20px; padding: 26px 20px 20px;
   box-shadow: var(--shadow);
 }
-/* الباقة المميزة: حدود تركوازية + تدرّج خفيف في الخلفية لتمييزها عن الأخريات */
+/* Highlight the featured plan. */
 .plan.featured {
   border-color: var(--fresh);
   background: linear-gradient(180deg, var(--mist-soft), #fff 46%);
@@ -596,7 +580,7 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .plans-note { margin-top: 18px; text-align: center; font-size: 12.5px; line-height: 1.95; color: var(--slate); }
 .plans-note a { font-weight: 700; }
 
-/* ==== الأسئلة الشائعة ==== */
+/* FAQ. */
 .faq-list { margin-top: 30px; display: flex; flex-direction: column; gap: 10px; }
 .faq-item {
   background: #fff; border: 1px solid var(--mist); border-radius: 16px; padding: 16px 18px;
@@ -614,8 +598,7 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .faq-item[open] summary::after { transform: rotate(180deg); }
 .faq-item p { margin-top: 12px; font-size: 12.5px; line-height: 2; color: var(--slate); }
 
-/* ==== شريط الدعوة ==== */
-/* خلفية كحلية بعمق بصري: شرارتا teal/مشمشي مموّهتان خلف المحتوى */
+/* Call-to-action band. */
 .cta-band { position: relative; overflow: hidden; background: var(--ink); color: #fff; }
 .cta-band::after {
   content: ""; position: absolute; inset-inline-start: -110px; bottom: -140px;
@@ -640,7 +623,7 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .btn-ghost-light { background: transparent; border-color: rgba(216, 243, 239, .45); color: #fff; font-weight: 700; }
 .btn-ghost-light:hover { background: var(--fresh-20); border-color: var(--fresh); color: #fff; }
 
-/* ==== صفحات الدخول والتسجيل ==== */
+/* Authentication pages. */
 .auth-split { display: grid; grid-template-columns: 1fr 1fr; min-height: 100vh; }
 .auth-aside {
   position: relative; overflow: hidden; display: flex; flex-direction: column;
@@ -682,8 +665,7 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .alert[hidden] { display: none; }
 .alert ul { margin-top: 6px; }
 
-/* ==== زر واتساب العائم (دعم فني) ==== */
-/* مثبّت أسفل الشاشة، لا يغطي المحتوى، ويختفي نصّه على الشاشات الضيقة */
+/* Floating support link. */
 .wa-float {
   position: fixed;
   inset-block-end: 18px;
@@ -707,11 +689,11 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .wa-float-icon { width: 20px; height: 20px; }
 @media (max-width: 560px) {
   .wa-float { display: none; }
-  /* إظهار الزر على الهاتف فقط في الصفحات المخصصة (الرئيسية وأدوات البحث) */
+  /* Show the support link on selected mobile pages. */
   .wa-float--show-mobile { display: inline-flex !important; }
 }
 
-/* ==== الإشعارات: جرس الترويسة + قائمة الإشعارات داخل الموقع ==== */
+/* In-app notifications. */
 .nav-bell {
   position: relative; display: inline-flex; align-items: center; justify-content: center;
   width: 38px; height: 38px; border-radius: 12px; border: 1px solid var(--mist);
@@ -727,13 +709,13 @@ hr, .hr { border: 0; border-top: 1px solid var(--mist); margin: 16px 0; }
 .nav-bell-badge[hidden] { display: none; }
 button.btn:disabled { opacity: .55; cursor: not-allowed; }
 
-/* ==== نماذج الملف البحثي ==== */
+/* Research profile forms. */
 .onboarding-card { max-width: 980px; margin: 0 auto 60px; padding: 0 20px; }
 .onboarding-grid { display: grid; gap: 18px; grid-template-columns: 1.6fr 1fr; align-items: start; }
 .onboarding-standalone { max-width: 980px; margin: 0 auto; padding: 34px 20px 48px; }
 .onboarding-standalone .page-head { text-align: center; margin-bottom: 20px; }
 .onboarding-aside { display: grid; gap: 14px; }
-/* حقل الواتساب مع أيقونة */
+/* WhatsApp profile field. */
 .wa-section { margin-top: 26px; padding-top: 24px; border-top: 1px solid var(--mist); }
 .wa-section h2 { font-size: 15px; margin-bottom: 8px; color: var(--ink); }
 .wa-field { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
@@ -755,7 +737,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   border-color: var(--sea);
   box-shadow: 0 0 0 3px var(--mist-soft);
 }
-/* قائمة دولة الواتساب + عرض المفتاح أمام الرقم (الرقم يُكتب محلياً بدون المفتاح) */
+/* Country selector and calling-code display. */
 .wa-field .wa-country {
   flex: 0 1 auto; width: auto; min-width: 148px; max-width: 60%;
   padding: 12px 30px 12px 13px; border: var(--line); border-radius: var(--radius);
@@ -776,7 +758,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   .wa-field .wa-country { flex: 1 1 100%; max-width: none; }
   .wa-field input { flex: 1 1 auto; }
 }
-/* ملاحظة صغيرة أسفل حقل النموذج + صنف إخفاء للقارئ الصوتي فقط */
+/* Field notes and screen-reader-only text. */
 .field-note { display: block; margin-top: 6px; font-size: 11.5px; color: var(--slate); }
 .visually-hidden {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
@@ -814,7 +796,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .field input[type=date]:focus, .field input[type=password]:focus,
 .field select:focus, .field textarea:focus { border-color: var(--fresh); box-shadow: 0 0 0 3px var(--fresh-12); }
 
-/* منتقي ملف مخصّص: input مخفي + label منسّق يدعم السحب والإفلات */
+/* Custom file picker. */
 .file-picker { position: relative; }
 .file-picker-input {
   position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; margin: 0;
@@ -844,7 +826,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 }
 .file-picker-name:empty { display: none; }
 
-/* شريط مساحة المستخدم (صفحة «ملفاتى») */
+/* User storage and file previews. */
 .file-viewer { display: grid; gap: 14px; grid-template-columns: minmax(0, 280px) minmax(0, 1fr); align-items: start; }
 .file-viewer-info .file-meta { margin: 12px 0 16px; }
 .file-viewer-stage { min-width: 0; padding: 10px; }
@@ -862,7 +844,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   font-size: 12.5px; line-height: 1.9; color: var(--ink);
   font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
 }
-/* معاينة جدول بيانات (xlsx/csv) */
+/* Spreadsheet previews. */
 .file-preview--sheet { display: grid; gap: 10px; }
 .sheet-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
 .sheet-tab {
@@ -878,7 +860,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   max-height: 72vh; overflow: auto; border: 1px solid var(--mist); border-radius: 10px;
   background: #fff;
 }
-/* جدول المعاينة داخل صندوق تمرير خاص: يتجاوز العرض عمداً (تمرير داخلي) فلا تلمسه القواعد العامة */
+/* Spreadsheet tables intentionally overflow inside their own scroll container. */
 .sheet-table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; max-width: none; table-layout: auto; font-size: 12.5px; }
 .sheet-table th, .sheet-table td {
   padding: 8px 12px; border-bottom: 1px solid var(--mist); border-left: 1px solid var(--mist);
@@ -895,7 +877,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   .sheet-wrap { max-height: 62vh; }
 }
 
-/* ---- شريط الوضع + إرفاق الملفات في صفحة الشات ---- */
+/* Chat status and attachments. */
 .chat-modebar {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 7px 12px; margin: 0 0 8px; border-radius: 10px;
@@ -903,7 +885,18 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 }
 .chat-modebar span { display: inline-flex; align-items: center; gap: 6px; }
 .chat-modebar.is-defense { background: rgba(15, 40, 62, 0.08); color: var(--ink); }
-/* خطة المناقشة: الأجزاء المغطاة (✓) والباقية (○) — شريط رفيع يوضّح التقدّم. */
+.defense-page { display: flex; flex-direction: column; gap: 10px; height: 100%; min-height: 0; }
+.defense-page > .chat-card--defense { flex: 1 1 auto; height: auto; }
+.defense-stats {
+  flex: 0 0 auto; margin: 0; padding: 10px 12px;
+  border: 1px solid var(--mist); border-radius: 14px; background: #fff;
+}
+.defense-stats h2 { margin: 0 0 7px; font-size: 13px; }
+.defense-stats-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 7px; margin: 0; }
+.defense-stats-grid > div { min-width: 0; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--mist-soft); }
+.defense-stats-grid dt { color: var(--slate); font-size: 10px; line-height: 1.45; }
+.defense-stats-grid dd { margin: 2px 0 0; color: var(--ink); font-size: 13px; font-weight: 700; }
+/* Defense plan progress. */
 .chat-plan {
   display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; padding: 7px 12px;
   border: 1px solid var(--mist); border-radius: 10px; background: var(--mist-soft);
@@ -914,9 +907,31 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .chat-thesis { flex: 0 0 auto; margin: 0 0 8px; padding: 10px 12px; border: 1px solid var(--mist); border-radius: 14px; background: var(--mist-soft); font-size: 13px; }
 .chat-thesis > summary { cursor: pointer; font-weight: 700; display: flex; align-items: center; gap: 6px; }
 .chat-thesis.is-required { border-color: #d9a441; background: #fdf6e3; }
+.chat-thesis input[type=file] {
+  display: block; width: 100%; min-width: 0; padding: 7px; border: 1px solid var(--mist);
+  border-radius: var(--radius-sm); background: #fff; color: var(--slate); font: inherit; font-size: 12px;
+}
+.chat-thesis input[type=file]::file-selector-button {
+  margin-inline-end: 10px; padding: 7px 12px; border: 1px solid var(--sea); border-radius: var(--radius-sm);
+  background: var(--sea); color: #fff; font: inherit; font-weight: 700; cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.chat-thesis input[type=file]::file-selector-button:hover { background: var(--sea-deep); border-color: var(--sea-deep); }
+.chat-thesis input[type=file]:focus-visible { outline: 2px solid var(--fresh); outline-offset: 2px; }
+.defense-upload-status {
+  margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--mist); border-radius: var(--radius-sm);
+  background: #fff; color: var(--sea-deep); font-size: 12px; font-weight: 600;
+}
+.defense-upload-status::before {
+  content: ''; display: inline-block; width: 13px; height: 13px; margin-inline-end: 8px;
+  vertical-align: -2px; border: 2px solid var(--mist); border-top-color: var(--sea);
+  border-radius: 50%; animation: defense-upload-spin .8s linear infinite;
+}
+.defense-thesis-submit:disabled { opacity: .75; cursor: wait; }
+@keyframes defense-upload-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .defense-upload-status::before { animation-duration: 2s; } }
 
-/* نتائج أداة المراجع: لوحة قابلة للطي فوق صندوق الكتابة — لا تغطي الحوار أبداً.
-   مطويّة افتراضياً، وعند الفتح لها تمرير داخلي بارتفاع محدود. */
+/* Collapsible references panel with independent, bounded scrolling. */
 .chat-refs {
   flex: 0 0 auto; max-height: 34vh; overflow-y: auto; margin: 0 0 8px;
   padding: 8px 10px; border: 1px solid var(--mist); border-radius: 14px; background: var(--mist-soft);
@@ -941,8 +956,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .ref-found-links a { color: var(--sea); }
 .ref-found.is-library { border-inline-start: 3px solid var(--sea); }
 
-/* بطاقة مراجعة اكتمال الخطوة: تُدرَج داخل الحوار بعد آخر رد، قراءة أولاً
-   بزرَي تعديل/إلغاء، ووضع التعديل يستبدلها بنموذج حقول بلا جافاسكربت. */
+/* Step-review card with a no-JavaScript edit form. */
 .step-review {
   flex: 0 0 auto; margin: 8px 0; padding: 12px 14px;
   border: 1px solid #bfe3cf; border-radius: 14px;
@@ -966,9 +980,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .sr-field input:focus { outline: 2px solid rgba(13, 142, 147, 0.25); border-color: var(--sea); }
 .sr-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 
-/* قائمة الإرفاق المنسدلة (details/summary بلا جافاسكربت): المربّع المطويّ شريط
-   صغير فوق صندوق الكتابة — لا يلتهم مساحة الرسائل — واللوزة تطفو فوق الحوار
-   عند الفتح بتمرير داخلي محدود. تظهر فقط عند وجود ملفات للباحث. */
+/* No-JavaScript attachment menu with bounded scrolling. */
 .chat-attach { flex: 0 0 auto; position: relative; }
 .chat-attach > summary {
   display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none;
@@ -985,7 +997,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   font-size: 10.5px; font-weight: 800; padding: 0 6px; border-radius: 999px;
   background: var(--mist); color: var(--sea-deep);
 }
-/* علامة «لديك ملفات محدّدة» تظهر على المربّع المطوي حتى لا يُنسى الإرفاق */
+/* Keep selected-file state visible while the menu is collapsed. */
 .attach-picked { display: none; font-size: 11px; font-weight: 800; color: #2f9e6d; }
 .chat-attach:has(input:checked) > summary .attach-picked { display: inline; }
 .chat-attach:has(input:checked) > summary { border-color: var(--sea); }
@@ -1027,15 +1039,14 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .field-row { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); }
 .form-actions { margin-top: 26px; display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
 
-/* ==== صفحة الحساب ==== */
-/* نفس شبكة الإحصائية: بطاقة عريضة أعلى + بطاقتان جنباً إلى جنب + عمود واحد على الجوال */
+/* Account page. */
 .account-grid { display: grid; gap: 16px; grid-template-columns: 1.4fr 1fr; }
 .account-grid > .card.full { grid-column: 1 / -1; }
 .account-hero { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; }
 .account-hero h2 { font-size: 18px; }
 .account-meta { display: grid; gap: 7px; min-width: 0; }
 .account-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-start; max-width: 100%; }
-/* شارة الدور بجانب الاسم — أوضح من سطر «باحث · عضو منذ» المختلط */
+/* Role badge. */
 .role-chip {
   display: inline-flex; align-items: center; gap: 5px; padding: 3px 11px; border-radius: 999px;
   background: var(--mist-soft); border: 1px solid var(--mist); color: var(--sea-deep);
@@ -1044,7 +1055,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .role-chip.is-admin { background: var(--ink); border-color: var(--ink); color: #fff; }
 .id-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 .id-meta .muted { margin: 0; }
-/* ==== الإحصائية (الصفحة الرئيسية للوحة الباحث) ==== */
+/* Dashboard. */
 .dash-grid { display: grid; gap: 16px; grid-template-columns: 1.4fr 1fr; }
 .dash-grid .card h2 { font-size: 15px; }
 .dash-welcome { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; }
@@ -1065,7 +1076,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .kv dt { font-weight: 600; color: var(--slate); }
 .kv dd { margin: 0; font-weight: 700; color: var(--ink); text-align: end; }
 
-/* شريط مؤشرات الإحصائية (KPIs) */
+/* Key performance indicators. */
 .stat-grid { grid-column: 1 / -1; display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(168px, 100%), 1fr)); }
 .stat-card {
   display: flex; align-items: center; gap: 12px; padding: 15px 17px;
@@ -1082,7 +1093,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .dash-side { display: grid; gap: 12px; justify-items: start; max-width: 100%; }
 .dash-side .chips { margin: 0; justify-content: flex-start; }
 
-/* مخططات الإحصائية: أعمدة + دائري (CSS خالص، بلا مكتبات ولا سكربتات) */
+/* CSS-only usage charts. */
 .dash-grid > .card.full { grid-column: 1 / -1; }
 .chart-card { align-self: start; }
 .chart-total { font-size: 11.5px; font-weight: 700; color: var(--sea-deep); white-space: nowrap; }
@@ -1099,7 +1110,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   background: linear-gradient(180deg, var(--fresh), var(--sea));
 }
 .bar-label { font-size: 10.5px; font-weight: 600; color: var(--slate); }
-/* عمود اليوم الحالي: أوضح بصرياً حتى يُعرف اتجاه الزمن في المخطط (RTL: الأقدم يميناً) */
+/* Emphasize the current day in the RTL chart. */
 .bar-col.is-today .bar-label { color: var(--sea-deep); font-weight: 800; }
 .bar-col.is-today .bar-track { box-shadow: inset 0 0 0 1px var(--fresh-20); }
 
@@ -1151,7 +1162,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   .hero-logo { width: 84px; height: 84px; }
 }
 
-/* ==== لوحة الباحث (area: 'app'): شريط علوي مضغوط + شريط جانبي يسار ==== */
+/* User application shell. */
 .app-top { position: sticky; top: 0; z-index: 60; background: var(--ink); color: #fff; border-bottom: 2px solid var(--apricot); }
 .app-top-inner { max-width: 1400px; margin: 0 auto; padding: 7px 16px; display: flex; align-items: center; gap: 10px; }
 .app-top .brand { gap: 9px; }
@@ -1177,8 +1188,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   font-size: 12px; font-weight: 800;
 }
 
-/* ==== قائمة حساب المستخدم المنسدلة (زر دائري بصورة الحساب في الناف بار) ==== */
-/* الزر دائري بصورة الحساب؛ القائمة بيضاء أسفله على حافة الشريط نحو داخل الصفحة */
+/* User account dropdown. */
 .user-wrap { position: relative; }
 .user-toggle {
   display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
@@ -1208,27 +1218,18 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .user-menu a.danger, .app-nav a.danger { color: #a13a2c; }
 .user-menu a.danger:hover, .app-nav a.danger:hover { background: var(--apricot-soft); color: #7c2b1f; }
 
-/* النسخة الفاتحة للقائمة في الترويسة العامة */
+/* Light dropdown variant for the public header. */
 .site-actions .user-toggle { border-color: var(--mist); }
 .site-actions .user-toggle:hover { border-color: var(--fresh); }
 .site-actions .user-menu a.danger { color: #a13a2c; }
 .site-actions .user-menu a.danger:hover { background: var(--apricot-soft); color: #7c2b1f; }
 
-/* ==== قائمة الجرس ==== */
-/* الجرس في نهاية شريط التطبيق (يسار الشاشة لأن الواجهة RTL)، فنثبّت القائمة
-   على الحافة نفسها (inset-inline-end) لتتمدد نحو داخل الصفحة لا خارج الشاشة.
-   ولو انقلبت الواجهة إلى LTR عادت تلقائياً للجهة المقابلة.
-   لكن CSS لا تعرف كم يبعد الجرس عن حافة الشاشة (يليه صورة الحساب والهامبرغر)،
-   فعلى الهواتف قد تتجاوز القائمة الحافة ويقصّها overflow-x على html/body —
-   لذلك يعيد /js/app-shell.js ضبط موضعها وارتفاعها بعد كل فتح (fitDropdown). */
+/* Notification dropdown; app-shell.js corrects its position on small screens. */
 .bell-wrap { position: relative; }
 .bell-menu {
   position: absolute; top: calc(100% + 9px); inset-inline-end: 0;
   width: min(370px, calc(100vw - 20px));
-  /* لا تتجاوز القائمة أسفل الشاشة أبداً: الرأس والتذييل ثابتان والقائمة وحدها تُمرَّر.
-     dvh = الارتفاع المرئي الحيّ يتتبّع شريط عنوان المتصفح على الهاتف (يظهر/يختفي)،
-     بخلاف vh الذي يقيس الشاشة كاملة تحت الشريط فتنزلق القائمة خارج الرؤية.
-     سطر vh يبقى كfallback للمتصفحات التي لا تعرف dvh. */
+  /* Prefer dvh to account for mobile browser chrome; vh is the fallback. */
   max-height: calc(100vh - 78px);
   max-height: calc(100dvh - 78px);
   display: flex; flex-direction: column;
@@ -1245,7 +1246,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   white-space: nowrap;
 }
 .bell-mini:hover { background: var(--mist-soft); }
-/* مرونة كاملة: تأخذ ما تبقّى من ارتفاع القائمة بلا حدّ ثابت مقطوع */
+/* Let the list fill the remaining dropdown height. */
 .bell-list {
   list-style: none; margin: 0; padding: 6px; flex: 1 1 auto; min-height: 0;
   overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 6px; align-content: start;
@@ -1259,17 +1260,12 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .bell-item-actions { display: grid; gap: 3px; flex: 0 0 auto; }
 .bell-empty { flex: 0 0 auto; padding: 20px 14px; text-align: center; font-size: 12px; color: var(--slate); }
 .bell-empty[hidden] { display: none; }
-/* ملاحظة: الجرس في أعلى الشاشة، فالقائمة تنزل دائماً للأسفل ولا تنقلب أبداً
-   (القلب للأعلى يدفعها خارج أعلى الشاشة فيختفي كل شيء). على الشاشات القصيرة
-   نكتفي بتقليل الفراغات، والسقف يمنع تجاوز حافة الشاشة.
-   76px = أطول موضع بداية ممكن (ترويسة الموقع على المكتب ≈ 69px + 5 فرق الموضع)
-   مع هامش أمان — القيمة الأصلية 66px كانت تتجاوز أسفل الشاشة بضعة بكسل. */
+/* Keep the dropdown below the header and within short viewports. */
 @media (max-height: 620px) {
   .bell-menu { top: calc(100% + 5px); max-height: calc(100vh - 76px); max-height: calc(100dvh - 76px); }
   .bell-list li { padding: 7px 9px; }
 }
-/* هواتف الشاشات الصغيرة والمتوسطة (320–640px): مسافات أخفّ تعرض إشعارات
-   أكثر داخل القائمة، والعرض يتكيف تلقائياً عبر min(370px, 100vw - 20px). */
+/* Compact notification spacing on small screens. */
 @media (max-width: 640px) {
   .bell-head { padding: 9px 11px; gap: 8px; }
   .bell-list { padding: 5px; gap: 5px; }
@@ -1277,17 +1273,14 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   .bell-item-text { line-height: 1.7; }
 }
 
-/* متصفح لا يعرف dvh (أقدم من 2022): يُتجاهل سطرا vh/dvh أعلاه ويعود vh الذي
-   يقيس الشاشة كاملة تحت شريط العنوان فينزلق أصل القائمة خارج الرؤية.
-   نقطعه عنده إلى 55% من الارتفاع على الهواتف (≤900px — الطرفان طول وعرض) —
-   كسر يبقى داخل الرؤية مهما ارتفع شريط العنوان، والمتصفحات الحديثة لا تراه. */
+/* Bound the menu on mobile browsers that do not support dvh. */
 @supports not (height: 100dvh) {
   @media (max-width: 900px) {
     .bell-menu { max-height: 55vh; }
   }
 }
 
-/* ==== هيكل الصفحة: شريط جانبي يمين (لأن الواجهة RTL) + محتوى ==== */
+/* RTL application layout. */
 .app-page { padding: 0; }
 .app-shell {
   max-width: 1400px; margin: 0 auto; padding: 14px 16px 34px;
@@ -1301,10 +1294,9 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 2px;
   min-height: calc(100vh - 110px);
 }
-/* قسم المشرف الذكي + سجل الجلسات مثبّت أسفل القائمة (margin-top:auto في flex column) */
+/* Keep supervisor navigation and its session list at the bottom of the sidebar. */
 .app-nav-foot { margin-top: auto; display: grid; gap: 2px; padding-top: 2px; }
-/* مجموعة الروابط العليا قابلة للانطواء: في صفحات الشات/المعلم/المناقشة تنطوي
-   تلقائياً (open يُزال عبر JS) لتظهر الجلسات بلا سكرول — Wercker يدوياً بالضغط */
+/* Collapse primary links on conversation pages to keep session lists visible. */
 .app-nav-group { display: grid; gap: 2px; }
 .app-nav-group > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 12px; color: var(--slate); font-size: 12.5px; font-weight: 700; }
 .app-nav-group > summary::-webkit-details-marker { display: none; }
@@ -1321,11 +1313,11 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .app-nav-sep { height: 1px; background: var(--mist); margin: 6px 9px; }
 .app-nav a.danger:hover { background: var(--apricot-soft); color: var(--ink); }
 
-/* ==== لوحة الإدارة (area: 'admin'): ترويسة + سايدبار + عناصر تحكم ==== */
+/* Admin layout. */
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
 .topbar-link { color: #fff; font-size: 13px; font-weight: 600; padding: 8px 11px; border-radius: 10px; }
 .topbar-link:hover { background: rgba(255, 255, 255, .12); color: #fff; }
-/* أقراص الصلاحيات: الاسم + زر صغير للحذف داخل الشريحة نفسها */
+/* Permission chips. */
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .chip {
   display: inline-flex; align-items: center; gap: 6px;
@@ -1338,39 +1330,39 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   color: var(--slate); font-size: 14px; line-height: 1;
 }
 .chip button:hover { color: #a13a2c; }
-/* شبكة معلومات في صفحة تفصيل الباحث وبطاقة النظام */
+/* User detail and system information grids. */
 .info-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); }
 .info-grid .card { margin: 0; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 
-/* ==== لوحة الإدارة: عمودان متجاوبان + جدول بتمرير داخلي + مودال بـ :target (بلا JS) ==== */
+/* Responsive admin tables and CSS-only modals. */
 .duo { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); align-items: start; }
 .duo .card { margin: 0; }
-/* جدول داخل صندوق بارتفاع محدود: شريط تمرير رأسي + رأس جدول ملتصق */
+/* Scrollable tables with sticky headers. */
 .table-scroll { max-height: 420px; overflow-y: auto; border: var(--line); border-radius: 12px; background: #fff; }
 .table-scroll > table { margin: 0; }
 .table-scroll thead th { position: sticky; top: 0; background: #fff; z-index: 1; box-shadow: inset 0 -1px 0 var(--mist); }
-/* مودال يظهر عند مطابقة #معرّف في الرابط — نفس أزرار التعديل القديمة تعمل بلا سكربت */
+/* CSS-only modal selected by its URL fragment. */
 .modal { display: none; position: fixed; inset: 0; z-index: 80; background: rgba(16, 42, 67, 0.5); padding: 40px 16px; overflow-y: auto; }
 .modal:target { display: block; }
 .modal .card { max-width: 760px; margin: 0 auto; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .modal-close { font-size: 24px; line-height: 1; color: var(--slate); text-decoration: none; }
 .modal-close:hover { color: var(--ink); }
-/* شريط فلترة (تاريخ + ساعات + عدد النتائج) فوق جداول العمليات */
+/* Usage filters. */
 .filter-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 12px; }
 .filter-bar .field { margin: 0; min-width: 132px; }
 .filter-bar label { font-size: 11.5px; font-weight: 700; }
 .filter-bar .form-actions { margin: 0; }
 
-/* ============ مساحة عمل الباحث: مسار البحث والمراجع والمفكرة والملفات والشات ============ */
-/* ترويسة بطاقة: العنوان يمين وزر إجراء يسار (مثل «إضافة نقاط» في الإحصائية) */
+/* Research workspace. */
+/* Card headers with a leading action. */
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .card-head h2 { margin: 0; }
 .btn-sm { padding: 7px 12px; font-size: 12.5px; }
 .btn-block { width: 100%; justify-content: center; }
 
-/* سجل الاستهلاك: قائمة مضغوطة بدل جدول */
+/* Compact usage log. */
 .usage-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .usage-item { display: flex; align-items: center; gap: 11px; padding: 10px 8px; border-radius: 12px; }
 .usage-item + .usage-item { border-top: 1px solid var(--mist); }
@@ -1436,13 +1428,13 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); align-items: start; }
 .grid .card { min-width: 0; }
 .grid > * { min-width: 0; max-width: 100%; }
-/* ==== جداول الملفات والمراجع: منع تكسّر التنسيق مع الأسماء الطويلة ==== */
+/* File and reference tables. */
 .table-scroll { position: relative; width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .table-scroll > table { min-width: auto; width: 100%; }
 .ref-table, .file-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
 .ref-table th, .file-table th { text-align: right; color: var(--slate); font-size: 12px; padding: 8px; border-bottom: 1px solid var(--mist); overflow-wrap: anywhere; }
 .ref-table td, .file-table td { padding: 9px 8px; border-bottom: 1px solid var(--mist); vertical-align: top; min-width: 0; overflow-wrap: anywhere; word-break: break-all; }
-/* توزيع الأعمدة: عمود الاسم يحصل على الحصة الأكبر، والأعمدة الرقمية ضيقة */
+/* Allocate the most width to names and keep numeric columns narrow. */
 .file-table th:nth-child(1), .file-table td:nth-child(1) { width: 34%; }
 .file-table th:nth-child(2), .file-table td:nth-child(2) { width: 16%; }
 .file-table th:nth-child(3), .file-table td:nth-child(3) { width: 18%; }
@@ -1451,12 +1443,12 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .ref-table th:nth-child(2), .ref-table td:nth-child(2) { width: 18%; }
 .ref-table th:nth-child(3), .ref-table td:nth-child(3) { width: 20%; }
 .ref-table th:nth-child(4), .ref-table td:nth-child(4) { width: 18%; }
-/* تناسق أزرار صفوف الجداول: مقاس موحّد بلا هوامش عمودية زائدة */
+/* Consistent table-row buttons. */
 .ref-table .row-actions, .file-table .row-actions { margin-top: 0; gap: 6px; align-items: center; flex-wrap: wrap; display: flex; }
 .ref-table .row-actions .btn, .file-table td .btn { margin-top: 0; max-width: 100%; white-space: normal; text-align: center; }
 .ref-table .ref-status { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; max-width: 100%; }
 .ref-table .ref-status select { max-width: 128px; min-width: 110px; flex: 1 1 110px; }
-/* خلية اسم الملف: سطران كحد أقصى + كسر الكلمات الطويلة جداً + مسافة مقتضبة */
+/* Keep long file names within two lines. */
 .file-cell { min-width: 0; max-width: 100%; }
 .file-name { min-width: 0; max-width: 100%; font-weight: 700; line-height: 1.7; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; word-break: break-all; }
 .file-meta { margin-top: 4px; font-size: 11.5px; color: var(--slate); overflow-wrap: anywhere; word-break: break-all; line-height: 1.7; }
@@ -1467,8 +1459,8 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .lib-item h3 { font-size: 14px; }
 .lib-item p { font-size: 12.5px; margin: 4px 0 8px; }
 
-/* ==== صفحة المكتبة العلمية (لوحة الإدارة): تخطيط بطل + عمود جلب جانبي ==== */
-/* ترويسة داكنة بأزرار فاتحة: تفصل بين «إدارة المكتبة» و«جلب الجديد» */
+/* Admin library. */
+/* Library header. */
 .lib-hero { padding: 0; overflow: hidden; }
 .lib-hero-top {
   display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: space-between;
@@ -1481,19 +1473,19 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .lib-hero-actions .btn:hover { background: #fff; border-color: #fff; color: var(--ink); }
 .lib-hero-actions .btn-primary { background: var(--fresh); border-color: var(--fresh); color: var(--ink); }
 .lib-hero-actions .btn-primary:hover { background: #fff; border-color: #fff; color: var(--ink); }
-/* شريط الإحصاءات داخل البطل — بمسافة سفلية تنفصل بها عن قائمة العناصر */
+/* Library statistics. */
 .lib-stats { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); padding: 16px 18px; margin-bottom: 22px; }
 .lib-stats .stat { box-shadow: none; background: var(--paper); border-color: var(--mist); }
 .lib-stats .stat-value { font-size: 20px; }
 .lib-hero-filters { padding: 0 18px; display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 14px; }
-/* عمودان: قائمة العناصر (الواسع) + لوحة الجلب (ثابتة على الشاشات الكبيرة) */
+/* Library items and import panel. */
 .lib-layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 336px; align-items: start; }
 .lib-panel { position: sticky; top: 16px; }
 @media (max-width: 1020px) {
   .lib-layout { grid-template-columns: minmax(0, 1fr); }
   .lib-panel { position: static; }
 }
-/* بطاقة عنصر: رأس (عنوان + شارات) + توثيق + وسوم + شريط إجراءات */
+/* Library item card. */
 .lib-card { display: grid; gap: 8px; padding: 14px 15px; }
 .lib-card-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; justify-content: space-between; }
 .lib-card-head h3 { font-size: 14.5px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -1504,7 +1496,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .lib-abs { font-size: 12.5px; color: var(--slate); }
 .lib-actions { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; border-top: 1px dashed var(--mist); padding-top: 9px; }
 .lib-actions .btn { padding: 6px 12px; font-size: 12px; }
-/* منتقي المصادر: بطاقات اختيار بدل قائمة منسدلة (يعمل بلا سكربتات عبر :checked) */
+/* CSS-only source picker. */
 .source-picker { display: grid; gap: 8px; }
 .source-option { position: relative; display: block; }
 .source-option input { position: absolute; opacity: 0; width: 1px; height: 1px; }
@@ -1518,7 +1510,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .source-name { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 800; color: var(--ink); }
 .source-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sea); flex: 0 0 auto; }
 .source-hint { margin-top: 4px; font-size: 11.5px; color: var(--slate); }
-/* حقول الجلب وحقول البحث الداخلي */
+/* Import and internal-search fields. */
 .lib-fields { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); }
 .lib-fields .field { margin-top: 0; }
 .lib-fields .lib-field-full { grid-column: 1 / -1; }
@@ -1528,15 +1520,20 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   border: 1px dashed var(--mist); font-size: 11.5px; color: var(--slate);
 }
 .lib-hint-box b { color: var(--ink); }
-/* رأس قسم النتائج الخارجية */
+/* External-result header. */
 .lib-section-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .lib-section-head h2 { margin: 0; }
 .lib-section-head .lib-section-note { font-size: 11.5px; color: var(--slate); }
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
 .toolbar input[type="search"], .toolbar select { flex: 1 1 200px; max-width: 100%; }
-/* فلتر فترة الإصدار في البحث الخارجي: حقلان ضيّقان «من سنة – إلى سنة» */
+.search-progress { flex: 1 0 100%; display: flex; align-items: center; gap: 10px; color: var(--slate); font-size: 11.5px; }
+.search-progress[hidden] { display: none; }
+.search-progress-track { position: relative; flex: 1 1 140px; min-width: 80px; height: 5px; overflow: hidden; border-radius: 999px; background: var(--mist); direction: ltr; }
+.search-progress-track span { position: absolute; inset-block: 0; width: 35%; border-radius: inherit; background: var(--sea); animation: library-search-progress 1.15s ease-in-out infinite alternate; }
+@keyframes library-search-progress { from { left: 0; } to { left: 65%; } }
+/* External search year range. */
 .toolbar input[type="number"] { flex: 0 1 96px; min-width: 88px; }
-/* تنويه قواعد حالات الحسابات في إدارة الباحثين: مطوي افتراضياً عند الفلترة */
+/* Collapsed account-state guidance. */
 .rules-note { border: 1px solid var(--mist); border-radius: 12px; background: var(--mist-soft); margin-bottom: 12px; }
 .rules-note > summary { list-style: none; cursor: pointer; padding: 10px 14px; font-size: 13px; font-weight: 800; color: var(--ink); }
 .rules-note > summary::-webkit-details-marker { display: none; }
@@ -1561,8 +1558,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .note-body { white-space: pre-wrap; font-size: 13.5px; line-height: 1.8; }
 .note-tags { display: flex; gap: 6px; flex-wrap: wrap; }
 
-/* ---- صفحة الشات: كارت واحد بملء الارتفاع + الجلسات أسفل رابط المشرف الذكي ---- */
-/* شريط التمرير بلون الهوية (كحلي + أخضر زنجبي) في كل مكان */
+/* Chat layout and session list. */
 * { scrollbar-width: thin; scrollbar-color: var(--sea) var(--mist-soft); }
 *::-webkit-scrollbar { width: 10px; height: 10px; }
 *::-webkit-scrollbar-track { background: var(--mist-soft); border-radius: 999px; }
@@ -1573,7 +1569,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 *::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, var(--sea-deep), var(--ink)); }
 *::-webkit-scrollbar-corner { background: var(--mist-soft); }
 
-/* وضع ملء الارتفاع: لا سكرول في الصفحة، والتمرير داخل الصناديق فقط */
+/* Fill the viewport and keep scrolling inside content panels. */
 .app-shell--fit { height: calc(100vh - 50px); padding-bottom: 14px; }
 .app-shell--fit .app-main { height: 100%; min-height: 0; }
 .app-shell--fit .app-side { max-height: 100%; }
@@ -1601,14 +1597,14 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 }
 .chat-welcome p { font-size: 13px; max-width: 420px; }
 .bubble { border-radius: 16px; padding: 10px 13px; max-width: min(86%, 720px); font-size: 13.5px; line-height: 1.9; }
-/* نحدّد اللون هنا لأن .bubble-user في صفحة الهبوط يستخدم خلفية غامقة ونصاً أبيض */
+/* Override the landing-page user bubble colors. */
 .bubble-user { background: var(--mist-soft); color: var(--ink); border: 1px solid var(--mist); align-self: flex-start; }
 .bubble-ai { background: #fff; color: var(--ink); border: 1px solid #cfe3f0; align-self: flex-end; }
-/* رسالة نظام داخل دردشة المناقشة (كإشعار تثبيت الملف): مصغّرة ومتمركزة. */
+/* Center system notices in defense chats. */
 .bubble-system { background: transparent; color: var(--slate); border: 1px dashed var(--mist); align-self: center; font-size: 11.5px; padding: 5px 12px; max-width: min(92%, 560px); text-align: center; }
 .bubble-text { white-space: pre-wrap; line-height: 1.9; overflow-wrap: anywhere; }
 .bubble-meta { font-size: 10.5px; color: var(--slate); margin-top: 6px; }
-/* مؤشر «يكتب…» وفقاعة معلّقة أثناء الإرسال بلا إعادة تحميل (chat-send.js) */
+/* Optimistic chat feedback. */
 .bubble.is-thinking { color: var(--slate); font-size: 12.5px; animation: chat-think 1.2s ease-in-out infinite; }
 .bubble.is-pending { opacity: 0.85; }
 @keyframes chat-think { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
@@ -1625,7 +1621,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   flex: 0 0 auto; width: 46px; height: 46px; padding: 0; border-radius: 14px; display: grid; place-items: center;
 }
 
-/* سجل الجلسات أسفل رابط المشرف الذكي داخل نفس القائمة (ChatGPT/Claude style) */
+/* Supervisor session list. */
 .chat-nav { display: grid; gap: 6px; margin-top: 4px; min-height: 0; }
 .chat-side-empty { font-size: 11.5px; color: var(--slate); text-align: center; padding: 6px 4px; }
 .chat-side-note { font-size: 10px; color: var(--slate); opacity: .85; text-align: center; padding: 2px 4px 4px; }
@@ -1649,8 +1645,8 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 .chat-del-btn:hover { background: var(--apricot-soft); color: #7c2b1f; }
 
 @media (max-width: 900px) {
-  /* بطاقات بدل الجداول على الهاتف: كل صف بطاقة مستقلة بحدود ومسافات مريحة */
-  .table-scroll { overflow-x: auto; }
+  /* Convert dense tables to stacked rows on mobile. */
+  .table-scroll { max-height: none; overflow-x: auto; overflow-y: hidden; }
   .table-scroll > table { min-width: 0; width: 100%; }
   .ref-table, .file-table { table-layout: auto; }
   .ref-table thead, .file-table thead { display: none; }
@@ -1661,6 +1657,10 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   }
   .ref-table tr:last-child, .file-table tr:last-child { margin-bottom: 0; }
   .ref-table td, .file-table td { border: 0; padding: 0; min-width: 0; max-width: 100%; }
+  .ref-table td::before, .file-table td::before {
+    content: attr(data-label); display: block; margin-bottom: 3px;
+    color: var(--slate); font-size: 10.5px; font-weight: 700;
+  }
   .ref-table td:nth-child(n), .file-table td:nth-child(n) { width: auto; }
   .file-name { -webkit-line-clamp: 3; }
   .file-table .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -1669,7 +1669,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   .file-table .row-actions .inline-form .btn, .ref-table .row-actions .inline-form .btn { flex: 1 1 auto; width: 100%; }
   .ref-table .ref-status { display: flex; flex-wrap: wrap; }
   .ref-table .ref-status select { flex: 1 1 auto; max-width: none; }
-  /* الشبكات والنماذج على الشاشات الضيقة جداً: عمود واحد بلا حد أدنى يكسر العرض */
+  /* Use a single flexible column on narrow screens. */
   .grid { grid-template-columns: minmax(0, 1fr); }
   .file-viewer { grid-template-columns: minmax(0, 1fr); }
   .toolbar input[type=search], .toolbar select { min-width: 0; flex: 1 1 100%; }
@@ -1692,19 +1692,23 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
   .app-nav-sep { display: none; }
   .app-nav-label { display: none; }
   .app-top .brand-text { display: none; }
+  .admin-top .topbar-inner { flex-wrap: nowrap; }
+  .admin-top .brand-text { display: none; }
+  .admin-top .topbar-actions { flex: 0 0 auto; gap: 6px; }
   .chat-card { height: 70vh; min-height: 420px; }
-  /* بطاقة المناقشة: نموذج تثبيت ملف البحث أسفل الرسائل — تتمدد بدل الارتفاع
-     المقصوص الذي كان يُقصّ زر «تثبيت وبدء المناقشة» تحت الطيّ فيُلزم سكرولاً.
-     وصندوق الرسائل يبقى قابلاً للتمرير بسقف محدود. */
-  .chat-card--defense { height: auto; }
+  /* Let the defense panel grow while keeping its message list bounded. */
+  .defense-page { height: auto; min-height: 0; }
+  .chat-card--defense { flex: 0 0 auto; height: auto; min-height: 420px; }
   .chat-card--defense .chat-body { max-height: 50vh; }
+  .defense-stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .chat-nav { margin-top: 0; }
   .chat-list { max-height: 120px; }
   .chat-side-note { display: none; }
 }
-/* قائمة السايدبار تُفتح من زر الهامبرغر في الترويسة.
-   :has ضرورية لربط زر في الترويسة بقائمة خارجها، فلا نُطبّق إلا على المتصفحات
-   الداعمة — وإلا بقي صفّ الأقراص الأفقي أعلاه بلا تعطيل للتنقل. */
+@media (max-width: 560px) {
+  .defense-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* The :has layout applies only where the selector is supported. */
 @supports selector(:has(*)) {
   @media (max-width: 900px) {
     .app-side { display: none; }
@@ -1713,7 +1717,7 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
     .nav-toggle-input:focus-visible ~ .app-top-inner .nav-toggle-btn,
     .nav-toggle-input:focus-visible ~ .topbar-inner .nav-toggle-btn { outline: 2px solid var(--fresh); outline-offset: 2px; }
     .topbar.admin-top { position: sticky; top: 0; z-index: 60; }
-    /* اللوحة تغطي الشاشة كاملة أسفل الشريط العلوي (z:60 فوقها) — padding-top يبعد الروابط عنه */
+    /* Keep mobile navigation below the sticky header. */
     body:has(#app-nav-toggle:checked) .app-side {
       display: block; position: fixed; inset: 0; z-index: 55;
       background: var(--ink); border: 0; border-radius: 0;
@@ -1733,22 +1737,14 @@ button.btn:disabled { opacity: .55; cursor: not-allowed; }
 }
 `;
 
-/**
- * سايدبار لوحة الإدارة: مجموعات أقسام بأيقونات + تمييز الصفحة الحالية،
- * وأسفله رابط زيارة الموقع وتسجيل الخروج (نفس عائلة تنسيقات app-nav).
- */
-/** هل للحساب حق دخول لوحة الإدارة؟ (المدير دائماً، والمشرف بصلاحية admin:panel). */
+/** Returns whether the account can access the admin panel. */
 function hasAdminPanel(account) {
   if (!account) return false;
   if (account.role === 'admin') return true;
   return Array.isArray(account.adminPermissions) && account.adminPermissions.includes('admin:panel');
 }
 
-/**
- * سايدبار لوحة الإدارة: لا يظهر للمشرف إلا ما يملك صلاحيته.
- * `adminPermissions` تُحمَّل مع الحساب في middleware/auth.js (حساب واحد لكل طلب)،
- * والصفحات المحجوبة (adminOnly) — كالإعدادات — تبقى للمدير وحده ولا تُمنح.
- */
+/** Renders only admin links permitted for the current account. */
 function renderAdminSidebar(activeKey, account = null) {
   const link = (item) =>
     `<a href="${item.href}"${item.key === activeKey ? ' class="active"' : ''}>${icon(item.icon, 'icon-sm')}<span>${escapeHtml(
@@ -1783,7 +1779,7 @@ function renderAdminSidebar(activeKey, account = null) {
 </aside>`;
 }
 
-/** ترويسة لوحة الإدارة: الشعار بعنوان «لوحة الإدارة» + رابط زيارة الموقع + قائمة الحساب. */
+/** Renders the admin header. */
 function renderAdminTopbar(activeKey, account) {
   return `<header class="topbar admin-top">
   <input type="checkbox" class="nav-toggle-input" id="app-nav-toggle" aria-label="أقسام لوحة الإدارة" />
@@ -1798,11 +1794,7 @@ function renderAdminTopbar(activeKey, account) {
 </header>`;
 }
 
-/**
- * بطاقة إحصائية واحدة.
- * الأرقام (والأرقام المكتوبة كنص) تُنسَّق بفواصل الآلاف، أم النصوص ذات الوحدات
- * (مثل «100 MB» أو «1.2 GB · 42 ملف») فتُعرض كما هي — وإلا تحوّلت إلى NaN.
- */
+/** Formats numeric values while preserving values with units. */
 export function renderStat(label, value) {
   const isNumeric =
     value == null ||
@@ -1814,25 +1806,23 @@ export function renderStat(label, value) {
   )}</p></div>`;
 }
 
-/** جدول بسيط مع رسالة عند عدم وجود بيانات. */
+/** Renders a table or its empty state. */
 export function renderTable({ columns, rows, emptyMessage = 'لا توجد بيانات بعد.' }) {
   if (!rows.length) {
     return `<div class="empty">${escapeHtml(emptyMessage)}</div>`;
   }
 
   const head = columns.map((column) => `<th>${escapeHtml(column)}</th>`).join('');
-  return `<table>
+  const minWidth = Math.max(columns.length, 1) * 112;
+  return `<table class="data-table" style="min-width:${minWidth}px">
   <thead><tr>${head}</tr></thead>
   <tbody>${rows.map((row) => `<tr>${row}</tr>`).join('')}</tbody>
 </table>`;
 }
 
-/**
- * ترويسة الهوية: أيقونة الشعار على وسادة Paper + اسم Zena AI بخط Manrope 800،
- * ثم الجملة التعريفية بلون Mist. (الشعار يوضع دائماً داخل مساحة أمان ولا يُمدَّد أو يُلوَّن.)
- */
+/** Renders the shared brand header. */
 function renderBrand(activeKey) {
-  const sub = activeKey ? `${APP_TAGLINE} · لوحة الإدارة` : APP_TAGLINE;
+  const sub = activeKey ? `${APP_TAGLINE}` : APP_TAGLINE;
 
   return `<a class="brand" href="/">
   <span class="brand-mark"><img src="${BRAND.icon}" alt="" width="34" height="34" /></span>
@@ -1843,10 +1833,7 @@ function renderBrand(activeKey) {
 </a>`;
 }
 
-/**
- * محتوى قائمة الإشعارات المنسدلة (مشترك بين شريط التطبيق والترويسة العامة).
- * لا صفحة إشعارات مخصّصة — كل الإشعارات تُعرض هنا ويُدار بها من /js/app-shell.js.
- */
+/** Renders the shared notification dropdown. */
 function renderBellMenu() {
   return `<div class="bell-menu" id="bell-menu" hidden>
     <div class="bell-head">
@@ -1858,10 +1845,21 @@ function renderBellMenu() {
   </div>`;
 }
 
-/**
- * قائمة حساب المستخدم المنسدلة (مشتركة بين شريط التطبيق والترويسة العامة):
- * زر دائري بصورة الحساب يفتح قائمة: حسابي · ملفي البحثي · الباقات · لوحة الإدارة (للمدير) · تسجيل الخروج.
- */
+function renderPushPrompt() {
+  return `<section class="push-prompt" id="bell-push" aria-labelledby="push-title" hidden>
+    <span class="push-prompt-icon">${icon('bell', 'icon')}</span>
+    <div class="push-prompt-copy">
+      <b id="push-title">خليك على اطلاع من هاتفك</b>
+      <p id="push-note">فعّل إشعارات الهاتف لتصلك تحديثات المنصة أولًا بأول.</p>
+    </div>
+    <div class="push-prompt-actions">
+      <button class="btn btn-primary" id="push-toggle" type="button">تفعيل الإشعارات</button>
+      <button class="push-prompt-dismiss" id="push-dismiss" type="button">لاحقًا</button>
+    </div>
+  </section>`;
+}
+
+/** Renders the shared user-account dropdown. */
 function renderUserMenu(account) {
   const name = String(account?.full_name || account?.email || 'باحث').trim();
   const email = String(account?.email || '').trim();
@@ -1890,7 +1888,7 @@ function renderUserMenu(account) {
   </div>`;
 }
 
-/** الشريط العلوي المضغوط للوحة الباحث: الشعار + جرس الإشعارات + صورة الحساب (قائمة منسدلة). */
+/** Renders the compact user application header. */
 function renderAppTopbar(account, unread = 0) {
   const badge =
     unread > 0
@@ -1923,20 +1921,14 @@ function renderAppTopbar(account, unread = 0) {
 </header>`;
 }
 
-/**
- * الشريط الجانبي للوحة الباحث.
- * الترتيب: فاصل ← أدوات البحث ← فاصل ← المشرف الذكي ← سجل الجلسات.
- * navBottom محتوى إضافي تحت رابط المشرف الذكي (تستخدمه صفحة الشات لسجل جلساتها)،
- * والحساب/الملف البحثي/الخروج كلها في الشريط العلوي فلا نكرّرها هنا.
- */
+/** Renders user navigation and optional conversation links. */
 function renderAppSidebar(activeKey, account, navBottom = '') {
   const link = (item) =>
     `<a href="${item.href}"${item.key === activeKey ? ' class="active"' : ''}>${icon(item.icon, 'icon-sm')}<span>${escapeHtml(
       item.label
     )}</span></a>`;
 
-  // الخدمات المفتوحة تُحسب في middleware/auth.js مرة واحدة لكل طلب وحُمّلت على req.account.
-  // غيابها (زائر أو خطأ قراءة) ⇒ نعرض كل الأدوات حتى لا يختفي شيء بالخطأ.
+  // Missing service data falls back to showing links rather than hiding them.
   const open = Array.isArray(account?.services)
     ? new Set(
         account.services
@@ -1951,8 +1943,7 @@ function renderAppSidebar(activeKey, account, navBottom = '') {
     ? `<a href="/admin"${activeKey === 'admin' ? ' class="active"' : ''}>${icon('shield', 'icon-sm')}<span>لوحة الإدارة</span></a>`
     : '';
 
-  // صفحات المحادثة (المشرف/المعلم/المناقشة/الصوتية): الروابط العليا تنطوي
-  // تلقائياً لتظهر الجلسات بلا سكرول — والمستخدم يفردها بالضغط متى أراد.
+  // Collapse primary links on conversation pages to keep session lists visible.
   const isChatFocus = ['chat', 'assistant', 'defense', 'voice'].includes(activeKey);
 
   return `<aside class="app-side">
@@ -1977,7 +1968,7 @@ function renderAppSidebar(activeKey, account, navBottom = '') {
 </aside>`;
 }
 
-/** ترويسة الصفحة العامة: قائمة الموقع + زر الدخول أو صورة الحساب (قائمة منسدلة) حسب الجلسة. */
+/** Renders the public header for signed-in and anonymous users. */
 function renderPublicHeader(account, unread = 0) {
   const nav = PUBLIC_NAV.map((item) => `<a href="${item.href}">${escapeHtml(item.label)}</a>`).join('');
 
@@ -1989,7 +1980,7 @@ function renderPublicHeader(account, unread = 0) {
     : `<a class="link-quiet" href="/login">تسجيل الدخول</a>
        <a class="btn btn-primary" href="/login">ابدأ مجاناً</a>`;
 
-  // جرس الإشعارات يظهر فقط للمسجّل — قائمة منسدلة (بلا صفحة مخصّصة)
+  // Notifications are available only to signed-in users.
   const bellBadge =
     unread > 0
       ? `<span class="nav-bell-badge" id="bell-badge">${unread > 99 ? '99+' : unread}</span>`
@@ -2018,17 +2009,13 @@ function renderPublicHeader(account, unread = 0) {
 </header>`;
 }
 
-/**
- * رابط واتساب للدعم الفني: يحوّل الرقم (بصيغته المحلية أو الدولية) إلى رابط
- * `wa.me` برسالة عربية جاهزة، فيفتح المحادثة ويملأ النص للباحث.
- * الرقم: `SUPPORT_WHATSAPP` في ملف البيئة أولاً ثم الثابت في constants.
- */
+/** Builds a WhatsApp support link from the configured phone number. */
 export function whatsappLink(message = 'مرحباً، لدي مشكلة في المنصة وأحتاج مساعدة.') {
-  // الرقم من صفحة الإعدادات أولاً (ما عدّله المدير)، ثم البيئة، ثم لا شيء.
+  // Prefer the admin setting, then the environment fallback.
   const raw = currentSupportWhatsapp() || SUPPORT_WHATSAPP;
   if (!raw) return '';
 
-  // نُبقي الأرقام فقط، ثم نضيف رمز الدولة (218) إن كان الرقم محلياً يبدأ بـ 0.
+  // Normalize local numbers to the Libya country code.
   let digits = raw.replace(/[^\d+]/g, '').replace(/\+/g, '');
   if (/^0/.test(digits)) digits = `218${digits.replace(/^0+/, '')}`;
   if (digits.length < 8) return '';   // رقم ناقص أو افتراضي ⇒ لا نرسل المستخدم إلى رابط مكسور
@@ -2036,7 +2023,7 @@ export function whatsappLink(message = 'مرحباً، لدي مشكلة في ا
   return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 }
 
-/** زر واتساب عائم أسفل الشاشة — نقطة وصول واحدة للدعم في كل صفحة. */
+/** Renders the floating support link. */
 function renderWhatsappFloat({ showOnMobile = false } = {}) {
   const href = whatsappLink();
   if (!href) return '';
@@ -2052,7 +2039,7 @@ function renderWhatsappFloat({ showOnMobile = false } = {}) {
   </a>`;
 }
 
-/** تذييل الصفحة العامة بمعلومات المنصة والدعم. */
+/** Renders the public footer. */
 function renderPublicFooter() {
   const productLinks = PUBLIC_NAV.map(
     (item) => `<li><a href="${item.href}">${escapeHtml(item.label)}</a></li>`
@@ -2071,7 +2058,7 @@ function renderPublicFooter() {
         ${
           whatsappLink()
             ? `<p>واتساب: <a href="${escapeHtml(whatsappLink())}" target="_blank" rel="noopener">${escapeHtml(
-                currentSupportWhatsapp()
+                currentSupportWhatsapp() || SUPPORT_WHATSAPP
               )}</a></p>`
             : ''
         }
@@ -2098,13 +2085,7 @@ function renderPublicFooter() {
 </footer>`;
 }
 
-/**
- * قالب الصفحة الكامل.
- * - `area`: 'public' صفحة عامة (ترويسة وتذييل الموقع)، 'auth' صفحة دخول بلا ترويسة،
- *   'admin' لوحة الإدارة بالشريط الكحلي وقائمة الإدارة.
- * - `pageHead: false` يُستخدم في الصفحات التي تحمل عنوانها البطولي في الجسم (الصفحة الرئيسية).
- * - إن كان العنوان يحتوي اسم المنصة لا يُكرَّر في وسم <title>.
- */
+/** Renders a complete page for the public, auth, user, or admin area. */
 export function renderLayout({
   title,
   subtitle = '',
@@ -2136,27 +2117,20 @@ export function renderLayout({
   </div>
 </header>`;
 
-  // تذييل الموقع للصفحات العامة فقط — لوحة الإدارة بلا تذييل (مساحتها أثقل من محتواها)
+  // Only public pages use the marketing footer.
   const footer = area === 'public' ? renderPublicFooter() : '';
 
-  // زر الدعم العائم: يظهر في كل الصفحات (public/app) وليس في لوحة الإدارة.
-  // على الشاشات الكبيرة يظهر في كل الصفحات.
-  // على الهاتف (<= 560px) يظهر فقط في الصفحة الرئيسية (area === 'public')
-  // وصفحات أدوات البحث (area === 'app' و activeKey في ['library', 'references']).
+  // Restrict the floating support link to selected user pages.
   let whatsappFloat = '';
-  if (area === 'admin') {
-    whatsappFloat = '';
-  } else if (area === 'public') {
+  if (area === 'public') {
     whatsappFloat = renderWhatsappFloat({ showOnMobile: true });
-  } else if (area === 'app' && ['library', 'references'].includes(activeKey)) {
+  } else if (area === 'app' && ['dashboard', 'journey', 'library', 'notes', 'files'].includes(activeKey)) {
     whatsappFloat = renderWhatsappFloat({ showOnMobile: true });
-  } else {
-    whatsappFloat = renderWhatsappFloat();
   }
 
-  // وصف الصفحة للمشاركة ومحركات البحث: نصّ الصفحة إن وُجد، وإلا وسم المنصة.
+  // Use the page subtitle as its metadata description when available.
   const metaDescription = String(subtitle || '').trim() || `${APP_NAME} — ${APP_TAGLINE}`;
-  // المسار الفعلي للصفحة (يمرّره المسار) — يُستخدم في og:url و link canonical.
+  // Used for og:url and the canonical link.
   const currentPath = String(canonicalPath || activeKey || '/');
 
   const headBlock = pageHead
@@ -2166,16 +2140,15 @@ export function renderLayout({
   </div>`
     : '';
 
-  // جرس الإشعارات المنسدل يعمل أيضاً على الصفحات العامة ولوحة الإدارة لمن لديه جلسة
-  // app-shell للجرس والقوائم. الجرس يظهر في «public» و«app» و«admin» ⇒ يُحمَّل في الثلاث،
-  // ويتجاهل نفسه إن لم يجد عناصره (صفحة بلا جرس) فلا أثر زائد.
-  //
-  // ملاحظة: لم نُحمّل /js/push-notifications.js هنا — حُذف زر «تفعيل إشعارات الهاتف»
-  // من قائمة الجرس بقرار المنصة، فصار السكربت بلا نقطة انطلاق (init يتحقق من الزر
-  // ويرجع فوراً). الخدمة نفسها باقية على الخادم، وما فعّل الإشعارات سابقاً ما زال
-  // يستقبلها عبر Service Worker نفسه.
+  // Load shared notification behavior only where the bell is rendered.
   const bellAreas = ['public', 'app', 'admin'];
-  const extraScripts = bellAreas.includes(area) && account ? ['/js/app-shell.js'] : [];
+  const extraScripts =
+    bellAreas.includes(area) && account
+      ? ['/js/app-shell.js', ...(area === 'app' ? ['/js/push-notifications.js'] : [])]
+      : [];
+  if (area === 'public' && firebaseWebConfig().measurementId) {
+    extraScripts.push('/js/firebase-analytics.js');
+  }
   const allScripts = [
     ...new Set([...(Array.isArray(scripts) ? scripts : []), ...extraScripts])
   ];
@@ -2183,13 +2156,11 @@ export function renderLayout({
     .map((src) => `<script src="${escapeHtml(src)}" defer></script>`)
     .join('\n');
 
-  // لوحة الباحث: السايدبار يمين (RTL) والمحتوى في العمود الثاني.
-  // navBottom محتوى إضافي أسفل قائمة السايدبار (سجل جلسات الشات مثلاً).
-  // fitViewport يمنع سكرول الصفحة ويجعل المحتوى يملأ ما تبقى من ارتفاع الشاشة.
+  // User layout places the sidebar on the right and can optionally fill the viewport.
   const shellClass = fitViewport ? 'app-shell app-shell--fit' : 'app-shell';
   const mainInner =
     area === 'app'
-      ? `<div class="${shellClass}"><div class="app-main">${headBlock}${body}</div>${renderAppSidebar(
+      ? `<div class="${shellClass}"><div class="app-main">${account ? renderPushPrompt() : ''}${headBlock}${body}</div>${renderAppSidebar(
         activeKey,
         account,
         navBottom
@@ -2209,7 +2180,7 @@ export function renderLayout({
 <meta name="description" content="${escapeHtml(metaDescription)}" />
 <meta name="theme-color" content="#102A43" />
 
-<!-- المشاركة على وسائل التواصل: بلا هذه يظهر الرابط نصاً بلا صورة أو وصف -->
+<!-- Social sharing metadata. -->
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="${escapeHtml(APP_NAME)}" />
 <meta property="og:locale" content="ar_LY" />
@@ -2224,7 +2195,7 @@ export function renderLayout({
 <meta name="twitter:image" content="${escapeHtml(absoluteUrl(BRAND.shareImage))}" />
 <link rel="canonical" href="${escapeHtml(absoluteUrl(currentPath))}" />
 
-<!-- تطبيق ويب: يجعل الإشعارات مثبّتة على الهاتف وتعمل بلا شريط متصفح -->
+<!-- Installable web app metadata. -->
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-title" content="${escapeHtml(APP_NAME)}" />
@@ -2246,11 +2217,9 @@ ${scriptTags}
 </html>`;
 }
 
-/** صفحة رسالة (خطأ أو تنبيه) بنفس هوية المنصة.
- * التفاصيل التقنية تُعرض في التطوير فقط (H1): في الإنتاج تُخفى تلقائياً
- * حتى لا تكشف نصوص driver/مضيف/مستخدم قاعدة البيانات للمستخدم النهائي. */
+/** Renders a notice and hides technical details in production. */
 export function renderNotice({ title, message, details = '', status = 200, extraHtml = '', area = '', subtitle = '', activeKey = '' }) {
-  // نفس نمط /api/health: التفاصيل للسجل فقط في الإنتاج، وللشاشة في التطوير.
+  // Match /api/health by exposing details only outside production.
   const showDetails = process.env.NODE_ENV !== 'production' ? details : '';
   const body = `
   <div class="notice">
@@ -2260,8 +2229,7 @@ export function renderNotice({ title, message, details = '', status = 200, extra
     ${extraHtml}
   </div>`;
 
-  // F7: القيم الافتراضية تتبع السياق — نداءات الإدارة (بلا area) تحصل على
-  // «لوحة الإدارة/home» كما قبل، ونداءات المستخدم (مع area) تحصل على عنوان محايد.
+  // Preserve admin defaults while using neutral defaults for user-facing errors.
   const resolvedArea = area || 'public';
   const resolvedSubtitle = subtitle || (area ? 'حدث خطأ' : 'لوحة الإدارة');
   const resolvedKey = activeKey || (area ? area : 'home');
@@ -2269,10 +2237,7 @@ export function renderNotice({ title, message, details = '', status = 200, extra
   return { status, html: renderLayout({ title, subtitle: resolvedSubtitle, activeKey: resolvedKey, area: resolvedArea, body }) };
 }
 
-/**
- * صفحة «الخدمة غير متاحة في باقتك»: تشرح ما تحتاجه الباقة وترى ما هو مفتوح فعلياً.
- * تُستخدم من requireService في middleware/auth.js.
- */
+/** Renders a service-access notice with the user's available services. */
 export function renderServiceNotice({ service = 'هذه الخدمة', account = null, services = [] }) {
   const open = services.filter((item) => item.enabled);
   const chips = open.length

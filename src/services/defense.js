@@ -1,24 +1,8 @@
 import { pool } from '../db/client.js';
 
-/**
- * خدمة المناقشة المستقلة (defense): دردشة مستقلة تماماً بملف بحث ثابت.
- *
- * الفكرة: جلسة المناقشة = دردشة مستقلة تُفتح بملف بحث واحد ثابت
- * (thesis_file_id في defense_state)، والمناقِش يقسم البحث ذهنياً إلى أجزائه
- * الطبيعية ويناقش جزءاً جزءاً بلا تكرار.
- *
- * الإصلاح (21 أكتوبر 2026): المناقشة كانت بلا حدّ ولا تتبّع — يسأل بلا نهاية
- * ويكرّر من الأول (لأن `asked` و `coveredParts` لم يُزادا أبداً). الآن:
- *   - خطة الأجزاء: تُستخرج من نصّ الملف (فصول/مقاطع) وتُخزَّن في defense_state.
- *   - سقف أسئلة محسوب (حصّة كل جزء) ⇒ لا تساؤل لا ينتهي.
- *   - عدّاد `asked` حقيقي + `askedQuestions` (نصّ كل سؤال) + `coveredParts`.
- *   - المناقِش يعرف في موجّه: كم طرح، كم بقي، وأي جزء غطّاه ⇒ لا يكرّر.
- */
+/** Defense-session planning, state tracking, scoring, and progress helpers. */
 
-/**
- * وسم ختام المناقشة: المناقِش يوسم رسالة تقييمه النهائي به، فتُحذف الصيغة من
- * النص المحفوظ ويُغلق مسار الجلسة (done) فوراً — لا انتظار لزر «إنهاء».
- */
+/** Internal marker removed from final reports before they are stored or displayed. */
 const DEFENSE_FINAL_RE = /\[\[\s*defense-final\s*\]\]/i;
 const DEFENSE_FINAL_GLOBAL_RE = /\s*\[\[\s*defense-final\s*\]\]/gi;
 
@@ -30,14 +14,9 @@ export function extractDefenseFinalTag(text) {
   };
 }
 
-/* =============================================================================
- * خطة المناقشة: تقسيم البحث إلى أجزاء + سقف أسئلة + تتبّع التغطية
- * ============================================================================= */
+/* Defense plan: section detection, question limits, and coverage tracking. */
 
-/**
- * أقسام البحث الشائعة — تُطابَق على عناوين الفصول/المقاطع في نصّ الملف.
- * الترتيب مهم: نطابق الأعمق أولاً (نتائج ومناقشة قبل المنهجية).
- */
+/** Common thesis sections, ordered from specific headings to broader matches. */
 const SECTION_PATTERNS = [
   { key: 'intro', label: 'المقدمة والخلفية والمشكلة', re: /مقدم|تمهيد|المشكلة|الفرضية|الفكرة العامة/i },
   { key: 'problem', label: 'المشكلة البحثية والأهداف والفرضيات', re: /أهد[اف]|مشكلة البحث|فرضي|تساؤل|قائمة الفرضيات/i },
@@ -47,29 +26,25 @@ const SECTION_PATTERNS = [
   { key: 'references', label: 'المراجع وقائمة المصادر', re: /مراجع|قائمة المصادر/i }
 ];
 
-/** الحد الأدنى لعدد الأسئلة في الجلسة كلها (حتى لو كان الملف صغيراً). */
+/** Minimum questions per session, including short documents. */
 const MIN_QUESTIONS = 6;
 
-/** سقف أعلى للجلسة كلها: مناقشة حقيقية، لا استجواب لا ينتهي. */
+/** Hard limit to prevent unbounded sessions. */
 const MAX_QUESTIONS = 36;
 
-/**
- * كل هذا العدد من أحرف الجزء ≈ سؤال واحد فيه (≈ ٣ صفحات: كل صفحة ~٩٠٠ حرف
- * في estimatePages). هذا هو **مقياس عدد الأسئلة**: بحث من ١٠٠ صفحة ⇒ ~٣٠ سؤالاً،
- * وبحث من ٢٠ صفحة ⇒ ~٧ أسئلة. (كان قبل ذلك ٦ أسئلة ثابتة لكل بحث.)
- */
+/** Approximate characters per question, calibrated to about three pages. */
 const CHARS_PER_QUESTION = 2800;
 
-/** أقصى حصّة للجزء الواحد: كتلة ضخمة لا تبتلع المناقشة كلها. */
+/** Maximum question quota for a single section. */
 const MAX_QUOTA_PER_PART = 5;
 
-/** أقصى عدد أجزاء في الخطة (حماية من فهرس/عناوين متكرّرة في ملف ضخم). */
+/** Maximum section count for documents with repetitive headings. */
 const MAX_PLAN_PARTS = 60;
 
-/** حجم الجزء الاحتياطي حين لا تُوجد عناوين في النص المستخرج. */
+/** Fallback chunk size when extracted text has no headings. */
 const FALLBACK_CHUNK_CHARS = CHARS_PER_QUESTION * 2;
 
-/** كلمات بداية عناوين الفصول/المقاطع في الرسائل العربية. */
+/** Common Arabic chapter-heading prefixes. */
 const CHAPTER_WORDS = [
   'الفصل ',
   'الباب ',
@@ -82,13 +57,10 @@ const CHAPTER_WORDS = [
   'باب '
 ];
 
-/**
- * ترقيم القسم: «١.٢ منهجية» أو «2) …» أو «3: …» — **بلا شُرَطة** لأن
- * «3- …» في الرسائل عنصر قائمة لا عنواناً.
- */
+/** Matches numbered headings but excludes hyphenated list items. */
 const NUMBERED_HEADING_RE = /^(?:[\(\[]?\s*[\d٠-٩]{1,3}\s*[\)\].:]\s*\S|[\d٠-٩]{1,3}(?:\.[\d٠-٩]{1,3})+\s+\S)/u;
 
-/** سطر فهرس المحتويات: نقاط قائدة («المقدمة ...... ٥») أو رقم صفحة في آخره. */
+/** Detects table-of-contents entries. */
 function looksLikeToc(line) {
   const l = String(line || '');
   return /\.{3,}|…/.test(l) || /\s[\d٠-٩]{1,4}\s*$/u.test(l.trim());
@@ -99,26 +71,23 @@ function isChapterLine(line) {
   return CHAPTER_WORDS.some((word) => l.startsWith(word));
 }
 
-/**
- * هل السطر عنوان قسم فعلي؟ (لا سطر فهرس ولا سطر بيانات ولا جملة عادية)
- * السطر الطويل جملة عادية بالضرورة ⇒ ليس عنواناً.
- */
+/** Rejects table-of-contents entries, data rows, and long prose from heading matches. */
 function isHeadingLine(line) {
   const l = String(line || '').trim();
   if (!l || l.length > 120) return false;
-  if (isChapterLine(l)) return true; // عناوين الفصول أولوية على قاعدة "ينتهي برقم"
-  if (looksLikeToc(l)) return false; // فهرس المحتويات («… ..... ٥») ليس قسمًا
+  if (isChapterLine(l)) return true; // Chapter headings take precedence over trailing-number checks.
+  if (looksLikeToc(l)) return false; // Exclude table-of-contents entries.
   if (!NUMBERED_HEADING_RE.test(l)) return false;
 
   const body = l.replace(NUMBERED_HEADING_RE, '').trim();
   if (body.length < 3) return false;
   const separators = (l.match(/[,،|؛]/gu) || []).length;
-  if (separators >= 3) return false; // سطر جدول بيانات لا عنوان
-  if (/^[\d٠-٩\s.\-–↑%]+$/u.test(body)) return false; // أرقام فقط
+  if (separators >= 3) return false; // Exclude data rows.
+  if (/^[\d٠-٩\s.\-–↑%]+$/u.test(body)) return false; // Exclude numeric-only headings.
   return true;
 }
 
-/** مفتاح فريد للجزء: نسمح بتكرار المفتاح المنطقي («intro#2») للفصول المكرّرة. */
+/** Adds a suffix when the same logical section appears more than once. */
 function uniqueKey(base, taken) {
   const key = String(base || 'part').trim() || 'part';
   if (!taken.has(key)) {
@@ -144,26 +113,12 @@ function keyOf(title, body) {
   return null;
 }
 
-/**
- * يقسّم نص البحث إلى أجزائه الفعلية كما وردت في الملف (فصول/مقاطع/عناوين
- * مرقّمة)، كل جزء بمفتاحه وعنوانه وحجم متنه ووزنه العلمي.
- *
- * التغيير الجوهري (٢١ أكتوبر ٢٠٢٦): كان التقسيم يعطي **٦ أجزاء كحدّ أقصى
- * دائماً** (المفاتيح من أنماط الأقسام الستة وحدها) ⇒ سقف الأسئلة = ٦ لكل بحث
- * مهما كان حجمه (١٠٠ صفحة = ٢٠ صفحة). الآن:
- *   - كل عنوان فعلي في الملف = جزء مستقل (بحدّ ٦٠ جزءاً).
- *   - تُهمَل أسطر فهرس المحتويات وعناوين الجداول وعناصر القوائم («٣- …»).
- *   - إن لم توجد عناوين في النص المستخرج: يُقسَّم المتن بالحجم (chunkBySize)
- *     فلا يسقط بحث ضخم إلى عدد أسئلة صغير.
- *   - الترتيب = ترتيب البحث نفسه (كما يمشي المناقِش في الورقة).
- */
+/** Splits extracted thesis text into ordered sections and ignores contents and list entries. */
 export function planParts(text) {
   const raw = String(text || '');
   if (!raw.trim()) return [];
 
-  // تقسيم بالحجم فقط (لا يعتمد على كشف عناوين الفصول).
-  // كل جزء بحجم FALLBACK_CHUNK_CHARS حرفاً، مما يجعل عدد الأسئلة
-  // متناسباً مع حجم البحث بغض النظر عن جودة استخراج النص من PDF.
+  // Fall back to size-based chunks when no usable headings are found.
   return chunkBySize(raw);
 }
 function chunkBySize(text) {
@@ -190,10 +145,7 @@ function chunkBySize(text) {
   });
 }
 
-/**
- * خطة الجلسة من نصّ البحث: الأجزاء + تقدير عدد الصفحات (لإعلام المناقِش والواجهة
- * بأصل العدد المحسوب: «بحثك ≈ ١٢٠ صفحة ⇒ خطة ٣٠ سؤالاً»).
- */
+/** Builds the session plan and estimates the thesis page count. */
 export function buildDefensePlan(text) {
   const raw = String(text || '');
   const parts = planParts(raw);
@@ -201,8 +153,7 @@ export function buildDefensePlan(text) {
 }
 
 
-/** يقدّر كثافة محتوى الجزء: يزيد «وزن» الجزء إذا وُجدت في عنوانه أو نصّه
- *  كلمات تشير إلى منهج أو نتائج أو إحصاء أو نموذج أو فرضية أو عينة. */
+/** Raises section weight when its title or text signals methodological density. */
 function partWeight(label, text) {
   const t = String(label || '') + ' ' + String(text || '');
   let w = 0;
@@ -213,13 +164,7 @@ function partWeight(label, text) {
   return w;
 }
 
-/**
- * حصّة الأسئلة في الجزء: مشتقّة من **حجم متنه** (سؤال لكل ~٢٨٠٠ حرف ≈ ٣ صفحات)،
- * ويُضاف سؤال إذا كان الجزء علمياً كثيفاً (منهج/نتائج/إحصاء/مناقشة).
- *
- * هذه هي وحدة الحساب الوحيدة لعدد الأسئلة: مجموع حصص الأجزاء = سقف الجلسة
- * (انظر maxQuestionsFor) — فلا يوجد رقم ثابت يخالف حجم البحث.
- */
+/** Derives each section's question quota from its size and academic density. */
 export function quotaForPart(part = {}) {
   if (!part || typeof part !== 'object') return 1;
   const chars = Math.max(0, Number(part.chars) || 0);
@@ -229,7 +174,7 @@ export function quotaForPart(part = {}) {
   return Math.max(1, Math.min(MAX_QUOTA_PER_PART, bySize + byWeight));
 }
 
-/** عدّاد الأسئلة لكل جزء من الحالة ({} إن لم تكن مُهيّأة). */
+/** Returns per-section question counts. */
 function askedCounts(state = {}) {
   const raw = state && typeof state === 'object' ? state : {};
   const byPart = raw.askedByPart && typeof raw.askedByPart === 'object' ? raw.askedByPart : {};
@@ -238,7 +183,7 @@ function askedCounts(state = {}) {
   return counts;
 }
 
-/** هل استُنفدت حصّة الجزء؟ (يُحترم التتبّع القديم القائم على coveredParts) */
+/** Supports current counts and legacy coveredParts state. */
 export function partCovered(state = {}, part = {}) {
   const raw = state && typeof state === 'object' ? state : {};
   const key = String(part?.key || '');
@@ -250,7 +195,7 @@ export function partCovered(state = {}, part = {}) {
   return (askedCounts(raw)[key] || 0) >= quotaForPart(part);
 }
 
-/** الأجزاء المغطّاة فعلاً (حصّتها مستنفدة) — بمفاتيح الخطة. */
+/** Returns section keys whose quotas have been met. */
 function coveredPartsOf(state = {}) {
   const raw = state && typeof state === 'object' ? state : {};
   if (!raw.askedByPart || typeof raw.askedByPart !== 'object') {
@@ -266,7 +211,7 @@ function coveredPartsOf(state = {}) {
   return covered;
 }
 
-/** الجزء المطلوب الآن: أول جزء لم تُستنفد حصّته من الأسئلة. */
+/** Returns the first section with remaining questions. */
 export function nextPendingPart(state = {}) {
   const raw = state && typeof state === 'object' ? state : {};
   const plan = Array.isArray(raw.parts) ? raw.parts : [];
@@ -274,18 +219,20 @@ export function nextPendingPart(state = {}) {
   return plan.find((part) => !partCovered(raw, part)) || null;
 }
 
-/**
- * يسجّل سؤالاً جديداً في حالة المناقشة: يزيد العدّاد العام، يحفظ نصّ السؤال،
- * ويزيد عدّاد الجزء الذي جاء منه السؤال.
- *
- * الجزء يُغلق عند **استنفاد حصّته** لا بعد سؤال واحد (جزء المنهجية مثلاً قد
- * يستحق سؤالين) — هذا ما يجعل المناقشة «جزءاً جزءاً» بمعناها الحقيقي.
- */
-export function applyQuestionToState(state = {}, { question = '', partKey = '', isCorrect } = {}) {
+/** Records a question, its section, and any grade for the previous answer. */
+export function applyQuestionToState(state = {}, {
+  question = '',
+  partKey = '',
+  isCorrect,
+  grade = null,
+  gradeIssue = null
+} = {}) {
   const raw = state && typeof state === 'object' ? state : {};
   const asked = Number(raw.asked) || 0;
-  const correctCount = Number(raw.correctCount) || 0;
-  const wrongCount = Number(raw.wrongCount) || 0;
+  let correctCount = Number(raw.correctCount) || 0;
+  let wrongCount = Number(raw.wrongCount) || 0;
+  let partialCount = Number(raw.partialCount) || 0;
+  const answerGrades = Array.isArray(raw.answerGrades) ? [...raw.answerGrades] : [];
   const askedQuestions = Array.isArray(raw.askedQuestions) ? [...raw.askedQuestions] : [];
   const plan = Array.isArray(raw.parts) ? raw.parts : [];
 
@@ -293,14 +240,14 @@ export function applyQuestionToState(state = {}, { question = '', partKey = '', 
   if (text) askedQuestions.push(text.slice(0, 400));
 
   const askedByPart = askedCounts(raw);
-  // ترحيل جلسة قديمة: `coveredParts` كانت تعني «سؤال واحد فيه» ⇒ نعتبر حصّته مستنفدة.
+  // Migrate legacy coverage markers to their current section quotas.
   if (!raw.askedByPart && Array.isArray(raw.coveredParts)) {
     for (const key of raw.coveredParts) {
       const part = plan.find((item) => item?.key === key);
       askedByPart[key] = Math.max(askedByPart[key] || 0, quotaForPart(part || {}));
     }
   }
-  if (partKey) askedByPart[partKey] = Math.max(0, Number(askedByPart[partKey]) || 0) + 1;
+  if (text && partKey) askedByPart[partKey] = Math.max(0, Number(askedByPart[partKey]) || 0) + 1;
 
   // Update correct/wrong counters based on isCorrect
   if (isCorrect === true) {
@@ -308,30 +255,42 @@ export function applyQuestionToState(state = {}, { question = '', partKey = '', 
   } else if (isCorrect === false) {
     wrongCount += 1;
   }
-  // if isCorrect is null or unspecified, don't change the counters
+  if (grade && ['correct', 'partial', 'incorrect'].includes(grade.verdict)) {
+    if (grade.verdict === 'correct') correctCount += 1;
+    if (grade.verdict === 'partial') partialCount += 1;
+    if (grade.verdict === 'incorrect') wrongCount += 1;
+    answerGrades.push({
+      question: Math.max(1, asked),
+      verdict: grade.verdict,
+      feedback: String(grade.feedback || '').slice(0, 600)
+    });
+  }
 
-  const next = { ...raw, asked: asked + 1, correctCount, wrongCount, askedQuestions, askedByPart };
+  const next = {
+    ...raw,
+    asked: asked + (text ? 1 : 0),
+    correctCount,
+    partialCount,
+    wrongCount,
+    answerGrades,
+    gradeIssue: gradeIssue || raw.gradeIssue || null,
+    askedQuestions,
+    askedByPart
+  };
   next.coveredParts = coveredPartsOf(next);
   return next;
 }
 
 
-/**
- * يستخرج كل أسئلة المناقِش من رسائل الجلسة (كل استفهام في ردّ assistant).
- * يُستخدم لترحيل العدّاد للجلسات القديمة التي سُئلت قبل وجود التتبّع.
- */
-/**
- * يستخرج نصّ السؤال من ردّ المناقِش: آخر جملة تنتهي بعلامة استفهام.
- * يعيد '' إن لم يكن في الردّ استفهام (ردّ تقييمي بلا سؤال جديد).
- */
+/** Extracts the final question from a defense reply, if present. */
 export function extractQuestionFromReply(reply = '') {
   const text = String(reply || '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
-  const sentences = text.split(/(?<=[؟؟])\s*/u).filter((part) => /[؟؟]/.test(part));
+  const sentences = text.split(/(?<=[؟?])\s*/u).filter((part) => /[؟?]/u.test(part));
   if (!sentences.length) return '';
-  // آخر جملة استفهامية — نستخرج ما قبلها («السؤال التالي: …»).
+  // Remove an optional question label from the extracted sentence.
   let question = sentences[sentences.length - 1].trim();
-  const marker = question.match(/^(?:[^؟؟]{0,40}?(?:السؤال التالي|السؤال|سؤال)\s*[:：]\s*)/);
+  const marker = question.match(/^(?:[^؟?]{0,40}?(?:السؤال التالي|السؤال|سؤال)\s*[:：]\s*)/u);
   if (marker) question = question.slice(marker[0].length).trim();
   return question;
 }
@@ -347,24 +306,57 @@ export function extractQuestionsFromMessages(messages = []) {
   return questions;
 }
 
-/** يستخرج حالة الإجابة (correct/incorrect/null) من ردود النموذج باستخدام التاغات [[correct]] أو [[incorrect]]. */
+/** Reads the final-line grading marker from a model reply. */
 export function extractAnswerCorrectness(reply = '') {
   const text = String(reply || '').trim();
   if (!text) return null;
-
-  // البحث عن تاغ الصواب
-  const correctTag = text.match(/\[\[correct\]\]/i);
-  if (correctTag) return 'correct';
-
-  // Search for incorrect tag
-  const incorrectTag = text.match(/\[\[incorrect\]\]/i);
-  if (incorrectTag) return 'incorrect';
-
-  // No tag means أن الإجابة غير مدقّقة (null)
-  return null;
+  const marker = text.match(
+    /(?:^|\n)[ \t]*\[\[\s*(correct|incorrect)\s*\]\][ \t]*(?:\r?\n|$)|\[\[\s*(correct|incorrect)\s*\]\][ \t]*$/i
+  );
+  return (marker?.[1] || marker?.[2] || '').toLowerCase() || null;
 }
 
-/** يستنتج حالة الصواب من رد المناقِش باستخدامextractAnswerCorrectness. */
+/** Parses a structured model grade and rejects incomplete or unknown results. */
+export function parseDefenseGrade(raw = '') {
+  const text = String(raw || '').trim().replace(/^```(?:json)?\s*|\s*```$/gi, '');
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+
+  const rawVerdict = String(parsed?.verdict || '').trim().toLowerCase();
+  const verdict = ({
+    correct: 'correct',
+    صحيح: 'correct',
+    صحيحة: 'correct',
+    partial: 'partial',
+    'partially correct': 'partial',
+    partially_correct: 'partial',
+    جزئي: 'partial',
+    جزئية: 'partial',
+    'صحيح جزئياً': 'partial',
+    'صحيحة جزئياً': 'partial',
+    incorrect: 'incorrect',
+    خطأ: 'incorrect',
+    خاطئ: 'incorrect',
+    خاطئة: 'incorrect'
+  })[rawVerdict];
+  const feedback = String(parsed?.feedback || parsed?.reason || parsed?.explanation || '').trim().slice(0, 600);
+  if (!verdict || !feedback) return null;
+  return { verdict, feedback };
+}
+
+/** Removes the internal grading marker before storing or displaying a reply. */
+export function stripAnswerCorrectnessTag(reply = '') {
+  return String(reply || '').replace(/\s*\[\[\s*(?:correct|incorrect)\s*\]\]\s*/gi, '\n').trim();
+}
+
+/** Converts the grading marker to a boolean state. */
 function inferAnswerState(reply = '') {
   const correctness = extractAnswerCorrectness(reply);
   if (correctness === 'correct') return true;
@@ -372,20 +364,14 @@ function inferAnswerState(reply = '') {
   return null;
 }
 
-/**
- * يستنتج كل من السؤال وثبوت الصواب من رد المناقِش.
- * يُستخدم في applyQuestionToState عند معالجة الإجابات.
- */
+/** Extracts the next question and grade from a single reply. */
 function extractQuestionAndCorrectness(reply = '') {
   const question = extractQuestionFromReply(reply);
   const isCorrect = inferAnswerState(reply);
   return { question, isCorrect };
 }
 
-/**
- * يستنتج عدّاد الأسئلة لكل جزء من عدد الأسئلة الكلي والخطة: نملأ حصّة كل جزء
- * بالترتيب حتى ينتهي العدد. تقدير معقول لجلسة لا تحمل `askedByPart`.
- */
+/** Reconstructs section counts for legacy sessions without askedByPart. */
 export function inferAskedByPart(plan = [], questionCount = 0) {
   const list = Array.isArray(plan) ? plan : [];
   let remaining = Math.max(0, Number(questionCount) || 0);
@@ -399,25 +385,37 @@ export function inferAskedByPart(plan = [], questionCount = 0) {
   return counts;
 }
 
-/**
- * يستنتج الأجزاء المغطّاة من عدد الأسئلة والخطة (حصّة كل جزء = quotaForPart).
- */
+/** Reconstructs covered sections from the total question count. */
 export function inferCoveredParts(plan = [], questionCount = 0) {
   const list = Array.isArray(plan) ? plan : [];
   const counts = inferAskedByPart(list, questionCount);
   return list.filter((part) => (counts[part.key] || 0) >= quotaForPart(part)).map((part) => part.key);
 }
 
-/**
- * يوفّق حالة المناقشة مع ما يُوجد فعلاً في الرسائل: إن كانت الجلسة قد سُئلت
- * قبل وجود التتبّع (العدّاد صفر) نرحّل العدّاد والأسئلة وأجزاء التغطية.
- *
- * يعيد الحالة الجديدة أو null إن لم تكن هناك فجوة تستوجب التحديث.
- */
+/** Reconciles legacy session state with questions found in stored messages. */
 export function reconcileDefenseState(state = {}, messages = []) {
   const raw = state && typeof state === 'object' ? state : {};
-  const questions = extractQuestionsFromMessages(messages);
+  const list = Array.isArray(messages) ? messages : [];
+  const lastAssistant = raw.done
+    ? list.findLastIndex((message) => message?.role === 'assistant')
+    : -1;
+  const questionMessages = lastAssistant === -1
+    ? list
+    : list.filter((message, index) => index !== lastAssistant);
+  const questions = extractQuestionsFromMessages(questionMessages);
   const asked = Number(raw.asked) || 0;
+  if (raw.done && asked !== questions.length) {
+    const plan = Array.isArray(raw.parts) ? raw.parts : [];
+    const askedByPart = inferAskedByPart(plan, questions.length);
+    const next = {
+      ...raw,
+      asked: questions.length,
+      askedQuestions: questions,
+      askedByPart
+    };
+    next.coveredParts = coveredPartsOf(next);
+    return next;
+  }
   if (questions.length <= asked) return null;
 
   const stored = Array.isArray(raw.askedQuestions) ? raw.askedQuestions : [];
@@ -436,12 +434,15 @@ export function reconcileDefenseState(state = {}, messages = []) {
   return next;
 }
 
-/** بدء جلسة مناقشة مستقلة جديدة (mode='defense' + ملف بحث ثابت اختياري). */
+/** Creates an independent defense session. */
 export async function startDefense({ userId, title = 'محاكاة مناقشة', thesisFileId = null }) {
   const state = {
     asked: 0,
     correctCount: 0,
+    partialCount: 0,
     wrongCount: 0,
+    gradeIssue: null,
+    answerGrades: [],
     thesisFileId: thesisFileId || null,
     coveredParts: [],
     askedQuestions: [],
@@ -459,7 +460,7 @@ export async function startDefense({ userId, title = 'محاكاة مناقشة'
   return rows[0];
 }
 
-/** تثبيت ملف البحث للجلسة (يبقى ثابتاً طوال المناقشة) — يبنِ الخطة دفعة واحدة. */
+/** Attaches the thesis and builds the plan once. */
 export async function setDefenseThesisFile(conversationId, fileId) {
   const { rows } = await pool.query('SELECT defense_state FROM conversations WHERE id = $1', [conversationId]);
   if (!rows.length) return false;
@@ -473,15 +474,7 @@ export async function setDefenseThesisFile(conversationId, fileId) {
   return true;
 }
 
-/**
- * صورة المناقشة كما يحتاجها **موجّه المناقِش**: الخطة (لكل جزء حصّته وعدّاده
- * وهل غُطّي)، السقف الإجمالي، ما طُرح، الجزء المطلوب الآن، وأسئلته السابقة.
- *
- * كانت هذه الصورة **غير موجودة**: `defensePlanSection` في supervisor-prompt.js
- * يقرأ `c.defenseParts/defenseTotal/defenseAsked…` ولم يضبطها أي كود ⇒ قسم
- * «خطة المناقشة» لم يُحقن أبداً ⇒ المناقِش لا يعرف سقفاً ولا خطة فيسأل بلا
- * حساب (وهو سبب «٦ أسئلة ثم يكمل ٧ و ٨»). الآن تُحقن في buildSupervisorContext.
- */
+/** Shapes session state for the defense prompt and UI. */
 export function defenseStateView(state = {}) {
   const raw = state && typeof state === 'object' ? state : {};
   const plan = Array.isArray(raw.parts) ? raw.parts : [];
@@ -504,19 +497,19 @@ export function defenseStateView(state = {}) {
   };
 }
 
-/**
- * صورة الجلسة: عدد الأسئلة + السقف + الأجزاء المغطاة + هل انتهت.
- *
- * total = سقف أسئلة الجلسة المحسوب من **حجم البحث وأجزائه** (حصة كل جزء من
- * متنه) ⇒ بحث من ١٠٠ صفحة يعرض «سؤال ٣ من ٣٠» لا «من ٦».
- */
+/** Builds progress, including question quotas and answer statistics. */
 export function defenseProgress(state = {}) {
   const raw = state && typeof state === 'object' ? state : {};
   const asked = Number(raw.asked) || 0;
+  const correctCount = Number(raw.correctCount) || 0;
+  const partialCount = Number(raw.partialCount) || 0;
+  const wrongCount = Number(raw.wrongCount) || 0;
+  const gradedCount = correctCount + partialCount + wrongCount;
+  const ungradedCount = Math.max(0, asked - gradedCount);
   const coveredParts = Array.isArray(raw.coveredParts) ? raw.coveredParts : [];
   const plan = Array.isArray(raw.parts) ? raw.parts : [];
   const counts = askedCounts(raw);
-  // نُثري الأجزاء بحصّتها وعدّادها لعرضها في الواجهة (وأصل الحجم chars/weight يبقى).
+  // Add derived counts for the UI without changing stored section weights.
   const parts = plan.map((part) => ({
     ...part,
     quota: quotaForPart(part),
@@ -530,12 +523,19 @@ export function defenseProgress(state = {}) {
 
   return {
     asked,
+    correctCount,
+    partialCount,
+    wrongCount,
+    gradedCount,
+    ungradedCount,
+    gradeIssue: raw.gradeIssue || null,
+    successRate: gradedCount ? Math.round((correctCount / gradedCount) * 100) : null,
     total,
     remaining,
     done,
     parts,
     currentPart: nextPendingPart(raw),
-    // المرحلة: هل انتهت (التقييم النهائي) · هل المناقشة جارية (ملف مثبّت) · بانتظار رفع
+    // Session stage: upload, active defense, or final report.
     stageKey: done ? 'final' : raw.thesisFileId ? 'discussing' : 'upload',
     stageLabel: done ? 'انتهت المناقشة' : raw.thesisFileId ? 'المناقشة جارية' : 'بانتظار رفع البحث',
     stageHint: done
@@ -553,11 +553,7 @@ export function defenseProgress(state = {}) {
   };
 }
 
-/**
- * يحفظ خطة الأجزاء (وتقدير الصفحات) في حالة المناقشة عند تثبيت ملف البحث.
- * تُستدعى مرة واحدة: الخطة تُبنى من نصّ البحث وتُخزَّن ليقرأها المناقِش في
- * كل ردّ (عبر defenseStateView) ولا يحتاج إعادة حساب.
- */
+/** Persists the plan generated from the attached thesis. */
 export async function setDefensePlan(conversationId, parts = [], pages = 0) {
   const { rows } = await pool.query('SELECT defense_state FROM conversations WHERE id = $1', [conversationId]);
   if (!rows.length) return false;
@@ -572,16 +568,19 @@ export async function setDefensePlan(conversationId, parts = [], pages = 0) {
   return true;
 }
 
-/**
- * يسجّل سؤال المناقِش في الحالة: يزيد العدّاد، يحفظ نصّ السؤال والجزء.
- * يُستدعى بعد كل ردّ من المناقِش في /defense.
- */
-export async function recordDefenseQuestion(conversationId, { question = '', partKey = '' } = {}) {
+/** Records the next question and the previous answer's grade. */
+export async function recordDefenseQuestion(conversationId, {
+  question = '',
+  partKey = '',
+  isCorrect,
+  grade = null,
+  gradeIssue = null
+} = {}) {
   const { rows } = await pool.query('SELECT defense_state FROM conversations WHERE id = $1', [conversationId]);
   if (!rows.length) return null;
   const raw = rows[0].defense_state;
   const state = raw && typeof raw === 'object' ? raw : {};
-  const next = applyQuestionToState(state, { question, partKey });
+  const next = applyQuestionToState(state, { question, partKey, isCorrect, grade, gradeIssue });
   await pool.query('UPDATE conversations SET defense_state = $2 WHERE id = $1', [
     conversationId,
     JSON.stringify(next)
@@ -589,10 +588,18 @@ export async function recordDefenseQuestion(conversationId, { question = '', par
   return next;
 }
 
-/**
- * يوفّق حالة المناقشة مع الرسائل الفعلية ويكتبها إن تغيّرت.
- * يُستدعى عند فتح الجلسة: يرحّل عدّاد الجلسات القديمة (سُئلت قبل التتبّع).
- */
+/** Marks the session complete without changing its counters. */
+export async function finishDefense(conversationId) {
+  const { rows } = await pool.query('SELECT defense_state FROM conversations WHERE id = $1', [conversationId]);
+  if (!rows.length) return null;
+  const raw = rows[0].defense_state;
+  const state = raw && typeof raw === 'object' ? raw : {};
+  const next = { ...state, done: true };
+  await pool.query('UPDATE conversations SET defense_state = $2 WHERE id = $1', [conversationId, JSON.stringify(next)]);
+  return next;
+}
+
+/** Reconciles and persists legacy state when a session is opened. */
 export async function syncDefenseState(conversationId, messages = []) {
   const { rows } = await pool.query('SELECT defense_state FROM conversations WHERE id = $1', [conversationId]);
   if (!rows.length) return null;
@@ -607,7 +614,7 @@ export async function syncDefenseState(conversationId, messages = []) {
   return next;
 }
 
-/** كل جلسات المحاكاة للمستخدم. */
+/** Lists the user's defense sessions. */
 export async function listDefenses(userId, { limit = 20 } = {}) {
   const { rows } = await pool.query(
     `SELECT id, title, defense_state, created_at, updated_at,
@@ -629,7 +636,7 @@ export async function listDefenses(userId, { limit = 20 } = {}) {
   }));
 }
 
-/** أسئلة مقترحة للباحث يجهّز نفسه لها (نص ثابت يأتي من المشرف نفسه في البداية). */
+/** Returns the static defense preparation checklist. */
 export function defenseChecklist(progress) {
   return [
     'لخّص البحث في ثلاث جمل: المشكلة، المنهج، أهم نتيجة.',
@@ -640,9 +647,7 @@ export function defenseChecklist(progress) {
   ];
 }
 
-/**
- * يقدّر عدد الصفحات من محتوى النص: كل 900 حرف ≈ صفحة واحدة، ويُكثر من التقدير
- * إذا لم تظهر علامات الصفحة (هذا يدل على أن الملف «طويل» حتى لو لم تُرقَم). */
+/** Estimates page count from extracted text and page markers. */
 export function estimatePages(text) {
   const raw = String(text || '');
   if (!raw.trim()) return 1;
@@ -653,20 +658,13 @@ export function estimatePages(text) {
   return Math.min(9999, pages);
 }
 
-/**
- * سقف أسئلة الجلسة = مجموع حصص الأجزاء، ضمن حدّ أدنى/أقصى.
- *
- * كل جزء له حصّة تت ramps حسب كثافة محتواه وعلميته (كلما زاد المحتوى و
- * علميته، زاد عدد الأسئلة). لا يوجد سقف كلي ثابت: العدد يساوي أو يتجاوز
- * الخطة، ويُظهر «سؤال X من Y» وفق التجزئة الفعلية للملف (الصفحات والأقسام).
- */
+/** The session limit is the sum of section quotas, clamped to configured bounds. */
 export function maxQuestionsFor(parts = [], actualAsked = 0) {
   const list = Array.isArray(parts) ? parts : [];
   const asked = Math.max(0, Number(actualAsked) || 0);
   if (!list.length) return Math.max(5, asked);
 
-  // السقف = مجموع حصص الأجزاء الحقيقية (كل جزء ≈ متنه/٢٨٠٠ سؤال + كثافة علمية)،
-  // مقيداً بالحد الأدنى ٦ والأعلى ٣٦ — بحث ١٠٠ صفحة ⇒ ~٣٠ سؤالاً، لا ٦ ثابتة.
+  // Derive the limit from actual section sizes and weights, then clamp it.
   const planned = list.reduce((sum, part) => sum + quotaForPart(part || {}), 0);
   return Math.min(MAX_QUESTIONS, Math.max(MIN_QUESTIONS, planned, asked));
 }

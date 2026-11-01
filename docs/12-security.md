@@ -1,18 +1,18 @@
-# 12 — الأمان: طبقات لا شعار
+# 12 — Security: Layers, Not Slogans
 
-| الطبقة | الآلية | أين؟ |
+| Layer | Mechanism | Location |
 |---|---|---|
-| الجلسات | HMAC-SHA256 + `timingSafeEqual` + HttpOnly/Secure/Lax + TTL | `auth/google.js` |
-| كلمات المرور | لا وجود لها — OAuth فقط | — |
-| CSRF | `requireSameOrigin`: كل POST بجلسة بلا Origin/Referer مطابق يُرفض | `middleware/security.js` |
-| المعدل | `rateLimit(name)` لكل مسار حساس (دخول/دفع/رفع) بمفتاح مسار+IP + تنظيف دوري | `middleware/security.js` |
-| التزامن | سقف 4 رفعات / 2 كتب — `429` فور الامتلاء، وتحرير على `finish/close` | `concurrencyLimit` |
-| الرفع | امتداد مغلق + MIME + **بصمة ثنائية** قبل أي كتابة + `nosniff` وإجبار النوع عند العرض | `upload-guard.js` + `files.js` |
-| الحقن | `escapeHtml` في كل View + ملفات البرومبت «بيانات فقط» + `step_key` يُتحقق من مسار الباحث | `views/*` + `supervisor-prompt.js` |
-| الانهيار | حارس `isUuid` قبل أي استعلام + معالج أخطاء عام (HTML/JSON) + التقاط `unhandledRejection` | `constants.js` + `server.js` |
-| الوكيل العكسي | `TRUST_PROXY` بعدد الوكلاء — بدونه يصير الكل `127.0.0.1` (تُفتح الإدارة وتتعطل الحدود) | `server.js` + `.env.example` |
-| الإنتاج | رفض إقلاع بلا `SESSION_SECRET/ADMIN_TOKEN` حقيقيين + تشخيص ENV **بالأسماء فقط** | `server.js` |
-| الأسرار | مفاتيح AI وFCM على الخادم فقط — المتصفح يرى الأسماء والأعداد | `services/ai.js` |
+| Sessions | HMAC-SHA256 + `timingSafeEqual` + HttpOnly/Secure/Lax + TTL | `auth/google.js` |
+| Passwords | None — OAuth only | — |
+| CSRF | `requireSameOrigin`: rejects every session-authenticated POST without a matching Origin/Referer | `middleware/security.js` |
+| Rate limiting | `rateLimit(name)` on every sensitive route (login/payment/upload), keyed by route + IP, with periodic cleanup | `middleware/security.js` |
+| Concurrency | Limit of 4 uploads / 2 books — immediate `429` when full; released on `finish/close` | `concurrencyLimit` |
+| Uploads | Allowlisted extensions + MIME + **binary signature check** before any write + `nosniff` and forced content type when served | `upload-guard.js` + `files.js` |
+| Injection | `escapeHtml` in every View + prompt files treated as “data only” + `step_key` validated against the researcher's path | `views/*` + `supervisor-prompt.js` |
+| Crashes | `isUuid` guard before every query + general error handler (HTML/JSON) + capture of `unhandledRejection` | `constants.js` + `server.js` |
+| Reverse proxy | `TRUST_PROXY` set to the number of proxies — otherwise everyone appears as `127.0.0.1` (admin access opens and limits break) | `server.js` + `.env.example` |
+| Production | Refuses to start without real `SESSION_SECRET/ADMIN_TOKEN` values + diagnoses ENV **names only** | `server.js` |
+| Secrets | AI and FCM keys stay on the server — the browser sees names and counts only | `services/ai.js` |
 
-## القاعدة الذهبية
-> **الفشل يُغلق الباب (fail-closed)**: أي خطأ في التحقق من صلاحية = رفض — إلا المدير فدوره فوق البوابات.
+## Golden rule
+> **Fail closed**: any error while checking authorization means denial — except administrators, whose role bypasses the gates.

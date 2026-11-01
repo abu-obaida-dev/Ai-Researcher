@@ -6,16 +6,10 @@ import { getProfile } from '../services/users.js';
 import { renderNotice } from '../views/layout.js';
 import { renderJourneyPage } from '../views/journey.js';
 
-/**
- * مسارات «مسار البحث» (1D):
- * - GET  /journey              صفحة الخطوات مع حالة الباحث في كل خطوة
- * - POST /journey/steps/:key   تغيير حالة الخطوة + ملاحظة المخرجات (نموذج HTML)
- * الخطوات تأتي من جدول research_paths إن كان مُ جهّزًا، وإلا من التعريفات
- * البرمجية في src/data/research-paths.js — فالصفحة تعمل بدون أي بذرة.
- */
+/** Research-journey page and step-status routes. */
 const router = express.Router();
 
-/** رسائل النتيجة التي تظهر في الصفحة بعد الـ POST (تٌرسل عبر باراميتر في الرابط). */
+/** Flash messages shown after POST redirects. */
 const FLASH = {
   status_saved: { type: 'ok', message: 'تم حفظ حالة الخطوة.' },
   bad_status: { type: 'error', message: 'حالة الخطوة غير معروفة — اختر لم يبدأ أو جاري أو تم.' },
@@ -23,7 +17,7 @@ const FLASH = {
   failed: { type: 'error', message: 'تعذّر حفظ الحالة — أعد المحاولة بعد لحظات.' }
 };
 
-/** تنبيه النتيجة من باراميترات الرابط. */
+/** Resolves a redirect flash message. */
 function flashFromQuery(query) {
   const key = String(query.ok || query.err || '');
   return FLASH[key] || null;
@@ -60,7 +54,7 @@ router.get('/journey', requireService('journey'), requireCoreOnboarding, async (
   }
 });
 
-/** تغيير حالة خطوة (لم يبدأ / جاري / تم) مع ملاحظة المخرجات. */
+/** Updates a step's status and output note. */
 router.post('/journey/steps/:key', requireService('journey'), requireCoreOnboarding, async (req, res) => {
   const stepKey = String(req.params.key || '').slice(0, 100);
 

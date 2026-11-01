@@ -9,11 +9,7 @@ import { rateLimit } from '../middleware/security.js';
 import { renderNotice } from '../views/layout.js';
 import { renderPaymentsPage } from '../views/payments.js';
 
-/**
- * الاشتراك والدفع اليدوي (دفع خارج المنصة):
- *   GET  /payments        صفحة الباقات + طرق الدفع + طلبات الباحث
- *   POST /payments        تقديم طلب (السعر يُقرأ من plans على الخادم)
- */
+/** Subscription and manual-payment routes. */
 const router = express.Router();
 
 const FLASH = {
@@ -25,7 +21,7 @@ const FLASH = {
   too_many: { type: 'error', message: 'لديك طلبات كثيرة قيد المراجعة — انتظر رد الإدارة.' }
 };
 
-/** يفصل رقم واتساب محفوظاً (بأي صيغة قديمة) إلى رمز الدولة والرقم المحلي. */
+/** Splits a stored WhatsApp number into country code and local number. */
 function splitStoredWhatsapp(stored) {
   const raw = String(stored || '').trim();
   if (!raw) return { country: 'LY', number: '' };
@@ -33,7 +29,7 @@ function splitStoredWhatsapp(stored) {
   let digits = raw.replace(/\D/g, '');
   if (digits.startsWith('00')) digits = digits.slice(2);
 
-  // نجرّب أطول مفتاح دولي أولاً حتى لا يخطئ رقم ليبي يبدأ بـ 91 مثلاً
+  // Try the longest country code first to avoid ambiguous prefixes.
   const sorted = [...WHATSAPP_COUNTRIES].sort((a, b) => b.dial.length - a.dial.length);
   for (const country of sorted) {
     if (!digits.startsWith(country.dial)) continue;
@@ -41,7 +37,7 @@ function splitStoredWhatsapp(stored) {
     if (country.lengths.includes(local.length)) return { country: country.code, number: local };
   }
 
-  // صيغة محلية بدون مفتاح (مثل 0912345678) — ليبيا هي الدولة الافتراضية
+  // Treat numbers without a country code as Libyan local numbers.
   const local = digits.replace(/^0+(?=\d)/, '');
   const ly = WHATSAPP_COUNTRIES.find((country) => country.code === 'LY');
   if (ly.lengths.includes(local.length)) return { country: 'LY', number: local };

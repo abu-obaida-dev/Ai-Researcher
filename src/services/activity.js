@@ -1,34 +1,17 @@
 import { pool } from '../db/client.js';
 
-/**
- * تصنيف حالات الحسابات (تلقائي بالكامل — بلا تدخل من المدير).
- *
- * القواعد المتفق عليها:
- *   نشط    = دخل خلال آخر 7 أيام  AND  باقته سارية (بما فيها فترة سماح 48 ساعة بعد الانتهاء)
- *   خامل    = لم يدخل منذ أكثر من 7 أيام  AND  باقته سارية
- *   منتهي   = دخل خلال آخر 7 أيام  AND  باقته منتهية (تجاوزت 48 ساعة سماح دون تجديد)
- *   متوقف   = لم يدخل منذ أكثر من 30 يوماً (بغض النظر عن الباقة — غياب طويل)
- *
- * الأولوية: متوقف أولاً (30+ يوم غياب)، ثم نشط (شرطان معاً)، ثم منتهي
- * (دخول حديث + باقة منتهية)، ثم خامل (الباقي).
- *
- * التواريخ تُملأ تلقائياً: last_login_at مع كل دخول بجوجل،
- * plan_expires_at عند تأكيد المدير لطلب دفع (مدة الباقة من plans.period_days).
- *
- * كل الاستعلامات تُبني من SQL هنا (مصدر واحد للمنطق) فلا يتكرر بين لوحة الإدارة
- * وصفحة الباحثين والإحصائيات.
- */
+/** Classifies account activity from login and plan-expiration timestamps. */
 
-/** أيام الخمول: من لم يدخل منذ أكثر منها = غير نشط. */
+/** Days without login before an account becomes inactive. */
 export const INACTIVE_LOGIN_DAYS = 7;
 
-/** ساعات السماح بعد انتهاء الباقة: خلالها يبقى الباحث نشطاً لمنحه فرصة التجديد. */
+/** Grace period after plan expiration. */
 export const PLAN_GRACE_HOURS = 48;
 
-/** أيام الغياب الطويل: من لم يدخل منذ أكثر منها = متوقف. */
+/** Days without login before an account is considered suspended. */
 export const STOPPED_LOGIN_DAYS = 30;
 
-/** فلتر صفحة الباحثين: قيم مسموحة مع تسمياتها العربية. */
+/** Allowed activity filters and their display labels. */
 export const ACTIVITY_FILTERS = {
   activity_active: 'نشط',
   activity_idle: 'خامل',
@@ -36,22 +19,16 @@ export const ACTIVITY_FILTERS = {
   activity_stopped: 'متوقف'
 };
 
-/**
- * شرط «دخل خلال آخر N أيام»: يستخدم last_login_at، ويسقط آمناً على created_at
- * للحسابات القديمة التي أُنشأت قبل وجود هذا العمود (فلا تُصنَّف كلها خاملة فجأة).
- */
+/** Uses created_at for legacy accounts without last_login_at. */
 const RECENT_LOGIN_SQL = `COALESCE(u.last_login_at, u.created_at) >= NOW() - make_interval(days => ${INACTIVE_LOGIN_DAYS})`;
 
-/** شرط «باقته سارية الآن أو في فترة السماح»: لا باقة (NULL) = لا تنتهي = سارية. */
+/** Treats accounts without a plan as non-expiring. */
 const PLAN_VALID_SQL = `(u.plan_expires_at IS NULL OR u.plan_expires_at >= NOW() - make_interval(hours => ${PLAN_GRACE_HOURS}))`;
 
-/** شرط «غائب منذ أكثر من N أيام» (للمتوقف): لا دخول منذ 30+ يوماً بغض النظر عن الباقة. */
+/** Builds the long-absence condition regardless of plan status. */
 const STOPPED_LOGIN_SQL = `COALESCE(u.last_login_at, u.created_at) < NOW() - make_interval(days => ${STOPPED_LOGIN_DAYS})`;
 
-/**
- * تعبير حالة الحساب في SQL — مصدر واحد يُستخدم في الفلترة والتجميع معاً
- * فلا يمكن أن يختلف المعنى بين الاستعلامين.
- */
+/** Shared SQL expression used by activity filtering and aggregation. */
 const ACTIVITY_STATUS_SQL = `
   CASE
     WHEN ${STOPPED_LOGIN_SQL} THEN 'stopped'
@@ -60,24 +37,20 @@ const ACTIVITY_STATUS_SQL = `
     ELSE 'idle'
   END`;
 
-/** مصفوفة الحالات مرتبة (لعرضها في لوحة الإدارة). */
+/** Returns activity statuses for admin filters. */
 export const INACTIVE_REASONS = [
   { key: 'idle', label: 'خامل — لا دخول منذ أكثر من 7 أيام وباقته سارية' },
   { key: 'plan_expired', label: 'منتهي باقته — دخل حديثاً لكن مرّت أكثر من 48 ساعة دون تجديد' },
   { key: 'stopped', label: 'متوقف — لا دخول منذ أكثر من 30 يوماً' }
 ];
 
-/** يقرأ فلتر النشاط من قيمة ?filter= ويُبقي فقط ما هو مسموح (والافتراضي «الكل»). */
+/** Validates the requested activity filter. */
 export function readActivityFilter(value) {
   const key = String(value || '');
   return Object.hasOwn(ACTIVITY_FILTERS, key) ? key : '';
 }
 
-/**
- * يضيف شرط الفلترة إلى WHERE حسب فلتر النشاط (إن وُجد).
- * @param {string} filter مفتاح من ACTIVITY_FILTERS أو '' لعرض الكل.
- * @returns {string} جملة SQL فرعية تبدأ بـ AND أو فارغة.
- */
+/** Builds the SQL predicate for an optional activity filter. */
 export function activityFilterWhere(filter) {
   const key = readActivityFilter(filter);
   if (!key) return '';
@@ -96,27 +69,20 @@ export function activityFilterWhere(filter) {
   }
 }
 
-/** أعمدة النشاط التي تُضاف إلى استعلام قائمة الباحثين (حالة + آخر دخول + انتهاء الباقة). */
+/** SQL fields appended to user-list queries. */
 export const ACTIVITY_COLUMNS_SQL = `
   ${ACTIVITY_STATUS_SQL} AS activity_status,
   COALESCE(u.last_login_at, u.created_at) AS last_login_at,
   u.plan_expires_at`;
 
-/**
- * إحصائية التصنيف للوحة الإدارة: الإجمالي + كل حالة.
- * استعلام واحد مجمّع (لا تحميل صفوف ثم عدّ في JS).
- * يستثني المديرين (role = 'admin') — تصنيف الباحثين يخصّ الباحثين فقط.
- */
+/** Aggregates user activity states in one query, excluding administrators. */
 
-/** شرط «متوقف» مستقل (يُستخدم في تنظيف الملفات): نفس تعريف CASE أعلاه. */
+/** Shared long-absence predicate for stale-file cleanup. */
 const STOPPED_WHERE_SQL = `NOT COALESCE(u.deleted, false)
   AND COALESCE(u.role, 'user') <> 'admin'
   AND COALESCE(u.last_login_at, u.created_at) < NOW() - make_interval(days => ${STOPPED_LOGIN_DAYS})`;
 
-/**
- * مستخدمون متوقفون ما زالت لهم ملفات على المنصة (للتنظيف التلقائي/اليدوي).
- * يعيد [{ id, email, fileCount, fileBytes }] — بلا بايتات، ميتاداتا فقط.
- */
+/** Lists long-inactive users with file metadata only. */
 export async function stoppedUsersWithFiles() {
   const { rows } = await pool.query(
     `SELECT u.id, u.email,
@@ -137,10 +103,7 @@ export async function stoppedUsersWithFiles() {
   }));
 }
 
-/**
- * حذف ملفات مستخدم واحد (سطور files فقط — بلا مساس بأي جدول آخر).
- * يعيد { files, bytes } — عدد الملفات وحجمها المحذوف.
- */
+/** Deletes only file rows and storage for one user. */
 export async function deleteUserFiles(userId) {
   const { rows } = await pool.query(
     'SELECT COALESCE(count(*), 0)::int AS n, COALESCE(sum(size_bytes), 0)::bigint AS bytes FROM files WHERE user_id = $1',
@@ -151,11 +114,7 @@ export async function deleteUserFiles(userId) {
   return { files: Number(rows[0]?.n || 0), bytes: Number(rows[0]?.bytes || 0) };
 }
 
-/**
- * تنظيف ملفات كل الحسابات المتوقفة (30+ يوم غياب): سطور files فقط.
- * تُستدعى دورياً من الخادم + يدوياً من لوحة الإدارة.
- * تعيد { users, files, bytes }.
- */
+/** Cleans files for all long-inactive users. */
 export async function purgeStoppedUserFiles() {
   const targets = await stoppedUsersWithFiles();
   let files = 0;

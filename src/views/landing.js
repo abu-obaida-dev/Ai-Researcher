@@ -10,13 +10,9 @@ import { whatsappLink } from './layout.js';
 import { formatNumber } from './format.js';
 import { icon } from './icons.js';
 import { BRAND, escapeHtml, renderLayout } from './layout.js';
+import { currentSupportWhatsapp } from '../services/settings.js';
 
-/**
- * الصفحة الرئيسية للمنصة (صفحة الهبوط) — مولَّدة على الخادم بدون React، وبهوية Zena AI،
- * وبباقات مقروءة من جدول plans في PostgreSQL (مع سقوط آمن على الباقات الافتراضية).
- * الأقسام بالترتيب: Hero (بالشعار والشعار النصي) · Features · Services · HowItWorks ·
- * Audience (لمن المنصة + الأمانة العلمية) · Pricing · FAQ · CtaBand، ثم الفوتر المشترك.
- */
+/** Server-rendered Zena AI landing page with database-backed plans. */
 
 const FEATURES = [
   {
@@ -51,7 +47,7 @@ const FEATURES = [
   }
 ];
 
-/** خطوات البدء — نص الرصيد المجاني يُبنى من الباقة المجانية في قاعدة البيانات */
+/** Builds onboarding steps using the free plan balance. */
 function buildSteps(freeTokens) {
   return [
     {
@@ -72,7 +68,7 @@ function buildSteps(freeTokens) {
   ];
 }
 
-/** القسم البطولي: النص التعريفي + بطاقة محادثة توضيحية + شريط أرقام. */
+/** Renders the hero section, example conversation, and key stats. */
 function renderHero(freeTokens) {
   const label = formatNumber(freeTokens);
 
@@ -131,7 +127,7 @@ function renderHero(freeTokens) {
 </section>`;
 }
 
-/** قسم المميزات: ست بطاقات بمحتوى المنصة نفسه. */
+/** Renders the platform feature cards. */
 function renderFeatures() {
   const cards = FEATURES.map(
     (feature) => `<article class="feature-card">
@@ -156,7 +152,7 @@ function renderFeatures() {
 </section>`;
 }
 
-/** قسم الخدمات: كل ما تُفتح عليه المنصة فعلياً (من PLATFORM_SERVICES) لا الدردشة فقط. */
+/** Renders all platform services from the shared service catalog. */
 function renderServices() {
   const cards = PLATFORM_SERVICES.map(
     (service) => `<article class="service-card">
@@ -184,7 +180,7 @@ function renderServices() {
 </section>`;
 }
 
-/** قسم «لمن هذه المنصة» + «الأمانة العلمية والخصوصية»: بطاقتان تقوّيان ثقة الباحث. */
+/** Renders the target audience and research ethics sections. */
 function renderAudience() {
   const audience = [
     'باحث ماجستير يعمل على الفصول الأولى',
@@ -219,7 +215,7 @@ function renderAudience() {
 </section>`;
 }
 
-/** قسم «كيف تعمل» — ثلاث خطوات فقط (جدول استهلاك النقاط حُذف بقرار المحتوى). */
+/** Renders the three onboarding steps. */
 function renderHowItWorks(freeTokens) {
   const steps = buildSteps(freeTokens)
     .map(
@@ -244,10 +240,7 @@ function renderHowItWorks(freeTokens) {
 </section>`;
 }
 
-/**
- * بطاقة باقة واحدة — تُبنى من صف جدول plans بعد توليد المزايا من صلاحيات
- * دور الباقة (services/plans.js)، فالمزايا المعروضة = ما يفتحه الباحث فعلاً.
- */
+/** Renders a plan card with features derived from its permissions. */
 function renderPlanCard(plan, currency) {
   const isFree = Number(plan.price) === 0;
   const features = plan.features.map((feature) => `<li>${escapeHtml(feature)}</li>`).join('');
@@ -269,9 +262,10 @@ function renderPlanCard(plan, currency) {
 </article>`;
 }
 
-/** قسم الباقات: البطاقات من قاعدة البيانات + طرق الدفع المتاحة. */
+/** Renders database-backed plans and available payment methods. */
 function renderPricing(plans, currency, methods = PAYMENT_METHODS) {
   const cards = plans.map((plan) => renderPlanCard(plan, currency)).join('');
+  const supportWhatsapp = currentSupportWhatsapp() || SUPPORT_WHATSAPP;
   const list = methods.length ? methods : PAYMENT_METHODS;
   const readyMethods =
     list
@@ -299,7 +293,7 @@ function renderPricing(plans, currency, methods = PAYMENT_METHODS) {
     <p class="plans-note">
       تحتاج باقة مخصصة لجامعة أو كلية أو مجموعة باحثين؟ راسلنا على
       <a href="mailto:${escapeHtml(SUPPORT_EMAIL)}">${escapeHtml(SUPPORT_EMAIL)}</a>${
-        whatsappLink() ? ` أو واتساب ${escapeHtml(process.env.SUPPORT_WHATSAPP || SUPPORT_WHATSAPP)}.` : '.'
+        whatsappLink() ? ` أو واتساب ${escapeHtml(supportWhatsapp)}.` : '.'
       }
     </p>
     <p class="plans-note">طرق الدفع المتاحة: ${escapeHtml(readyMethods)} — وبطاقة بنكية قريباً.</p>
@@ -307,7 +301,7 @@ function renderPricing(plans, currency, methods = PAYMENT_METHODS) {
 </section>`;
 }
 
-/** قسم الأسئلة الشائعة بعناصر details الأصلية (بدون JavaScript). */
+/** Renders the FAQ using native details elements. */
 function renderFaq(freeTokens) {
   const items = buildFaqs(freeTokens)
     .map(
@@ -329,7 +323,7 @@ function renderFaq(freeTokens) {
 </section>`;
 }
 
-/** شريط الدعوة الأخير قبل الفوتر. */
+/** Renders the final call-to-action before the footer. */
 function renderCtaBand(freeTokens) {
   return `<section class="cta-band">
   <div class="cta-inner">
@@ -348,11 +342,7 @@ function renderCtaBand(freeTokens) {
 </section>`;
 }
 
-/**
- * الصفحة الرئيسية كاملة.
- * plans: باقات الموقع (من listPublicPlans)، freeTokens: رصيد التجربة المجانية،
- * account: الحساب الحالي إن وُجدت جلسة (لتغيير أزرار الترويسة).
- */
+/** Renders the complete landing page for the current plan and account state. */
 export function renderLandingPage({ plans, freeTokens, account = null, currency = 'LYD', paymentMethods = [] }) {
   const body = [
     renderHero(freeTokens),

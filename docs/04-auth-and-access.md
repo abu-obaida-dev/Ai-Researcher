@@ -1,54 +1,54 @@
-# 04 — الدخول والوصول: Google OAuth + الجلسات + الأدوار
+# 04 — Authentication and Access: Google OAuth + Sessions + Roles
 
-## 1. الدخول بجوجل (OAuth 2.0) — `src/auth/google.js`
-
-```
-الباحث → GET /auth/login → رابط جوجل (+ state عشوائي في كوكي httpOnly)
-  → يوافق في جوجل → GET /auth/google/callback?code=…&state=…
-  → نتحقق من state (ضد CSRF) → نبدّل code بـ access_token (نداء خلفي)
-  → نجلب profile (email/name/picture/sub)
-  → ensureUserFromGoogle() → كوكي جلسة → redirect للوجهة (homePathFor)
-```
-
-- **بلا كلمات مرور**: لا نخزن أي سرّ للمستخدم.
-- **الـ `sub`**: معرّف جوجل الثابت — يربط الحساب حتى لو غيّر بريده الاسم.
-- **غير مُفعّل؟** إن غابت `GOOGLE_CLIENT_ID/SECRET` صفحة الدخول تشرح ذلك بدل الانهيار.
-
-## 2. الجلسات: كوكي موقّع HMAC — بلا جدول جلسات
-
-- الحمولة: `{ uid, email, role, iat, exp }` — مشفرة `base64url` + توقيع `HMAC-SHA256` بالسرّ.
-- التحقق `timingSafeEqual` — يمنع التزوير وقياس الزمن.
-- `Secure + HttpOnly + SameSite=Lax` في الإنتاج، وTTL يوم واحد (24 ساعة) — ينتهي التوقيع و`Max-Age` الكوكي معاً فيخرج المستخدم تلقائياً.
-- **لماذا بلا Redis/جدول؟** البساطة: التحقق حسابي خالص، والإبطال يتم عبر `is_active/deleted` في `users`.
-
-## 3. `attachAccount` — كل طلب يعرف صاحبه (`src/middleware/auth.js`)
-
-- يُثبَّت قبل كل المسارات: يقرأ الكوكي → `getUserById` → `syncUserRole` → يحمّل `services` + `adminPermissions` مرة واحدة.
-- الحساب الموقوف/المحذوف → لا جلسة. فشل DB → الصفحات العامة تظل تعمل (تحذير في السجل فقط).
-
-## 4. مزامنة الدور `syncUserRole` — الترتيب الهرمي
+## 1. Google Sign-In (OAuth 2.0) — `src/auth/google.js`
 
 ```
-admin (ADMIN_EMAILS أو جدول admins)  ← أعلى، لا يُنزَع إلا بتغيير المصدر
-  ← supervisor (جدول supervisors)
-  ← دور الباقة (plans.role_code)
-  ← بلا باقة: 'researcher' (حتى لا تُقفل الخدمات فجأة على البيانات القديمة)
+Researcher → GET /auth/login → Google URL (+ random state in an httpOnly cookie)
+  → approves on Google → GET /auth/google/callback?code=…&state=…
+  → verify state (against CSRF) → exchange code for access_token (back-channel request)
+  → fetch profile (email/name/picture/sub)
+  → ensureUserFromGoogle() → session cookie → redirect to destination (homePathFor)
 ```
 
-## 5. الصلاحيات والخدمات — `src/services/access.js`
+- **No passwords:** We do not store any user secret.
+- **The `sub`:** Google’s stable identifier — it links the account even if the user changes their email or name.
+- **Not configured?** If `GOOGLE_CLIENT_ID/SECRET` are missing, the sign-in page explains the issue instead of crashing.
 
-- كل خدمة في `PLATFORM_SERVICES` لها **صلاحية واحدة** (مثل `chat:use`، `library:use`، `defense:use`).
-- الدور يملك صلاحياته في `role_permissions` — والمدير يعدّلها من «الأدوار والصلاحيات» فيسري التغيير في الطلب التالي (كاش 30 ثانية فقط).
-- **الشات مفتوح لكل الباقات** بمجرد التسجيل — القفل على المزايا المتقدمة لا على المشرف نفسه.
-- `requireService(key)` في المسارات: الممنوع يرى صفحة عربية تشرح الخدمة والباقة المطلوبة (403) بدل خطأ جاف — تغطي `/references` و`/notes` و`/files` و`/defense` و`/journey` (و`/chat` خارجها قصداً).
-- `requireCoreOnboarding` (البوابة الجزئية للملف): وظائف تحتاج سياقاً بحثياً — إرسال الشات، مسار البحث، بدء المناقشة — تحوّل غير المكمل إلى `/onboarding?next=…` ليعود لوجهته بعد الحفظ. القراءة العامة والمساعدة لا تُمنع (ولوحة الباحث تحوّلك للملف أول مرة فقط).
-- `needsOnboarding`: المدير/المشرف لا يُطالبان بملف بحثي.
+## 2. Sessions: HMAC-Signed Cookie — No Session Table
 
-## 6. صلاحيات الإدارة `ADMIN_PERMISSIONS`
+- Payload: `{ uid, email, role, iat, exp }` — encoded as `base64url` + signed with `HMAC-SHA256` using the secret.
+- Verification uses `timingSafeEqual` — prevents forgery and timing attacks.
+- `Secure + HttpOnly + SameSite=Lax` in production, with a one-day TTL (24 hours) — the signature and the cookie’s `Max-Age` expire together, automatically logging the user out.
+- **Why no Redis/session table?** Simplicity: verification is purely computational, and revocation is handled through `is_active/deleted` in `users`.
 
-`admin:panel/users/library/plans/roles/usage/payments/notify` — المدير يملك `*`، والمشرف ما يُمنح له فقط، والسايدبار يُصفَّى بها.
+## 3. `attachAccount` — Every Request Knows Its Owner (`src/middleware/auth.js`)
 
-## 7. حماية `/admin` طبقتان
+- Mounted before all routes: reads the cookie → `getUserById` → `syncUserRole` → loads `services` + `adminPermissions` once.
+- Suspended/deleted account → no session. DB failure → public pages continue to work (log a warning only).
 
-1. **رمز `ADMIN_TOKEN`** (مقارنة ثابتة الزمن) — أو localhost فقط إن غاب في التطوير، ورفض إقلاع في الإنتاج بلا رمز.
-2. **دور admin/supervisor+panel** من الجلسة — الرمز وحده لا يكفي.
+## 4. Role Synchronization `syncUserRole` — Priority Order
+
+```
+admin (ADMIN_EMAILS or admins table)  ← highest priority; removed only by changing the source
+  ← supervisor (supervisors table)
+  ← plan role (plans.role_code)
+  ← no plan: 'researcher' (so services are not suddenly locked for legacy data)
+```
+
+## 5. Permissions and Services — `src/services/access.js`
+
+- Each service in `PLATFORM_SERVICES` has **one permission** (such as `chat:use`, `library:use`, `defense:use`).
+- Roles have their permissions in `role_permissions` — the admin edits them under “Roles and Permissions,” and changes take effect on the next request (30-second cache only).
+- **Chat is open to all plans** as soon as users register — restrictions apply to advanced features, not to the supervisor itself.
+- `requireService(key)` in routes: a user without access sees an Arabic-language page explaining the service and required plan (403), rather than a bare error — covers `/references`, `/notes`, `/files`, `/defense`, and `/journey` (`/chat` is intentionally excluded).
+- `requireCoreOnboarding` (partial profile gate): features that need research context — sending a chat message, the research journey, and starting a defense — redirect incomplete profiles to `/onboarding?next=…` so users return to their destination after saving. General reading and assistance are not blocked (the researcher dashboard redirects to the profile only on the first visit).
+- `needsOnboarding`: admins/supervisors are not required to have a research profile.
+
+## 6. Admin Permissions `ADMIN_PERMISSIONS`
+
+`admin:panel/users/library/plans/roles/usage/payments/notify` — the admin has `*`; the supervisor receives only explicitly granted permissions, and the sidebar is filtered accordingly.
+
+## 7. Two-Layer `/admin` Protection
+
+1. **`ADMIN_TOKEN`** (constant-time comparison) — or localhost only if it is absent in development; production startup is rejected without the token.
+2. **admin/supervisor+panel role** from the session — the token alone is insufficient.

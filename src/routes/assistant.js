@@ -10,21 +10,13 @@ import { listFiles } from '../services/files.js';
 import { renderNotice } from '../views/layout.js';
 import { renderAssistantPage, renderAssistantUpdate } from '../views/assistant.js';
 
-/**
- * مسارات «المعلم» (/assistant) — مساعد تعليمي مستقل:
- * - GET  /assistant            صفحة المحادثة (?c=id · ?prompt= تعبئة مسبقة)
- * - POST /assistant            إرسال رسالة (نموذج تقليدي 303 · أو JSON بلا إعادة تحميل)
- * - POST /assistant/:id/delete حذف محادثة
- *
- * جداوله الخاصة (assistant_conversations/messages) منفصلة تماماً عن
- * المشرف الذكي — ولا يمسّ خطوات الرحلة ولا الذاكرة.
- */
+/** Independent teaching-assistant routes. */
 const router = express.Router();
 
-/** حدّ قراءة واسع على صفحة المعلم (M5): 120 طلباً/5 دقائق لكل حساب. */
+/** Per-account read limit for the assistant page. */
 const pageReadLimit = rateLimitUser('page_read', { limit: 120, windowMs: 5 * 60 * 1000 });
 
-/** رسائل النتيجة بعد التحويل. */
+/** Flash messages shown after redirects. */
 const FLASH = {
   sent: { type: 'ok', message: 'وصل رد المعلم.' },
   empty: { type: 'error', message: 'اكتب رسالتك أولاً.' },
@@ -35,7 +27,7 @@ const FLASH = {
   deleted: { type: 'ok', message: 'حُذفت المحادثة.' }
 };
 
-/** تنبيه النتيجة من باراميترات الرابط (مع رسالة مخصّصة لنقص الرصيد). */
+/** Resolves a redirect flash message, including low-balance details. */
 function flashFromQuery(query) {
   const base = FLASH[String(query.ok || query.err || '')];
   if (!base) return null;
@@ -43,7 +35,7 @@ function flashFromQuery(query) {
   return custom ? { ...base, message: custom.slice(0, 300) } : base;
 }
 
-/** كود خطأ من askAssistant → مفتاح رسالة FLASH. */
+/** Maps askAssistant errors to flash-message keys. */
 function flashKeyForError(error) {
   const map = {
     EMPTY_ASSISTANT: 'empty',
@@ -55,7 +47,7 @@ function flashKeyForError(error) {
   return map[error?.code] || 'failed';
 }
 
-/** صفحة المعلم: القراءة مسموحة للجميع، والإرسال يتطلب الملف الأساسي. */
+/** Assistant page; sending requires a completed core profile. */
 router.get('/assistant', pageReadLimit, requireAccount, async (req, res) => {
   try {
     const userId = req.account.id;
@@ -94,12 +86,7 @@ router.get('/assistant', pageReadLimit, requireAccount, async (req, res) => {
   }
 });
 
-/**
- * إرسال رسالة للمعلم — نفس نمط الشات تماماً:
- * نموذج HTML عادي (بلا جافاسكربت): 303 مع flash في الرابط.
- * طلب JSON (Accept: application/json من chat-send.js): قطع HTML محدّثة
- * (رسائل + لوحة مصادر + سايدبار) — بلا إعادة تحميل الصفحة.
- */
+/** Sends an assistant message with normal-form and JSON response modes. */
 router.post(
   '/assistant',
   requireCoreOnboarding,
@@ -115,7 +102,7 @@ router.post(
         userId: req.account.id,
         prompt: body.message,
         conversationId: conversationId || null,
-        // ملفات يرفقها الباحث بهذه الرسالة (من ملفاته المرفوعة فقط — تُتحقّق الملكية)
+        // Attach only files owned by the current user.
         fileIds: body.file_ids,
         profile
       });
@@ -157,7 +144,7 @@ router.post(
   }
 );
 
-/** حذف محادثة معلم كاملة برسائلها (لا يمسّ النقاط المستهلكة). */
+/** Deletes an assistant conversation without changing recorded usage. */
 router.post('/assistant/:id/delete', requireAccount, async (req, res) => {
   const wantsJson = String(req.get('accept') || '').includes('application/json');
   try {

@@ -1,112 +1,112 @@
-# تقرير التعارضات: التوثيق مقابل المشروع الحالي (To-Do List)
+# Conflict Report: Documentation vs. the Current Project (To-Do List)
 
-> **الغرض:** رصد كل موضع يعِد فيه التوثيق (`docs/`) بشيء لا ينفذه الكود الحالي — أو يصف الكود وصفاً غير دقيق.
-> **القاعدة:** التوثيق هو المتغير (يُصحَّح ليصف الواقع)، والكود ثابت. لا Features جديدة إلا بقرار صريح.
-> **المرجع الأعلى:** وثيقة Documentation Realignment Specification.
-> **الحالة:** ✅ تم إغلاق جميع البنود الـ18 (آخر تحديث: بوابة الملف الجزئية P0-2 + التوثيق المصاحب).
-
----
-
-## 🔴 P0 — وعود يخالفها الكود فعلياً (أولوية قصوى)
-
-- [x] **P0-1 ✅ · التوثيق يعد بـ 5 أساليب توثيق، والكود يدعم 2 فقط**
-  - التوثيق (`01 §6`، `06`): «يلتزم بأسلوب توثيقه» بصيغة عامة توحي بأي أسلوب يختاره.
-  - الواقع (`supervisor-context.js:145`): `mla9 ? MLA 9 : APA 7` — أي قيمة أخرى (Chicago 17 / IEEE / Harvard) تسقط صامتة إلى APA 7 رغم أن النموذج يعرضها كخيارات ويحفظها (`routes/auth.js`).
-  - **✅ تم:** خريطة `CITATION_STYLE_INSTRUCTIONS` بقيم الخمسة في `supervisor-context.js` — القيمة غير المعروفة تسقط إلى APA 7 بوضوح.
-
-- [x] **P0-2 ✅ · التوثيق يقول «الملف شرط وبوابات مغلقة»، والكود لا يمنع شيئاً**
-  - التوثيق (`07 §2`): «بلا ملف مكتمل تبقى البوابات مغلقة».
-  - الواقع: `needsOnboarding()` معرّفة ولا يستدعيها أي Router؛ الحماية الوحيدة تحويلة `/dashboard` فقط، بينما `/chat` و`/references` و`/journey` و`/files` و`/defense` تعمل بملف فارغ (والسياق يملأ «غير محدد»).
-  - **✅ تم (قرار صاحب المنتج: بوابة جزئية تدريجية):** وسيط `requireCoreOnboarding` في `middleware/auth.js` مطبَّق على `POST /chat` + `GET/POST /journey` + `POST /defense/*` مع دورة عودة `?next=` كاملة؛ القراءة مفتوحة؛ و`GET /chat` و`/references` يعرضان رسالة ذكية تشرح الناقص مع رابط الملف؛ `docs/07 §2` أُعيدت صياغته ليصف «نقطة انطلاق لا حاجز».
-
-- [x] **P0-3 ✅ · تعارض صريح داخل التوثيق حول قاعدة المراجع**
-  - `07` (شروط الانتقال): «لا يوجد قفل» + القيد الوحيد سؤال العنوان قبل المراجع.
-  - `06` (التنقل): «لا تطالبه بمراجع قبل تسجيل العنوان» — صياغة زمنية (قبل/بعد) توحي بمرحلة منجزة، بينما القيد لحظي (اذكر عنواناً الآن حتى لو خطوتك الأولى).
-  - **✅ تم:** صياغة واحدة في `07 §5` («لا ترشيح مراجع ما لم يذكر عنواناً محدداً الآن — قيد لحظي») وفي `06` (تنقل الدراسات).
+> **Purpose:** Identify every place where the documentation (`docs/`) promises something the current code does not implement, or describes the code inaccurately.
+> **Rule:** Documentation is the variable (correct it to describe reality); code is fixed. No new features without an explicit decision.
+> **Highest authority:** Documentation Realignment Specification.
+> **Status:** ✅ All 18 items have been closed (last update: partial profile gate P0-2 + accompanying documentation).
 
 ---
 
-## 🟠 P1 — أوصاف غير دقيقة لسلوك حقيقي
+## 🔴 P0 — Promises the code actually contradicts (highest priority)
 
-- [x] **P1-1 ✅ · أسئلة المناقشة: التوثيق 11، وتعليق الكود 8–12**
-  - `07 §6`: «11 سؤالاً (2+3+3+2+1)» — صحيح (`defense.js: TOTAL_QUESTIONS = 11`).
-  - لكن `chat.js:437`: تعليق «(8–12 سؤالاً)» — نطاق قديم يوحي بمرونة غير موجودة.
-  - **✅ تم:** التعليق صار «الإجمالي 11 سؤالاً حتى التقييم النهائي».
+- [x] **P0-1 ✅ · Documentation promises 5 citation styles, but code supports only 2**
+  - Documentation (`01 §6`, `06`): “follows the citation style” is phrased generally, implying that it supports any style the user chooses.
+  - Reality (`supervisor-context.js:145`): `mla9 ? MLA 9 : APA 7` — any other value (Chicago 17 / IEEE / Harvard) silently falls back to APA 7, even though the form presents them as options and saves them (`routes/auth.js`).
+  - **✅ Done:** `CITATION_STYLE_INSTRUCTIONS` map with all five values in `supervisor-context.js` — unknown values clearly fall back to APA 7.
 
-- [x] **P1-2 ✅ · حالات القراءة: التوثيق 3، والكود 4**
-  - `03-database.md`: `to_read/reading/done` فقط.
-  - الواقع (`constants.js:264`): `to_read/reading/read/cited` — أربع حالات.
-  - **✅ تم:** `03` يعدّل الأربع (هو الموضع الوحيد المذكور فيها).
+- [x] **P0-2 ✅ · Documentation says “the profile is required and gates are closed,” but code blocks nothing**
+  - Documentation (`07 §2`): “Without a complete profile, gates remain closed.”
+  - Reality: `needsOnboarding()` is defined but no router calls it; the only protection is a `/dashboard` redirect, while `/chat`, `/references`, `/journey`, `/files`, and `/defense` work with an empty profile (and the context fills in “unspecified”).
+  - **✅ Done (product owner's decision: gradual partial gate):** `requireCoreOnboarding` middleware in `middleware/auth.js` is applied to `POST /chat` + `GET/POST /journey` + `POST /defense/*`, with a complete `?next=` return flow; reads remain open; `GET /chat` and `/references` show a helpful notice explaining what is missing and linking to the profile; `docs/07 §2` was rewritten to describe a “starting point, not a barrier.”
 
-- [x] **P1-3 ✅ · «سؤال واحد في كل رد» مطلقة، والكود يكسرها في 3 مواضع**
-  - رسالة بدء المناقشة (ترحيب + سؤال)؛ التقييم النهائي (3 بنود + توصيات بلا سؤال)؛ رد `needsTopic` (سؤال + ذكر التخصص).
-  - **✅ تم:** الثلاثة موثقة كحالات خاصة تحت القاعدة في `06 §كيف تتحدث`.
-
-- [x] **P1-4 ✅ · «الترحيب أول مرة» — نطاقه تاريخ الحساب كله لا الجلسة**
-  - الواقع (`supervisor-context.js:45`): `isFirstMessageEver` عبر كل محادثاته؛ ومن حذف كل محادثاته يُرحَّب به كجديد (حالة حدّية غير موثقة).
-  - **✅ تم:** سطر في `06 §كيف تستخدم الذاكرة` يحدد النطاق («أول مرة في تاريخه مع المنصة عبر كل محادثاته»).
-
-- [x] **P1-5 ✅ · المراجع «بلا خصم» — دقيق لكن ناقص**
-  - البحث الخارجي بلا خصم مباشر، لكن نتائجه المحقونة تضخم إدخال الرسالة فيُسعَّر ضمنياً.
-  - **✅ تم:** سطر في `05 §4` عن التكلفة غير المباشرة.
+- [x] **P0-3 ✅ · Explicit conflict within the documentation about the references rule**
+  - `07` (transition requirements): “There is no lock” + the only restriction is to ask for a title before references.
+  - `06` (navigation): “Do not ask for references before recording the title” — temporal wording (before/after) implies a completed stage, whereas the restriction is immediate (state a title now, even if it is your first step).
+  - **✅ Done:** Unified wording in `07 §5` (“No reference recommendations unless the researcher names a specific title now — an immediate constraint”) and in `06` (study navigation).
 
 ---
 
-## 🟡 P2 — فجوات توثيقية (واقع صحيح غير موثق)
+## 🟠 P1 — Inaccurate descriptions of actual behavior
 
-- [x] **P2-1 ✅ · تسجيل الموضوع يعمل في مرحلة `topic` فقط — غير موثق**
-  - `07 §4`: «عندما يصرح بموضوعه يُسجَّل» بصيغة عامة.
-  - الواقع (`chat.js:312`): يعمل فقط إن كانت المرحلة الحالية `topic` — من صرّح وهو في «المنهج» لا يُسجَّل له شيء صامتاً.
-  - **✅ تم:** الشرط موثق صراحةً في `07 §4`.
+- [x] **P1-1 ✅ · Defense questions: documentation says 11, code comment says 8–12**
+  - `07 §6`: “11 questions (2+3+3+2+1)” — correct (`defense.js: TOTAL_QUESTIONS = 11`).
+  - However, `chat.js:437` has an old comment (“8–12 questions”) that suggests flexibility where none exists.
+  - **✅ Done:** The comment now says “11 questions total through the final evaluation.”
 
-- [x] **P2-2 ✅ · «راجعه في صفحة المسار قبل أن نعتمده» — بلا آلية تحقق**
-  - الكود يعتمد `registeredTopic()` فوراً في الرسالة التالية دون انتظار أي مراجعة فعلية.
-  - **✅ تم:** وُثّقت كتوصية إرشادية لا ضمانة في `07 §4`.
+- [x] **P1-2 ✅ · Reading statuses: documentation lists 3, code has 4**
+  - `03-database.md`: only `to_read/reading/done`.
+  - Reality (`constants.js:264`): `to_read/reading/read/cited` — four statuses.
+  - **✅ Done:** `03` now lists all four (the only occurrence mentioned there).
 
-- [x] **P2-3 ✅ · سقف الرد يتمدد صامتاً (900 ← 1400) مع المراجع/المرفقات**
-  - الواقع (`chat.js:331`): أي رد بمراجع أو مرفقات يتمدد لسقف المناقشة حتى في الوضع العادي (تكلفة أعلى دون إعلان).
-  - **✅ تم:** القاعدة موثقة في `05 §4` لأنها تؤثر على الفاتورة.
+- [x] **P1-3 ✅ · “One question per response” is stated absolutely, but code breaks it in 3 places**
+  - Defense start message (greeting + question); final evaluation (3 items + recommendations, no question); `needsTopic` response (question + mention of field).
+  - **✅ Done:** All three are documented as exceptions under the rule in `06 §How she speaks`.
 
-- [x] **P2-4 ✅ · التلخيص عند «بدء جلسة جديدة» لا «بعد كل جلسة»**
-  - الواقع (`chat.js:196,427`): تُلخَّص السابقة فقط عند إنشاء محادثة جديدة؛ ومن يستخدم محادثة واحدة للأبد لا تُلخَّص جلساته.
-  - **✅ تم:** الصياغة صارت دقيقة في `06 §كيف تستخدم الذاكرة`.
+- [x] **P1-4 ✅ · “First-time greeting” covers the account's entire history, not a session**
+  - Reality (`supervisor-context.js:45`): `isFirstMessageEver` spans all conversations; if all conversations are deleted, the user is greeted as new (an undocumented edge case).
+  - **✅ Done:** A line in `06 §How memory is used` specifies the scope (“the first time in the user's history on the platform, across all conversations”).
 
-- [x] **P2-5 ✅ · `resetStrikes` موجودة ولا يستدعيها أحد**
-  - التصفير الفعلي الوحيد تلقائي بعد الهدوء؛ الدالة اليدوية صفر استدعاءات في `src/`.
-  - **✅ تم:** وُثّقت كاحتياط غير مستخدم في تعليقها (`supervisor-memory.js`) وفي `06`.
-
-- [x] **P2-6 ✅ · تعليق `requireService` يعدد 4 مسارات ويسقط `/journey`**
-  - `/journey` محمي فعلاً (`journey.js:32`) وغير مذكور؛ و`/chat` خارج البوابة قصداً (متاح للجميع) دون توثيق للقصد.
-  - **✅ تم:** التعليق يعدّ المسارات الخمسة ويبرّر خروج `/chat` ويستدرك بوابة الملف الجزئية؛ و`04 §5` عُدّلت كذلك.
+- [x] **P1-5 ✅ · References are “free” — accurate but incomplete**
+  - External search has no direct charge, but injecting its results increases the message input and is therefore priced indirectly.
+  - **✅ Done:** A line in `05 §4` describes the indirect cost.
 
 ---
 
-## 🔵 P3 — توحيد مصطلحات
+## 🟡 P2 — Documentation gaps (correct behavior not documented)
 
-- [x] **P3-1 ✅ · «نقاط» في الواجهة مقابل `tokens_*` في القاعدة — بلا تنبيه**
-  - **✅ تم:** سطر ازدواج المصطلح في `03` و`10`.
+- [x] **P2-1 ✅ · Topic registration works only during the `topic` stage — undocumented**
+  - `07 §4`: “When the researcher states their topic, it is registered” is phrased generally.
+  - Reality (`chat.js:312`): it works only when the current stage is `topic` — if the researcher states a topic during “methodology,” nothing is registered, silently.
+  - **✅ Done:** The condition is explicitly documented in `07 §4`.
 
-- [x] **P3-2 ✅ · «المشرف» تعني 3 أشياء (ذكية/جامعي/إداري) بلا مسرد**
-  - **✅ تم:** مسرد 3 أسطر في `00` تحت تعريف المنتج.
+- [x] **P2-2 ✅ · “Review it on the journey page before we approve it” — no verification mechanism**
+  - The code uses `registeredTopic()` immediately in the next message without waiting for any actual review.
+  - **✅ Done:** This is documented as guidance, not a guarantee, in `07 §4`.
 
-- [x] **P3-3 ✅ · أسماء المراحل غير موحدة (6 فلسفية / 9 برمجية / 7 رحلية)**
-  - **✅ تم:** جدول مطابقة واحد جديد في `07 §مطابقة المراحل` يربط القوائم الثلاث.
+- [x] **P2-3 ✅ · Response limit silently expands (900 → 1400) with references/attachments**
+  - Reality (`chat.js:331`): any response with references or attachments gets the defense-stage limit, even in normal mode (higher cost without notice).
+  - **✅ Done:** The rule is documented in `05 §4` because it affects the bill.
 
-- [x] **P3-4 ✅ · «المحادثة تُفتح على خطوة» توحي بعرض مجمع غير موجود**
-  - `step_key` يُحفظ كسياق فقط؛ لا استعلام يجلب محادثات خطوة ولا صفحة تعرضها.
-  - **✅ تم:** الصياغة خُفّفت في `08` («تُوسم بخطوتها كسياق فقط»).
+- [x] **P2-4 ✅ · Summarization happens when “starting a new session,” not “after every session”**
+  - Reality (`chat.js:196,427`): the previous conversation is summarized only when a new one is created; sessions are not summarized for users who keep one conversation forever.
+  - **✅ Done:** Wording in `06 §How memory is used` is now accurate.
+
+- [x] **P2-5 ✅ · `resetStrikes` exists but nobody calls it**
+  - The only actual reset happens automatically after an idle period; the manual function has zero call sites in `src/`.
+  - **✅ Done:** It is documented as an unused fallback in its comment (`supervisor-memory.js`) and in `06`.
+
+- [x] **P2-6 ✅ · `requireService` comment lists 4 routes and omits `/journey`**
+  - `/journey` is actually protected (`journey.js:32`) but is not mentioned; `/chat` is intentionally outside the gate (available to everyone), but that intention is undocumented.
+  - **✅ Done:** The comment lists all five routes, explains why `/chat` is excluded, and notes the partial profile gate; `04 §5` was also updated.
 
 ---
 
-## 📊 الخلاصة
+## 🔵 P3 — Terminology consistency
 
-| الأولوية | العدد | الحالة |
-|---|---|---|
-| P0 حرجة | 3 | ✅ كلها (P0-1 خريطة الأساليب · P0-2 بوابة جزئية + توثيق · P0-3 صياغة موحدة) |
-| P1 دقة | 5 | ✅ كلها (تعليقات وصياغات) |
-| P2 فجوات | 6 | ✅ كلها (توثيق الواقع + تعليقات) |
-| P3 لفظية | 4 | ✅ كلها (مسرد + جداول + صياغات) |
-| **المجموع** | **18** | **✅ مُغلق** |
+- [x] **P3-1 ✅ · The interface says “points,” while the database uses `tokens_*` — no note explains this**
+  - **✅ Done:** Terminology note added to `03` and `10`.
 
-> **ما تم تنفيذه في الكود (وليس توثيقاً فقط):** P0-1 (خريطة أساليب التوثيق الخمسة) · P0-2 (وسيط `requireCoreOnboarding` + دورة `?next=` + رسائل ذكية في `/chat` و`/references`) · P1-1 وP2-5 وP2-6 (تعليقات كود). بقيّة البنود توثيقية.
-> **ضوابط الإغلاق:** لا Feature جديدة بلا اتفاق؛ بعد P0 أُعيدت قراءة `00` و`01` و`07`؛ `npm run test:unit` = **19/19** (أُضيف اختبارا بوابة الملف في هذا الإغلاق).
+- [x] **P3-2 ✅ · “Supervisor” refers to 3 things (AI/academic/administrative) without a glossary**
+  - **✅ Done:** Three-line glossary added under the product definition in `00`.
+
+- [x] **P3-3 ✅ · Stage names are inconsistent (6 philosophical / 9 programmatic / 7 journey stages)**
+  - **✅ Done:** A single new mapping table in `07 §Stage mapping` links the three lists.
+
+- [x] **P3-4 ✅ · “Conversation opens on a step” implies a grouped view that does not exist**
+  - `step_key` is stored as context only; no query fetches conversations by step and no page displays them.
+  - **✅ Done:** Wording was softened in `08` (“tagged with its step as context only”).
+
+---
+
+## 📊 Summary
+
+| Priority | Count | Status |
+|---|---:|---|
+| Critical P0 | 3 | ✅ All (P0-1 citation-style map · P0-2 partial gate + documentation · P0-3 unified wording) |
+| Accuracy P1 | 5 | ✅ All (comments and wording) |
+| Gaps P2 | 6 | ✅ All (documented actual behavior + comments) |
+| Terminology P3 | 4 | ✅ All (glossary + tables + wording) |
+| **Total** | **18** | **✅ Closed** |
+
+> **Implemented in code (not documentation only):** P0-1 (map of five citation styles) · P0-2 (`requireCoreOnboarding` middleware + `?next=` flow + helpful notices in `/chat` and `/references`) · P1-1, P2-5, and P2-6 (code comments). The remaining items are documentation-only.
+> **Closure checks:** No new features without agreement; after P0, `00`, `01`, and `07` were reread; `npm run test:unit` = **19/19** (two profile-gate tests were added in this closure).

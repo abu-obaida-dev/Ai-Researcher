@@ -1,21 +1,12 @@
 import { pool } from '../db/client.js';
 import { DEFAULT_CURRENCY, DEFAULT_PAYMENT_METHODS, SITE_CURRENCIES, WHATSAPP_COUNTRIES, isUuid } from '../constants.js';
 
-/**
- * الدفع اليدوي خارج المنصة + إدارة الطلبات:
- *
- *   - الباحث يختار باقة وطريقة دفع (تحويل بنكي أو كاش فقط)، ويؤكد رقمه على واتساب.
- *   - النظام يولّد كود تفعيل من 6 أرقام يظهر للباحث ويُرسل عبر واتساب لخدمة
- *     العملاء لتفعيل باقته. لا رقم عملية من الباحث، ولا ملاحظات.
- *   - المدير (أو مشرف يحمل صلاحية admin:payments) يؤكّد الطلب فيُمنح الباحث
- *     باقة الطلب ونقاطها، أو يرفضه بملاحظة.
- *   - الأسعار تُقرأ من جدول plans وقت الطلب (لا يُرسل السعر من المتصفح).
- */
+/** Manual-payment request creation and administrator approval. */
 
 const STATUSES = ['pending', 'confirmed', 'rejected'];
 const MAX_PENDING_PER_USER = 5;
 
-/** رقم واتساب ليبي بعد التنظيف (يُstripped الأحرف غير الأرقام و +). */
+/** Normalizes a Libyan WhatsApp number. */
 function normalizeWhatsapp(value) {
   return String(value || '').replace(/[^\d+]/g, '').slice(0, 20);
 }
@@ -26,10 +17,7 @@ function isValidWhatsapp(value) {
   return WHATSAPP_REGEX.test(value);
 }
 
-/**
- * تحويل أي صيغة مدخلة (محلية/دولية/00) إلى الصيغة الدولية الكاملة +218....
- * يُستخدم مع دولة مختارة من القائمة (نفس منطق صفحة التسجيل).
- */
+/** Converts local or international input to a normalized international number. */
 export function toInternationalWhatsapp(value, countryCode = 'LY') {
   let digits = String(value ?? '').replace(/\D/g, '');
   if (digits.startsWith('00')) digits = digits.slice(2);
@@ -46,7 +34,7 @@ export function toInternationalWhatsapp(value, countryCode = 'LY') {
   return `+${digits}`;
 }
 
-/** كود تفعيل من 6 أرقام، فريد بين طلبات الدفع. */
+/** Generates a unique six-digit activation code. */
 async function generateReferenceCode() {
   for (let attempt = 0; attempt < 10; attempt++) {
     const code = String(100000 + Math.floor(Math.random() * 900000));
@@ -62,13 +50,13 @@ function badInput(message, code = 'BAD_INPUT') {
   return error;
 }
 
-/** عملة صالحة من القائمة المدعومة. */
+/** Validates a supported currency code. */
 export function normalizeCurrency(value) {
   const code = String(value || '').trim().toUpperCase();
   return SITE_CURRENCIES.some((item) => item.code === code) ? code : DEFAULT_CURRENCY;
 }
 
-/** عملة الموقع من الإعدادات (سقوط آمن على الافتراضي). */
+/** Returns the configured site currency. */
 export async function siteCurrency() {
   try {
     const { rows } = await pool.query("SELECT value FROM settings WHERE key = 'site_currency'");
@@ -78,7 +66,7 @@ export async function siteCurrency() {
   }
 }
 
-/** تغيير عملة الموقع (من الإعدادات). */
+/** Updates the site currency. */
 export async function setSiteCurrency(code) {
   const next = normalizeCurrency(code);
   await pool.query(
@@ -101,7 +89,7 @@ function normalizeMethod(row) {
   };
 }
 
-/** طرق الدفع النشطة للباحث (من الجدول، مع سقوط آمن لقائمة الثوابت). */
+/** Lists active payment methods with a constants fallback. */
 export async function listPaymentMethods({ includeInactive = false } = {}) {
   try {
     const { rows } = await pool.query(
@@ -116,7 +104,7 @@ export async function listPaymentMethods({ includeInactive = false } = {}) {
   return DEFAULT_PAYMENT_METHODS.map((item) => ({ ...item, isActive: true, displayOrder: 0 }));
 }
 
-/** إضافة/تعديل طريقة دفع (المدير من الإعدادات). */
+/** Creates or updates a payment method. */
 export async function savePaymentMethod(input = {}) {
   const code = String(input.code || '')
     .trim()
@@ -152,7 +140,7 @@ export async function savePaymentMethod(input = {}) {
   return code;
 }
 
-/** تعطيل/حذف طريقة (من لها طلبات سابقة تُعطَّل بدل حذفها). */
+/** Deletes unused methods and disables methods with historical requests. */
 export async function removePaymentMethod(code) {
   const key = String(code || '').trim().toLowerCase().slice(0, 50);
   const used = await pool.query('SELECT 1 FROM payment_requests WHERE method_code = $1 LIMIT 1', [key]);
@@ -164,18 +152,14 @@ export async function removePaymentMethod(code) {
   return rowCount > 0 ? 'deleted' : 'missing';
 }
 
-/**
- * تقديم طلب دفع. السعر يؤخذ من جدول plans (لا يُرسل من المتصفح)،
- * والحد الأقصى للطلبات المعلّقة يمنع التزاحم على صندوق المراجعة.
- * يُولّد النظام كود تفعيل من 6 أرقام ويُخزّن رقم الواتساب وقت الطلب.
- */
+/** Creates a payment request using server-side plan pricing. */
 export async function createPaymentRequest(userId, input = {}) {
   const planCode = String(input.plan_code || '').trim().slice(0, 100);
   const methodCode = String(input.method_code || '').trim().toLowerCase().slice(0, 50);
-  // الدولة من القائمة (نفس قائمة التسجيل) — تُستخدم لتطبيع الرقم للصيغة الدولية
+  // Use the selected country to normalize the phone number.
   const countryCode = WHATSAPP_COUNTRIES.some((item) => item.code === input.wa_country) ? input.wa_country : 'LY';
   const country = WHATSAPP_COUNTRIES.find((item) => item.code === countryCode);
-  // الرقم بأي صيغة (محلي/دولي/00) — يُطبَّع دولياً قبل الحفظ والتحقق
+  // Normalize local, international, and 00-prefixed numbers before validation.
   const fullNumber = toInternationalWhatsapp(input.whatsapp_number, countryCode);
   const digitsOnly = fullNumber.replace(/\D/g, '');
   const localPart = digitsOnly.startsWith(country.dial) ? digitsOnly.slice(country.dial.length) : digitsOnly;
@@ -242,7 +226,7 @@ function normalizeRequest(row) {
   };
 }
 
-/** طلبات الباحث (الأحدث أولاً). */
+/** Lists a user's payment requests. */
 export async function listUserPaymentRequests(userId, { limit = 20 } = {}) {
   const { rows } = await pool.query(
     `SELECT pr.*, p.title AS plan_title, pm.label AS method_label
@@ -257,7 +241,7 @@ export async function listUserPaymentRequests(userId, { limit = 20 } = {}) {
   return rows.map(normalizeRequest);
 }
 
-/** كل الطلبات للمراجع (صفحة المدير) مع بحث وفلترة. */
+/** Lists payment requests for administrator review. */
 export async function listPaymentRequests({ status = 'pending', q = '', page = 1, pageSize = 25 } = {}) {
   const safeStatus = STATUSES.includes(String(status)) || status === 'all' ? String(status) : 'pending';
   const term = String(q || '').trim().slice(0, 100);
@@ -297,10 +281,7 @@ export async function listPaymentRequests({ status = 'pending', q = '', page = 1
     counts: await paymentCounts()
   };
 }
-/**
- * تأكيد طلب: ينقل الباحث لباقة الطلب ويضيف نقاطها.
- * ذرّي (معاملة واحدة): إما أن يُؤكّد الطلب وتُضاف النقاط، أو لا يحدث شيء.
- */
+/** Atomically approves a request and grants its plan benefits. */
 export async function confirmPaymentRequest(requestId, { adminNote = '', by = '' } = {}) {
   if (!isUuid(requestId)) throw badInput('الطلب غير موجود.', 'NOT_FOUND');
   const client = await pool.connect();
@@ -314,7 +295,7 @@ export async function confirmPaymentRequest(requestId, { adminNote = '', by = ''
 
     const plan = await client.query('SELECT code, tokens, period_days FROM plans WHERE code = $1', [request.plan_code]);
     const tokens = Number(plan.rows[0]?.tokens || 0);
-    // مدة الباقة بالأيام (NULL/صفر = لا تنتهي، مثل المجانية) — تُحسب من لحظة التأكيد
+    // Start the plan period at approval time; null or zero means no expiration.
     const periodDays = Number(plan.rows[0]?.period_days || 0);
 
     await client.query(
@@ -352,7 +333,7 @@ export async function confirmPaymentRequest(requestId, { adminNote = '', by = ''
   }
 }
 
-/** رفض طلب بملاحظة للباحث (لا خصم ولا تغيير باقة). */
+/** Rejects a request with a user-visible note. */
 export async function rejectPaymentRequest(requestId, { adminNote = '', by = '' } = {}) {
   if (!isUuid(requestId)) throw badInput('الطلب غير موجود.', 'NOT_FOUND');
   const { rows } = await pool.query('SELECT status FROM payment_requests WHERE id = $1', [requestId]);
@@ -369,7 +350,7 @@ export async function rejectPaymentRequest(requestId, { adminNote = '', by = '' 
   return { ok: true };
 }
 
-/** عدّادات سريعة (معلّق / مؤكّد / مرفوض) لشريط الصفحة. */
+/** Returns payment-request status counts. */
 export async function paymentCounts() {
   try {
     const { rows } = await pool.query('SELECT status, count(*)::int AS c FROM payment_requests GROUP BY status');

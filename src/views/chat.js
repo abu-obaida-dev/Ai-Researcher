@@ -3,21 +3,14 @@ import { icon } from './icons.js';
 import { escapeHtml, renderLayout } from './layout.js';
 
 /**
- * صفحة الشات (1F): صندوق دردشة بملء الشاشة + قائمة المحادثات داخل السايدبار.
+ * Full-screen chat page with a conversation list in the sidebar.
  *
- * قرارات التصميم:
- * - بلا ترويسة صفحة (pageHead:false) وبلا هيدر للكارت: أقصى مساحة لمربع الدردشة.
- * - زر «محادثة جديدة» في أعلى قائمة المحادثات بالسايدبار (لا مكان له داخل الكارت).
- * - زر الإرسال بجانب مربع الكتابة مباشرة (وليس تحته).
- * - بلا اقتراحات داخل الكارت: «محادثة جديدة» تبدأ محادثة نظيفة.
- * - الحذف لا يلمس النقاط: الاستهلاك يُسجَّل في usage_logs وقت كل رسالة،
- *   وحذف المحادثة يحذف المحادثة ورسائلها فقط (لا رصيد ولا سجل استهلاك).
+ * Keep the chat area prominent, place controls beside the composer, and preserve
+ * usage records when conversations are deleted.
  */
 
 /**
- * فقاعة رسالة واحدة (لون حسب الدور) مع الوقت.
- * **لا نعرض اسم الموديل** للباحث — ما يهمه هو الإجابة، لا تفاصيل المزوّد.
- * (يُحفظ الموديل في قاعدة البيانات للتشخيص والمراجعة فنيا.)
+ * Renders a message bubble with its timestamp; provider details stay internal.
  */
 function renderMessage(message) {
   const isUser = message.role === 'user';
@@ -28,7 +21,7 @@ function renderMessage(message) {
 </div>`;
 }
 
-/** تصريف عربي مبسّط لعدد الرسائل: 1 → رسالة واحدة · 2 → رسالتان · 3-10 → N رسائل · غير ذلك → N رسالة. */
+/** Formats a message count in Arabic. */
 function messageCountLabel(count) {
   const n = Number(count) || 0;
   if (n === 1) return 'رسالة واحدة';
@@ -38,8 +31,7 @@ function messageCountLabel(count) {
 }
 
 /**
- * قائمة المحادثات — تُدرَج في أعلى قائمة السايدبار (مثل ChatGPT/Claude).
- * زر «محادثة جديدة» في الأعلى، ولكل محادثة زر حذف مستقل.
+ * Renders the sidebar conversation list with a delete action for each item.
  */
 function renderConversations(conversations, activeId) {
   const list = conversations.length
@@ -68,10 +60,7 @@ function renderConversations(conversations, activeId) {
 }
 
 /**
- * إرفاق ملفات مع الرسالة: قائمة منسدلة (details/summary بلا جافاسكربت) مطويّة
- * فوق صندوق الكتابة — لا تلتهم مساحة الرسائل على الشاشات الصغيرة، وتظهر فقط
- * عند وجود ملفات للباحث (بلا ملفات: لا يُرسم شيء أصلاً). المربّعات ما زالت داخل
- * نموذج الإرسال (كانت خارجه فلا تصل المشرف ولا واحدة) مع وسم «يُقرأ/غير مقروء».
+ * Renders a collapsible attachment list inside the send form when files are available.
  */
 function renderAttachRow(files = []) {
   if (!files.length) return '';
@@ -97,8 +86,7 @@ function renderAttachRow(files = []) {
 }
 
 /**
- * نتائج أداة المراجع — تظهر تحت آخر ردّ: بيانات الاستشهاد كاملة + رابط
- * المصدر + رابط النسخة المفتوحة، وزر لإضافتها إلى «مراجعي» بضغطة واحدة.
+ * Renders references below the latest reply with source links and a save action.
  */
 function renderReferencesFound(conversation) {
   const items = Array.isArray(conversation?.references_found) ? conversation.references_found : [];

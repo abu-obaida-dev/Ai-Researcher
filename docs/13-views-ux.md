@@ -1,26 +1,26 @@
-# 13 — الواجهات: SSR عربي بلا React
+# 13 — Interfaces: Arabic SSR Without React
 
-## القرار
-HTML مولّد على الخادم في `src/views/` (13 ملفاً) + CSS مخصص + JS خفيف في `public/js/` — **لا React/Next/Vite، لا خطوة بناء، لا CDN ثقيل**.
+## Decision
+Server-generated HTML in `src/views/` (13 files) + custom CSS + lightweight JS in `public/js/` — **no React/Next/Vite, no build step, no heavy CDN**.
 
-## الهيكل — `views/layout.js` (1948 سطراً)
-- `renderLayout({account, services, active, content})`: الـ `<html dir=rtl lang=ar>` + الهوية + السايدبار (يُصفَّى بخدمات الحساب وصلاحيات الإدارة) + زر واتساب العائم + توافق PWA.
-- `renderNotice` (صفحات النجاح/الخطأ) + `renderServiceNotice` (403 البوابات: ما الخدمة وما الباقة المطلوبة).
+## Structure — `views/layout.js` (1,948 lines)
+- `renderLayout({account, services, active, content})`: the `<html dir=rtl lang=ar>` element + branding + sidebar (filtered by account services and admin permissions) + floating WhatsApp button + PWA compatibility.
+- `renderNotice` (success/error pages) + `renderServiceNotice` (403 gate notices: which service and which plan is required).
 
-## الصفحات
-| الملف | الصفحات |
+## Pages
+| File | Pages |
 |---|---|
-| `landing.js` | الهبوط: هيرو/مميزات/خدمات/كيف تعمل/جمهور/باقات (بمزايا مولدة)/أسئلة/دعوة |
-| `auth.js` | الدخول + الملف البحثي (onboarding: **صفحة مستقلة بلا سايدبار قبل الإكمال**، ثم تعديل داخل اللوحة بعده) + الإحصائية (مخططات 7 أيام) + الحساب |
-| `journey.js` | المسار: الخطوات + الحالات + زر تغيير الحالة + الملاحظة |
-| `chat.js` | المشرف: المحادثات + الرسائل + المراجع الموثقة تحت الرد + إرفاق ملفات + بطاقة مراجعة اكتمال الخطوة (قراءة ⇄ تعديل بلا جافاسكربت) |
-| `defense.js` | المناقشة: المراحل + العدّاد (سؤال n/11) + قائمة التحضير + التقييم |
-| `workspace.js` | المراجع (بحث مكتبة + خارجي + حالات قراءة) + المفكرة + الملفات (رفع/معاينة/تحميل) |
-| `payments.js` | الباقات + طرق الدفع + نموذج الطلب + حالة طلباتي |
-| `admin.js` + `admin-payments.js` | كل أقسام اللوحة (جداول + فلاتر + نماذج) |
+| `landing.js` | Landing page: hero/features/services/how it works/audience/plans (with generated features)/FAQ/call to action |
+| `auth.js` | Login + research profile (onboarding: **standalone page without a sidebar until complete**, then editable in the dashboard) + analytics (7-day charts) + account |
+| `journey.js` | Research path: steps + statuses + status-change button + note |
+| `chat.js` | Supervisor: conversations + messages + verified references below the response + file attachments + step-completion review card (read ⇄ edit without JavaScript) |
+| `defense.js` | Defense: stages + counter (question n/11) + preparation checklist + evaluation |
+| `workspace.js` | References (library + external search + reading statuses) + notebook + files (upload/preview/download) |
+| `payments.js` | Plans + payment methods + request form + request status |
+| `admin.js` + `admin-payments.js` | All dashboard sections (tables + filters + forms) |
 
-## الهوية — Zena AI
-زمردي (ثقة) / نحاسي (تميز) / ورق الرقّ (خلفية) / حبر البرقوق (إدارة) — خطا Manrope + IBM Plex Sans Arabic **محلياً** في `public/fonts/` (يعمل أوفلاين)، والأيقونات SVG في `views/icons.js`.
+## Branding — Zena AI
+Emerald (trust) / copper (distinction) / parchment (background) / plum ink (administration) — Manrope + IBM Plex Sans Arabic fonts are **stored locally** in `public/fonts/` (work offline), and the icons are SVGs in `views/icons.js`.
 
-## سلوك المتصفح — `public/js/`
-`app-shell.js` (القائمة/الأوفلاين) · `file-picker.js` (اختيار الملفات للشات) · `chat-auto-scroll.js` (النزول لآخر رد) · `push-notifications.js` + `firebase-messaging-sw.js` (تسجيل توكن FCM).
+## Browser behavior — `public/js/`
+`app-shell.js` (menu/offline) · `file-picker.js` (chat file picker) · `chat-auto-scroll.js` (scroll to the latest response) · `push-notifications.js` + `firebase-messaging-sw.js` (FCM token registration).

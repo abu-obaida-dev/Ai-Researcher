@@ -3,18 +3,14 @@ import { formatDateTime, formatNumber } from './format.js';
 import { icon } from './icons.js';
 import { escapeHtml, renderLayout } from './layout.js';
 
-/**
- * صفحة «مسار البحث» (1D): خطوات درجة الباحث مع حالته في كل خطوة،
- * وروابط ربط المرجع/الملاحظة/الملف بالخطوة، وزر «ابدأ مع المشرف» الذي
- * يفتح الشات بسياق الخطوة (/chat?step=…). النماذج تُرسل POST إلى /journey/steps/:key.
- */
+/** Renders the research journey and step-specific workspace links. */
 
-/** اسم الدرجة المعروض (من DEGREE_LEVELS). */
+/** Resolves the degree label for display. */
 function degreeLabel(value) {
   return DEGREE_LEVELS.find((item) => item.value === value)?.label || value || 'غير محددة';
 }
 
-/** تنبيه نتيجة العملية (يأتي من ?ok= / ?err= بعد الـ POST). */
+/** Renders a POST result message. */
 function flashBox(flash) {
   if (!flash?.message) return '';
 
@@ -23,7 +19,7 @@ function flashBox(flash) {
     : `<div class="notice">${escapeHtml(flash.message)}</div>`;
 }
 
-/** أزرار حالة الخطوة (radio مبثقة كأزرار) — الحالة الحالية محددة. */
+/** Renders the step status radio controls. */
 function statusChoices(statuses, current) {
   return statuses
     .map((item) => {
@@ -36,7 +32,7 @@ function statusChoices(statuses, current) {
     .join('');
 }
 
-/** شريط روابط للخطوة: مراجعها وملاحظاتها وملفاتها والشات بسياقها. */
+/** Renders links to resources associated with a step. */
 function stepLinks(step) {
   const key = encodeURIComponent(step.key);
   const chatHref = `/chat?step=${key}&title=${encodeURIComponent(`خطوة: ${step.title}`)}`;

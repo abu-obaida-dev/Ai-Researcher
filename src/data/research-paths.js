@@ -1,13 +1,4 @@
-/**
- * مسارات البحث الافتراضية — مصدر واحد للحالتين:
- * 1) بذرة جدول research_paths/research_path_steps عند تشغيل npm run db:seed (اختياري).
- * 2) السقوط الآمن لصفحة «مسار البحث»: تعمل المنصة فوراٌ بدون أي بذرة، لأن
- *    services/journey.js يستخدم هذه التعريفات حين لا يوجد مسار مخزّن للدرجة.
- *
- * key لكل خطوة ثابت ويٌستخدم معرّفاٌ دلالياٌ لتقدّم الباحث
- * (user_step_progress.step_key / notes.step_key / user_references.step_key).
- * cost_type يجب أن يطابق أحد أنواع TOKEN_COSTS في constants.js حتى يظهر سعر الخطوة.
- */
+/** Shared default research paths for database seeding and runtime fallback. */
 const step = (key, title, description, costType, guidance, isRequired = true) => ({
   key,
   title,

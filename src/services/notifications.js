@@ -6,16 +6,12 @@ import {
   sendPushToTokens
 } from './firebase.js';
 
-/**
- * طبقة الإشعارات: إشعارات داخل الموقع (جدول notifications) + إشعارات هاتف
- * عبر FCM (جدول device_tokens) — بدون أي Firestore؛ كل شيء في PostgreSQL.
- * الإرسال اختياري: بدون مفاتيح FCM تُحفظ الإشعارات داخل الموقع فقط.
- */
+/** Stores in-app notifications and optionally sends push notifications through FCM. */
 
-// مصدر واحد لإعدادات Firebase (تعريفي + خادمي) — تُصدَّر من هنا أيضاً لراحة المستورد.
+// Re-export Firebase configuration helpers from one module.
 export { firebaseWebConfig, isFirebaseWebConfigured, isFcmServerConfigured };
 
-/** يحفظ إشعاراً داخل الموقع للمستخدم (يعمل دائماً حتى بدون مفاتيح FCM). */
+/** Stores an in-app notification. */
 export async function saveNotification(userId, { title, body = '', kind = 'system', url = '/account' }) {
   const { rows } = await pool.query(
     `INSERT INTO notifications (user_id, title, body, kind, url)
@@ -31,7 +27,7 @@ export async function saveNotification(userId, { title, body = '', kind = 'syste
   return rows[0];
 }
 
-/** توكنات الأجهزة المفعّلة لهذا المستخدم. */
+/** Lists enabled device tokens for a user. */
 async function deviceTokens(userId) {
   try {
     const { rows } = await pool.query(
@@ -44,10 +40,7 @@ async function deviceTokens(userId) {
   }
 }
 
-/**
- * يرسل Push لكل أجهزة المستخدم عبر FCM.
- * يعيد { sent, failed, skipped, error } ولا يرمي أبداً — الفشل يُبلَّغ نصاً عربياً.
- */
+/** Sends push notifications and returns per-device results without throwing. */
 export async function sendPushToUser(userId, { title, body = '', url = '/account' }) {
   const result = { sent: 0, failed: 0, skipped: 0, error: '' };
 
@@ -67,7 +60,7 @@ export async function sendPushToUser(userId, { title, body = '', url = '/account
     const push = await sendPushToTokens(tokens, { title, body, url });
     result.sent = push.sent;
     result.failed = push.failed;
-    // تنظيف التوكنات الميتة حتى لا يتراكم رفض FCM في كل إرسال
+    // Remove invalid tokens to avoid repeated FCM failures.
     if (push.invalidTokens?.length) {
       await pool.query('DELETE FROM device_tokens WHERE user_id = $1 AND token = ANY($2)', [
         userId,
@@ -84,7 +77,7 @@ export async function sendPushToUser(userId, { title, body = '', url = '/account
   return result;
 }
 
-/** يحفظ نسخة داخل الموقع ثم يرسل Push — لا يرمي خطأ أبداً. */
+/** Stores an in-app copy and attempts push delivery. */
 export async function notifyUser(userId, { title, body = '', kind = 'system', url = '/account' }) {
   try {
     const saved = await saveNotification(userId, { title, body, kind, url });
@@ -99,7 +92,7 @@ export async function notifyUser(userId, { title, body = '', kind = 'system', ur
   }
 }
 
-/** يسجّل توكن جهاز (أو يعيد تفعيله إن تكرر بعد إيقافه). */
+/** Registers or re-enables a device token. */
 export async function registerDeviceToken(userId, token, platform = 'web') {
   const clean = String(token || '').trim();
   if (clean.length < 20 || clean.length > 4096) {
@@ -118,7 +111,7 @@ export async function registerDeviceToken(userId, token, platform = 'web') {
   return rows[0];
 }
 
-/** يوقف توكن جهاز معيّن (إلغاء التفعيل من الهاتف). */
+/** Disables a device token. */
 export async function disableDeviceToken(userId, token) {
   const clean = String(token || '').trim();
   if (!clean) return false;
@@ -132,7 +125,7 @@ export async function disableDeviceToken(userId, token) {
   return rowCount > 0;
 }
 
-/** آخر إشعارات المستخدم (الأحدث أولاً). */
+/** Lists the user's latest notifications. */
 export async function listNotifications(userId, { limit = 50 } = {}) {
   const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
   const { rows } = await pool.query(
@@ -146,7 +139,7 @@ export async function listNotifications(userId, { limit = 50 } = {}) {
   return rows;
 }
 
-/** عدد الإشعارات غير المقروءة (يُستخدم في شارة الجرس — لا يرمي أبداً). */
+/** Returns the unread notification count. */
 export async function unreadCount(userId) {
   try {
     const { rows } = await pool.query(
@@ -159,7 +152,7 @@ export async function unreadCount(userId) {
   }
 }
 
-/** تعليم إشعار واحد كمقروء (id قديم أو غير UUID يعيد false بدل رمي خطأ). */
+/** Marks one notification as read; invalid IDs return false. */
 export async function markNotificationRead(userId, id) {
   try {
     const { rowCount } = await pool.query(
@@ -172,7 +165,7 @@ export async function markNotificationRead(userId, id) {
   }
 }
 
-/** تعليم كل إشعارات المستخدم كمقروءة — يعيد عدد ما تم تعديله. */
+/** Marks all notifications as read. */
 export async function markAllNotificationsRead(userId) {
   try {
     const { rowCount } = await pool.query(
@@ -185,7 +178,7 @@ export async function markAllNotificationsRead(userId) {
   }
 }
 
-/** حذف إشعار واحد من قائمة صاحبه (id غير صالح يعيد false بدل رمي خطأ). */
+/** Deletes an owned notification; invalid IDs return false. */
 export async function deleteNotification(userId, id) {
   try {
     const { rowCount } = await pool.query('DELETE FROM notifications WHERE user_id = $1 AND id = $2', [
@@ -198,7 +191,7 @@ export async function deleteNotification(userId, id) {
   }
 }
 
-/** عدد الأجهزة المفعّلة فعلياً (0 يعني إيقاف الإشعارات تماماً). */
+/** Counts enabled devices for the user. */
 export async function activeDeviceCount(userId) {
   try {
     const { rows } = await pool.query(
@@ -211,7 +204,7 @@ export async function activeDeviceCount(userId) {
   }
 }
 
-/** يزامن عمود users.notifications_enabled مع حالة الأجهزة (أفضل جهد). */
+/** Best-effort sync of the user's notification preference. */
 async function setNotificationsEnabled(userId, enabled) {
   try {
     await pool.query('UPDATE users SET notifications_enabled = $2, updated_at = NOW() WHERE id = $1', [
@@ -219,14 +212,11 @@ async function setNotificationsEnabled(userId, enabled) {
       Boolean(enabled)
     ]);
   } catch {
-    /* غير حاسم — الحالة الحقيقية هي توكنات device_tokens */
+    /* Device tokens remain the source of truth. */
   }
 }
 
-/**
- * تلميح عربي لحالة الإشعارات يُعرض في صفحة الحساب وصفحة الإشعارات:
- * { ready, webReady, serverReady, text } — ready تعني أن كل ما يلزم جاهز.
- */
+/** Returns notification readiness flags and a user-facing status message. */
 export function pushStatusHint() {
   const webReady = isFirebaseWebConfigured();
   const serverReady = isFcmServerConfigured();

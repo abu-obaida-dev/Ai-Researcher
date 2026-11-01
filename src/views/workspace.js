@@ -5,14 +5,9 @@ import { formatDate, formatDateTime, formatNumber } from './format.js';
 import { icon } from './icons.js';
 import { escapeHtml, renderLayout } from './layout.js';
 
-/**
- * صفحات مساحة عمل الباحث (1E): المراجع والمفكرة والملفات.
- * كلها HTML مولّد على الخادم (نماذج POST عادية + 303 redirect) بلا أي سكربت سطري،
- * فالصفحات تعمل حتى لو تعطّل JavaScript. الروابط بين الصفحات تمر بـ ?step=<step_key>
- * القادمة من صفحة «مسار البحث».
- */
+/** Server-rendered views for references, notes, files, and the library. */
 
-/** قائمة منسدلة بخطوات المسار لربط العنصر بالخطوة الحالية. */
+/** Renders the step selector for linking an item. */
 function stepSelect(stepOptions, current = '', name = 'step', id = 'step') {
   const options = stepOptions
     .map(
@@ -32,20 +27,20 @@ function stepSelect(stepOptions, current = '', name = 'step', id = 'step') {
 </div>`;
 }
 
-/** تنبيه النتيجة بعد التحويل (ok / err من الرابط). */
+/** Renders a redirect flash message. */
 function flashBox(flash) {
   if (!flash?.message) return '';
   return flash.type === 'error' ? `<div class="alert">${escapeHtml(flash.message)}</div>` : `<div class="notice">${escapeHtml(flash.message)}</div>`;
 }
 
-/** خدمة مفتوحة لهذا الحساب؟ (نفس منطق السايدبار: بلا بيانات خدمات ⇒ نعرض كل شيء). */
+/** Checks whether a service is available to the account. */
 function serviceOpen(account, key) {
   const services = account?.services;
   if (!Array.isArray(services)) return true;
   return services.some((item) => (typeof item === 'string' ? item === key : item?.key === key && item?.enabled !== false));
 }
 
-/** صف مرجع في «مراجعي»: التوثيق + حالة القراءة + ملاحظات مرتبطة. */
+/** Renders a reference row with reading status and linked notes. */
 function renderReferenceRow(reference) {
   const statusOptions = READING_STATUSES.map(
     (item) =>
@@ -55,21 +50,21 @@ function renderReferenceRow(reference) {
   ).join('');
 
   return `<tr>
-  <td>
+  <td data-label="المرجع">
     <b class="ref-title" title="${escapeHtml(reference.title)}">${escapeHtml(reference.title)}</b>
     <p class="muted ref-citation">${escapeHtml(reference.citation)}</p>
     ${reference.note ? `<p class="muted ref-citation">${escapeHtml(reference.note)}</p>` : ''}
   </td>
-  <td>${reference.year ? escapeHtml(String(reference.year)) : '—'}<br /><span class="muted">${escapeHtml(
+  <td data-label="السنة والمصدر">${reference.year ? escapeHtml(String(reference.year)) : '—'}<br /><span class="muted">${escapeHtml(
     reference.source || '—'
   )}</span></td>
-  <td>
+  <td data-label="الحالة">
     <form method="post" action="/references/${escapeHtml(reference.id)}/status" class="inline-form ref-status">
       <select name="status" aria-label="حالة قراءة المرجع">${statusOptions}</select>
       <button class="btn btn-sm" type="submit">تحديث</button>
     </form>
   </td>
-  <td>
+  <td data-label="إجراءات">
     <div class="links row-actions">
     ${
       reference.hasFile
@@ -96,9 +91,9 @@ function renderReferenceRow(reference) {
 </tr>`;
 }
 
-/** بطاقة نتيجة من المكتبة مع زر الإضافة إلى «مراجعي» + الوصول إلى الكتاب نفسه. */
+/** Renders a library result with add and access actions. */
 function renderLibraryItem(item, stepKey) {
-  // الوصول للكتاب: ملف للمعاينة + ملف للتحميل، أو رابط المصدر الأصلي إن لم يكن ملف.
+  // Prefer the stored file, otherwise use the original source URL.
   const access = item.hasFile
     ? `<a class="btn btn-sm" href="/library/${encodeURIComponent(item.id)}/file?inline=1" target="_blank" rel="noopener">${icon(
         'book',
@@ -133,10 +128,7 @@ function renderLibraryItem(item, stepKey) {
 </article>`;
 }
 
-/**
- * نتيجة بحث الويب (قاعدة بيانات علمية) — تُعرض بكل بيانات الاستشهاد ورابط
- * المصدر ورابط النسخة المفتوحة، مع زر «أضف إلى مراجعي» يحمل البيانات جاهزة.
- */
+/** Renders an external literature result with citation and access links. */
 function renderWebReference(item, stepKey) {
   const bits = [
     item.authorText || 'بلا مؤلف محدد',
@@ -174,43 +166,43 @@ function renderWebReference(item, stepKey) {
 </article>`;
 }
 
-/**
- * لوحة «ابحث في قواعد البيانات العلمية» — نموذج بحث عام في المصادر الخارجية
- * مع إحصائية واضحة لعدد المراجع الظاهرة.
- */
+/** Renders the external literature-search form and results. */
 function renderWebSearchPanel({ web, webQuery, webSource, webYearFrom = 0, webYearTo = 0, webSources = [], stepKey }) {
   const optionTag = (source) =>
     `<option value="${escapeHtml(source.id)}"${source.id === webSource ? ' selected' : ''}>${escapeHtml(source.label)}</option>`;
-  // تقسيم القائمة إلى مجموعات مفهومة: عالمية · تخصصية · ناشرون · كتب ومراجع عربية وعالمية
+  // Group sources by type for selection.
   const groupOptions = SOURCE_GROUPS.map((group) => ({
     label: group.label,
     options: webSources.filter((source) => sourceGroup(source.id) === group.id).map(optionTag)
   })).filter((entry) => entry.options.length);
   const options = [
-    `<option value=""${!webSource ? ' selected' : ''}>كل المصادر (الأسرع والأغنى)</option>`,
+    `<option value=""${!webSource ? ' selected' : ''}>كل المصادر (بحث شامل)</option>`,
     ...groupOptions.map((entry) => `<optgroup label="${escapeHtml(entry.label)}">${entry.options.join('')}</optgroup>`)
   ].join('');
 
   const results = web?.items || [];
   const errors = (web?.errors || []).filter((entry) => entry.error);
 
-  // إحصائية عدد المراجع الظاهرة بعد البحث — تُعرض أعلى القائمة بوضوح.
+  // Show the visible-result count above the list.
   const countBadge = webQuery
     ? `<div class="notice mt-12" role="status"><b>عدد المراجع الظاهرة:</b> ${String(results.length)}</div>`
     : '';
 
-  // فلتر فترة الإصدار الفعّال — يُعرض مع النتائج وحالة «لا نتائج» ليعرف الباحث ما يُرشَّح.
+  // Keep the active year range visible even when there are no results.
   const periodNote =
     webYearFrom || webYearTo ? `فترة الإصدار: ${webYearFrom || '…'}–${webYearTo || '…'}` : '';
   const triedLine = web?.tried?.length
-    ? `بحثنا في: ${web.tried.map((entry) => `${escapeHtml(entry.source)} (${entry.count})`).join(' · ')}`
+    ? `بحثنا في: ${web.tried.map((entry) => {
+        const label = webSources.find((source) => source.id === entry.source)?.label || entry.source;
+        return `${escapeHtml(label.split(' — ')[0])} (${entry.count})`;
+      }).join(' · ')}`
     : '';
   const metaLine = [triedLine, periodNote].filter(Boolean).join(' · ');
 
   return `<section class="card">
   <div class="card-head">
     <h2>${icon('book', 'icon-sm')} ابحث في قواعد البيانات العلمية</h2>
-    <span class="muted">مرجع كامل برابطه خلال ثوانٍ</span>
+    <span class="muted">بحث متوازٍ في قواعد البيانات المتاحة</span>
   </div>
   <p class="muted">
     ابحث بالكلمات المفتاحية (عنوان · مفهوم · كلمات مفتاحية إنجليزية وعربية) في المصادر العالمية
@@ -221,7 +213,7 @@ function renderWebSearchPanel({ web, webQuery, webSource, webYearFrom = 0, webYe
     والسنة وDOI ورابط المصدر ونسخة PDF مفتوحة إن وُجدت. ونقّص النتائج بفلتر
     <b>فترة الإصدار (من – إلى)</b> إن تبحث عن مراجع زمن محدّد.
   </p>
-  <form class="toolbar" method="get" action="/library">
+  <form class="toolbar" method="get" action="/library" data-literature-search>
     ${stepKey ? `<input type="hidden" name="step" value="${escapeHtml(stepKey)}" />` : ''}
     <input type="hidden" name="q" value="" />
     <input type="search" name="wq" value="${escapeHtml(webQuery || '')}" placeholder="مثال: machine learning in higher education" />
@@ -232,6 +224,10 @@ function renderWebSearchPanel({ web, webQuery, webSource, webYearFrom = 0, webYe
       <input type="number" name="wto" min="1500" max="2100" inputmode="numeric" placeholder="إلى سنة" aria-label="إلى سنة الإصدار" value="${webYearTo || ''}" />
     </span>
     <button class="btn btn-primary" type="submit">${icon('searchCheck', 'icon-sm')} ابحث</button>
+    <div class="search-progress" data-search-progress hidden role="status" aria-live="polite">
+      <span class="search-progress-track" aria-hidden="true"><span></span></span>
+      <span>جارٍ البحث في جميع المصادر العلمية…</span>
+    </div>
   </form>
 
   ${countBadge}
@@ -246,10 +242,7 @@ function renderWebSearchPanel({ web, webQuery, webSource, webYearFrom = 0, webYe
 </section>`;
 }
 
-/**
- * صفحة المكتبة (رابط مستقل): صفحة بحث فقط — البحث في القواعد العلمية أولاً
- * ثم مكتبة المنصة. كتب الباحث المرفوعة تُدار من صفحة الملفات.
- */
+/** Renders the platform library and external-search page. */
 export function renderLibraryPage({
   account,
   unread = 0,
@@ -300,13 +293,13 @@ ${renderWebSearchPanel({ web, webQuery, webSource, webYearFrom, webYearTo, webSo
     activeKey: 'library',
     account,
     unread,
-    scripts: ['/js/app-shell.js'],
+    scripts: ['/js/app-shell.js', '/js/library-search-progress.js'],
     body
   });
 }
 
 
-/** بطاقة ملاحظة: نصها، وسومها، خطوتها، وأزرار التثبيت/التعديل/الحذف. */
+/** Renders a note card and its actions. */
 function renderNoteCard(note, { stepTitles, editing = false, focus = false }) {
   const tags = note.tags.length
     ? `<p class="note-tags">${note.tags.map((tag) => `<span class="chip">#${escapeHtml(tag)}</span>`).join('')}</p>`
@@ -367,12 +360,12 @@ function renderNoteCard(note, { stepTitles, editing = false, focus = false }) {
 </article>`;
 }
 
-/** خيارات الخطوة المشتقة من عناوين الخطوات المعروضة (للتعديل السريع). */
+/** Builds step options from the displayed journey. */
 function stepOptionsLocal(stepTitles) {
   return Object.entries(stepTitles).map(([value, label]) => ({ value, label }));
 }
 
-/** صفحة المفكرة: نموذج إضافة + قائمة ملاحظات (بحث/فلترة بخطوة/تثبيت). */
+/** Renders the notes page and its filters. */
 export function renderNotesPage({ account, unread = 0, notes = [], query = '', stepKey = '', referenceId = '', stepOptions = [], stepTitles = {}, editingId = '', flash = null }) {
   const noteCards = notes.length
     ? notes.map((note) => renderNoteCard(note, { stepTitles, editing: note.id === editingId })).join('')
@@ -425,20 +418,20 @@ ${flashBox(flash)}`;
   });
 }
 
-/** صف ملف: النوع والحجم والخطوة + أزرار العرض والتحميل والحذف. */
+/** Renders a file row and its actions. */
 function renderFileRow(file, stepTitles) {
   const viewBtn = file.previewable
     ? `<a class="btn btn-sm btn-quiet" href="/files/${escapeHtml(file.id)}/view">${icon('searchCheck', 'icon-sm')} عرض</a>`
     : '';
 
   return `<tr>
-  <td>
+  <td data-label="الملف">
     <div class="file-cell"><b class="file-name" title="${escapeHtml(file.title)}">${escapeHtml(file.title)}</b>
     <p class="file-meta muted">${escapeHtml(file.fileName)}</p></div>
   </td>
-  <td>${escapeHtml(file.kind)}<br /><span class="muted">${escapeHtml(formatFileSize(file.sizeBytes))}</span></td>
-  <td>${escapeHtml(formatDate(file.createdAt))}</td>
-  <td>
+  <td data-label="النوع والحجم">${escapeHtml(file.kind)}<br /><span class="muted">${escapeHtml(formatFileSize(file.sizeBytes))}</span></td>
+  <td data-label="التاريخ">${escapeHtml(formatDate(file.createdAt))}</td>
+  <td data-label="إجراءات">
     <div class="links row-actions">
     ${viewBtn}
     <a class="btn btn-sm btn-quiet" href="/files/${escapeHtml(file.id)}/raw">${icon('download', 'icon-sm')} تحميل</a>
@@ -450,7 +443,7 @@ function renderFileRow(file, stepTitles) {
 </tr>`;
 }
 
-/** شريط مساحة المستخدم: المستخدم / الحصة + المتبقي، بلون تحذيري عند الامتلاء. */
+/** Renders the storage-usage summary. */
 function renderStorageBar(summary) {
   const tone = summary.isFull ? 'is-full' : summary.isNearFull ? 'is-near' : '';
   const hint = summary.isFull
@@ -459,7 +452,7 @@ function renderStorageBar(summary) {
       ? 'المساحة أوشكت على الامتلاء.'
       : 'احذف أي ملف لتحرير مساحته فوراً.';
 
-  // نصوص جاهزة من الخدمة حتى تبقى الوحدات متسقة مع الحساب (بايت → KB/MB/GB)
+  // Use service-formatted values so displayed units match calculations.
   const usedLabel = summary.usedLabel ?? `${summary.usedMb} MB`;
   const quotaLabel = summary.quotaLabel ?? `${summary.quotaMb} MB`;
   const remainingLabel = summary.remainingLabel ?? `${summary.remainingMb} MB`;
@@ -476,11 +469,7 @@ function renderStorageBar(summary) {
 </div>`;
 }
 
-/**
- * معاينة جدول بيانات (xlsx/csv): أزرار للتنقّل بين الأوراق + جدول قابل للتمرير.
- * كل قيمة خلية تُطبع بـ escapeHtml — لا HTML من محتوى الملف إطلاقاً،
- * والصف الأول يُعامَل كعناوين أعمدة (مع إبقاء الصف نفسه موجوداً في tbody).
- */
+/** Renders spreadsheet sheets with escaped cell values and bounded scrolling. */
 function renderSheetPreview({ sheetData, sheetError = '' }) {
   if (sheetError) return `<div class="alert">${escapeHtml(sheetError)}</div>`;
   if (!sheetData?.sheets?.length) {
@@ -543,11 +532,7 @@ function renderSheetPreview({ sheetData, sheetError = '' }) {
 </div>`;
 }
 
-/**
- * صفحة معاينة ملف (1E): تعرض الملف داخل الموقع حسب نوعه — صورة أو PDF أو نص أو جدول.
- * المحتوى النصّي يُطبع مُهرَّباً (escapeHtml) في <pre> — لا HTML من محتوى الملف إطلاقاً،
- * والملفات غير المعروضة (doc/pptx/zip) تحثّ على التحميل.
- */
+/** Renders a safe inline preview or download prompt for an owned file. */
 export function renderFileViewerPage({
   account,
   unread = 0,
@@ -623,7 +608,7 @@ export function renderFileViewerPage({
   });
 }
 
-/** صفحة الملفات: نموذج رفع (multipart) + جدول الملفات مع فلترة بخطوة. */
+/** Renders the file-upload form and filtered file list. */
 export function renderFilesPage({ account, unread = 0, files = [], summary = { total: 0, bytes: 0, usedMb: 0, quotaMb: 0, remainingMb: 0, percent: 0, barWidth: 0, usedLabel: '0 بايت', quotaLabel: '500 MB', remainingLabel: '500 MB' }, references = [], refCounts = {}, stepKey = '', stepOptions = [], stepTitles = {}, maxMb = 100, allowedTypes = '', flash = null }) {
   const rows = files.length
     ? `<div class="table-scroll"><table class="file-table">
@@ -632,7 +617,7 @@ export function renderFilesPage({ account, unread = 0, files = [], summary = { t
 </table></div>`
     : '<div class="empty">لا ملفات بعد — ارفع أول مستند (PDF أو Word) ليعمل عليه المشرف الذكي.</div>';
 
-  // قسم المراجع: ما أضافه الباحث من المكتبة (الخارجية أو مكتبة المنصة) — بلا إضافة يدوية.
+  // Show references added from external or platform-library results.
   const refsHtml = references.length
     ? `<div class="table-scroll"><table class="ref-table">
   <thead><tr><th>المرجع</th><th>السنة والمصدر</th><th>الحالة</th><th>إجراءات</th></tr></thead>
@@ -724,7 +709,7 @@ ${refsCard}
     activeKey: 'files',
     account,
     unread,
-    // منتقي الملف المخصّص (اسم الملف + السحب والإفلات) — تحسين اختياري
+    // The custom file picker is a progressive enhancement.
     scripts: ['/js/file-picker.js', '/js/app-shell.js'],
     body
   });

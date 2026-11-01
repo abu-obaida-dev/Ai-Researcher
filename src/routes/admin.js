@@ -268,22 +268,19 @@ function requireAdminAccess(req, res, next) {
   res.status(403).type('html').send(html);
 }
 
-/** رسائل نجاح صفحة الطلبات (مع عدد النقاط الممنوحة عند التأكيد). */
+/** Success messages shown on payment request pages. */
 const PAYMENT_OK = {
   rejected: 'رُفض الطلب وأُبلغ الباحث بالسبب.',
   'confirmed:0': 'أُكّد الطلب وفُعّلت الباقة.'
 };
 
-/** رسالة خطأ عربية موحّدة لطلبات الدفع. */
+/** Returns a consistent payment error message. */
 function paymentErrorMessage(error) {
   if (['NOT_FOUND', 'BAD_STATUS', 'BAD_INPUT'].includes(error?.code)) return error.message;
   return 'تعذّر تنفيذ العملية على الطلب — أعد المحاولة.';
 }
 
-/**
- * سبب رفض أي إجراء على حساب مدير (إيقاف/حذف).
- * إن لم يكن الحساب موجوداً ⇒ «غير موجود»، وإلا فهو مدير محمي.
- */
+/** Explains why an admin account cannot be suspended or deleted. */
 async function adminProtectedMessage(id) {
   try {
     const { rows } = await pool.query('SELECT role FROM users WHERE id = $1', [id]);
@@ -294,10 +291,7 @@ async function adminProtectedMessage(id) {
   return 'حساب المدير محمي: لا يمكن إيقافه أو حذفه. المدير يغيّر بريده بنفسه من الإعدادات.';
 }
 
-/**
- * بوابة حماية: ترفض أي إجراء يهدّد حساب المدير (إيقاف/حذف/تعطيل).
- * تُستدعى في مسارات الحالة والحذف، وفي الحذف الجماعي إن وُجد.
- */
+/** Blocks actions that could suspend or delete an admin account. */
 async function blockIfAdmin(req, res, redirect) {
   const id = String(req.params.id || '');
   const found = await pool.query('SELECT role FROM users WHERE id = $1', [id]).catch(() => ({ rows: [] }));
@@ -309,15 +303,12 @@ async function blockIfAdmin(req, res, redirect) {
   return false;
 }
 
-/**
- * بوابة صلاحيات لوحة الإدارة: المدير يتجاوزها دائماً، والمشرف لا يدخل الصفحة
- * إلا بصلاحيتها. تُستدعى في كل مسار إداري حسب مجموعته (باحثون/مكتبة/باقات…).
- */
+/** Enforces the permission required for an admin page. */
 function requireAdminPermission(permission) {
   const meta = ADMIN_PERMISSIONS.find((item) => item.key === permission);
 
   return async (req, res, next) => {
-    // المدير، أو الدخول المفتوح (ADMIN_TOKEN / localhost) — يتجاوزان البوابة
+    // Admins and unlocked local sessions bypass this permission check.
     if (req.account?.role === 'admin' || req.adminUnlocked) {
       next();
       return;

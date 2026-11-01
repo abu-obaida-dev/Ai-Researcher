@@ -1,16 +1,5 @@
 /* eslint-disable no-undef */
-/**
- * تفعيل إشعارات الهاتف (Firebase Cloud Messaging — Web Push).
- *
- * التدفّق من زر واحد داخل قائمة الجرس:
- *   1) نطلب إذن الإشعارات (لا يُطلب تلقائياً — بضغط المستخدم فقط).
- *   2) نقرأ الإعدادات العامة من نفس النطاق (/api/firebase-config) — لا أسرار هنا.
- *   3) نسجّل Service Worker ثم نطلب توكن FCM ونحفظه في /api/notifications/register.
- *   4) عند التعذّر (متصفح قديم · إعدادات ناقصة · إذن مرفوض) نشرح السبب بالعربية
- *      بدل الفشل الصامت.
- *
- * Chrome/Edge على HTTPS (أو localhost) هو المدعوم؛ ما عداه نُبلغ المستخدم بوضوح.
- */
+/** Handles opt-in Firebase Cloud Messaging setup and reports unsupported configurations. */
 (function () {
   'use strict';
 
@@ -57,7 +46,7 @@
       document.head.appendChild(tag);
     });
   }
-  /** إعدادات Firebase العامة؛ ترجع خطأ صريحاً إن كان المشروع غير مكتمل. */
+  /** Loads public Firebase configuration and rejects incomplete setup. */
   function loadConfig() {
     return fetch('/api/firebase-config', { headers: { accept: 'application/json' } })
       .then(function (res) {
@@ -96,7 +85,7 @@
       });
   }
 
-  /** يرسم الحالة الحقيقية: مفعّل · غير مفعّل · الإذن مرفوض. */
+  /** Renders the current notification-permission state. */
   function renderState(permission) {
     var box = el('bell-push');
     if (!box) return;
@@ -104,32 +93,37 @@
     if (!('Notification' in window)) {
       box.hidden = false;
       setButton('غير مدعوم');
-      note('متصفحك لا يدعم إشعارات الهاتف.');
+      if (el('push-toggle')) el('push-toggle').disabled = true;
+      note('متصفحك لا يدعم إشعارات الهاتف. جرّب Chrome أو Safari على هاتفك.');
       return;
     }
     if (permission === 'denied') {
       box.hidden = false;
-      box.classList.add('is-on');
       setButton('الإذن مرفوض');
-      note('فعّل الإشعارات من إعدادات الموقع في المتصفح ثم أعد تحميل الصفحة.');
+      if (el('push-toggle')) el('push-toggle').disabled = true;
+      note('الإشعارات محظورة من المتصفح. افتح إعدادات الموقع واسمح بالإشعارات ثم أعد تحميل الصفحة.');
       return;
     }
     if (state.enabled) {
-      box.hidden = false;
-      box.classList.add('is-on');
-      setButton('إشعارات الهاتف مفعّلة');
-      note('سيصلك إشعار على هذا الجهاز فور حدوثه.');
+      box.hidden = true;
       return;
     }
 
     box.hidden = false;
-    box.classList.remove('is-on');
-    setButton('تفعيل إشعارات الهاتف');
-    note(permission === 'granted' ? 'الإذن مُمنح — اضغط الزر لربط هذا الجهاز.' : 'يظهر إشعار على هاتفك فور حدوثه.');
+    if (el('push-toggle')) el('push-toggle').disabled = false;
+    setButton(permission === 'granted' ? 'استكمال التفعيل' : 'تفعيل الإشعارات');
+    note(permission === 'granted'
+      ? 'باقي خطوة واحدة لربط هذا الجهاز واستقبال التنبيهات.'
+      : 'فعّلها لتصلك تنبيهات المنصة على هاتفك حتى عندما لا تكون فاتحًا للموقع.');
   }
 
   function enable() {
     var button = el('push-toggle');
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'denied') {
+      note('افتح إعدادات الموقع في المتصفح واسمح بالإشعارات، ثم أعد تحميل الصفحة.');
+      return;
+    }
     if (button) button.disabled = true;
     setButton('جارٍ التفعيل…');
     note('');
@@ -166,7 +160,7 @@
         note(error.message || 'تعذّر تفعيل الإشعارات على هذا الجهاز.');
       })
       .then(function () {
-        if (button) button.disabled = false;
+        if (button) button.disabled = Notification.permission === 'denied';
       });
   }
 
@@ -200,14 +194,33 @@
   function init() {
     var box = el('bell-push');
     var button = el('push-toggle');
-    if (!box || !button) return; // صفحة بلا جرس (لوحة landings مثلاً)
+    if (!box || !button) return;
+
+    try {
+      if (sessionStorage.getItem('zena-push-dismissed') === '1') return;
+    } catch (_) {}
 
     button.addEventListener('click', function () {
-      if (state.enabled) disable();
-      else enable();
+      enable();
+    });
+    var dismiss = el('push-dismiss');
+    if (dismiss) dismiss.addEventListener('click', function () {
+      box.hidden = true;
+      try {
+        sessionStorage.setItem('zena-push-dismissed', '1');
+      } catch (_) {}
     });
 
     renderState('Notification' in window ? Notification.permission : 'unsupported');
+    fetch('/api/notifications', { headers: { accept: 'application/json' } })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (result) {
+        if (result && result.ok && result.devices > 0) {
+          state.enabled = true;
+          box.hidden = true;
+        }
+      })
+      .catch(function () {});
   }
 
   if (document.readyState === 'loading') {
@@ -216,6 +229,6 @@
     init();
   }
 
-  // للتشخيص والاختبار فقط — لا تستعمله الواجهة.
+  // Used for diagnostics and tests; not called by the UI.
   window.__zenaPush = { state: state, enable: enable, disable: disable };
 })();

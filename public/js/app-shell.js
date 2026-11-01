@@ -1,15 +1,8 @@
-/**
- * سلوك لوحة الباحث:
- * 1) قائمة جرس الإشعارات: تعليم كمقروء (فردي/الكل) وحذف — بدون إعادة تحميل الصفحة.
- * 2) فتح/غلق القوائم المنسدلة (الجرس + صورة الحساب) بالنقر أو زر Escape أو النقر خارجها.
- *
- * ملاحظات: لا سكربتات سطرية (CSP: 'self')، وكل النصوص تُكتب بـ textContent
- * لمنع أي حقن HTML قادم من قاعدة البيانات.
- */
+/** Shared dashboard behavior. Dynamic text uses textContent to avoid HTML injection. */
 (function () {
   'use strict';
 
-  /** فتح/غلق قائمة منسدلة عامة: زر + قائمة، تُغلق مع القوائم الأخرى وزر Escape والنقر خارجها. */
+  /** Wires a dropdown and its close interactions. */
   var dropdowns = [];
 
   function closeAllDropdowns(except) {
@@ -20,22 +13,14 @@
     });
   }
 
-  /**
-   * إبقاء القائمة المنسدلة داخل حدود الشاشة — مرونتها على مقاسات الهاتف المختلفة:
-   * القائمة مرسومة من حافة زرّها للداخل عبر position:absolute وعرضها
-   * min(370px, 100vw - 20px)، ولا تعرف CSS كم يبعد الزر عن حافة الشاشة
-   * (يليه صورة الحساب والهامبرغر)؛ فعلى الهواتف تتجاوز الحافة اليمنى ويقصّها
-   * overflow-x على html/body فيختفي جزء منها (عناوين الإشعارات تحديداً).
-   * نقيس بعد كل فتح/رسم ونصحّح: انزاحة أفقية للبقاء بين هوامش الشاشة، وتقليص
-   * الارتفاع إن تجاوزت الأسفل — رأس القائمة ثابت وقائمتها تُمرَّر فلا يضيع محتوى.
-   */
+  /** Keeps open menus within the viewport, including on narrow screens. */
   var FIT_MARGIN = 8; // هوامش أمان (بكسل) بين القائمة وحافة الشاشة
 
   function fitDropdown(entry) {
     var el = entry && entry.menu;
     if (!el || el.hidden) return;
 
-    // نبدأ من إعدادات CSS خالصة: الشاشة قد تغيّرت منذ آخر ضبط (تدوير/شريط عنوان)
+    // Re-measure from CSS because viewport dimensions may have changed.
     el.style.width = '';
     el.style.maxHeight = '';
     el.style.transform = '';
@@ -48,7 +33,7 @@
     var rect = el.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
 
-    // عرض أوسع من الشاشة (شريط تمرير أو حواف ملء الشاشة): نقيّده داخل الهوامش
+    // Constrain menus wider than the viewport.
     if (rect.width > vw - 2 * FIT_MARGIN) {
       el.style.width = Math.floor(vw - 2 * FIT_MARGIN) + 'px';
       rect = el.getBoundingClientRect();
@@ -60,8 +45,7 @@
     var dx = left - rect.left;
     if (dx) el.style.transform = 'translateX(' + Math.round(dx) + 'px)';
 
-    // عمودياً: إن تجاوزت حافة الأسفل ننقص من ارتفاعها بدل النزول — يبقى الرأس
-    // ظاهراً وقائمة الإشعارات تُمرَّر تحته (كما تفعل أصلاً عند تجاوز السقف CSS).
+    // Keep the menu header visible and scroll its contents when it exceeds the viewport.
     rect = el.getBoundingClientRect();
     var overflowBottom = rect.bottom - (vh - FIT_MARGIN);
     if (overflowBottom > 0) {
@@ -69,7 +53,7 @@
     }
   }
 
-  /** إعادة ضبط كل القوائم المفتوحة — تُستدعى مع أي تغيّر في أبعاد الشاشة أو المحتوى. */
+  /** Repositions open menus after viewport changes. */
   function fitOpenDropdowns() {
     dropdowns.forEach(fitDropdown);
   }
@@ -88,7 +72,7 @@
         menu.hidden = false;
         toggle.setAttribute('aria-expanded', 'true');
         if (onOpen) onOpen();
-        // بعد الرسم الأول — القياس يجبر التخطيط فوراً فلا تُرى القائمة متجاوزة قبل التصحيح
+        // Measure immediately after rendering to avoid a visible overflow frame.
         fitDropdown(entry);
       },
       close: function () {
@@ -104,7 +88,7 @@
     });
 
     menu.addEventListener('click', function (event) {
-      // روابط القائمة تنتقل للصفحة المطلوبة؛ النقر داخلها فقط لا يُغلق قبل الانتقال
+      // Allow navigation links to proceed without closing the menu first.
       if (event.target.closest('a')) return;
       event.stopPropagation();
     });
@@ -121,21 +105,35 @@
     if (event.key === 'Escape') closeAllDropdowns(null);
   });
 
-  // شاشات الهاتف تغيّر أبعادها باستمرار (شريط العنوان يظهر/يختفي، والتدوير،
-  // وفتح صفحات بعرض مختلف) — نعيد ضبط القوائم المفتوحة فتبقى كاملة داخل الرؤية.
+  // Mobile browser chrome and orientation changes can resize the viewport.
   window.addEventListener('resize', fitOpenDropdowns);
   window.addEventListener('orientationchange', fitOpenDropdowns);
   if (window.visualViewport) window.visualViewport.addEventListener('resize', fitOpenDropdowns);
 
-  // قائمة صورة الحساب: تعمل دائماً (حتى بلا جرس) في الشريط العلوي والترويسة العامة
+  // The account menu is available even when notifications are disabled.
   wireDropdown('user-toggle', 'user-menu');
 
-  // تأكيد قبل إرسال أي نموذج يحمل data-confirm (حذف وإجراءات خطيرة).
-  // يُثبَّت هنا قبل فحص الجرس ليعمل على كل الصفحات حتى بلا جلسة.
+  // Handle confirmation and defense-upload loading on every page.
   document.addEventListener('submit', function (event) {
     var form = event.target;
     var question = form && form.getAttribute ? form.getAttribute('data-confirm') : null;
     if (question && !window.confirm(question)) event.preventDefault();
+    if (!form || !form.matches || !form.matches('.defense-thesis-form')) return;
+    if (form.getAttribute('data-submitting') === '1') {
+      event.preventDefault();
+      return;
+    }
+
+    form.setAttribute('data-submitting', '1');
+    form.setAttribute('aria-busy', 'true');
+    var button = form.querySelector('.defense-thesis-submit');
+    if (button) {
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      button.textContent = 'جارٍ تجهيز المناقشة…';
+    }
+    var status = form.querySelector('[data-upload-status]');
+    if (status) status.hidden = false;
   });
 
   var toggle = document.getElementById('bell-toggle');
@@ -148,10 +146,10 @@
   if (!toggle || !menu || !list) return;
 
   var items = [];
-  // listLoaded: هل جُلبت القائمة ورُسمت فعلاً؟ (الجلب المسبق للشارة لا يكفي وحده)
+  // The badge prefetch does not count as loading the visible list.
   var listLoaded = false;
 
-  /** شارة عدد غير المقروء في الشريط العلوي. */
+  /** Updates the unread count badge. */
   function setBadge(count) {
     if (!badge) return;
     var value = Number(count) || 0;
@@ -164,7 +162,7 @@
     }
   }
 
-  /** صياغة تاريخ الإشعار بالعربية. */
+  /** Formats a notification timestamp. */
   function timeText(value) {
     if (!value) return '';
     var date = new Date(value);
@@ -185,7 +183,7 @@
     }).length;
   }
 
-  /** رسم قائمة الإشعارات من المصفوفة الحالية (نص فقط — بلا HTML). */
+  /** Renders notifications using text nodes only. */
   function render() {
     list.innerHTML = '';
     if (empty) empty.hidden = items.length > 0;
@@ -250,7 +248,7 @@
     fitOpenDropdowns(); // المحتوى ازداد أو نقص — أعِد ضبط الموضع والارتفاع
   }
 
-  /** طلب JSON بنفس نطاق الموقع مع ترجمة الأخطاء إلى رسالة عربية. */
+  /** Sends a same-origin JSON request. */
   function request(url, options) {
     var config = options || {};
     config.credentials = 'same-origin';
@@ -259,7 +257,7 @@
 
     return fetch(url, config).then(function (response) {
       if (response.status === 401) {
-        // جلسة منتهية أو غير موجودة — أعد توجيه المستخدم للدخول
+        // Redirect expired sessions to sign-in.
         window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
         throw new Error('انتهت الجلسة، يرجى تسجيل الدخول مجدداً.');
       }
@@ -272,7 +270,7 @@
     });
   }
 
-  /** تحميل الإشعارات (مرة واحدة عند أول فتح، أو إجبارياً). */
+  /** Loads notifications once, unless a refresh is requested. */
   function load(force) {
     if (listLoaded && !force) return Promise.resolve();
     showEmpty('جارٍ تحميل الإشعارات…');
@@ -339,7 +337,7 @@
 
   var bellDropdown = wireDropdown('bell-toggle', 'bell-menu', {
     onOpen: function () {
-      // إن كان الجلب المسبق قد انتهى نرسم ما وصلنا فوراً، ثم نتحقق من أي جديد
+      // Render prefetched data immediately, then refresh it if needed.
       if (listLoaded) render();
       load(false);
     }
@@ -348,8 +346,7 @@
 
   if (readAllButton) readAllButton.addEventListener('click', markAllRead);
 
-  // تحديث الشارة عند فتح الصفحة (بدون فتح القائمة) حتى تبقى الأرقام حديثة،
-  // ونضع علامة أن القائمة جُلبت فعلاً حتى تُرسم لحظة فتح الجرس.
+  // Refresh the count without opening the menu and reuse the result when opened.
   request('/api/notifications')
     .then(function (data) {
       items = Array.isArray(data.items) ? data.items : [];
@@ -357,7 +354,7 @@
       setBadge(data.unread || 0);
     })
     .catch(function () {
-      /* تبقى الشارة كما رسمها الخادم — لا نُظهر خطأ تقنياً في الشريط العلوي */
+      /* Keep the server-rendered badge if the background request fails. */
     });
 
 })();

@@ -2,23 +2,14 @@ import { pool } from '../db/client.js';
 import { READING_STATUSES, isUuid } from '../constants.js';
 import { isValidStepKeyForUser } from './journey.js';
 
-/**
- * مراجع الباحث ومفكرته (1E).
- * - المكتبة العلمية مركزية في جدول library_items، والمراجع الخاصة بالباحث في
- *   user_references: إما رابط لعنصر مكتبة أو بيانات يدوية (عنوان/مؤلف/سنة/مصدر).
- * - المفكرة في جدول notes مع تثبيت ووسوم وربط اختياري بخطوة من مسار البحث.
- * كل الاستعلامات مقيدة بـ user_id حتى لا يطّلع باحث على بيانات باحث آخر.
- */
+/** User references and notes, with every query scoped to its owner. */
 
 const REFERENCE_STATUSES = new Set(READING_STATUSES.map((item) => item.value));
 const REFERENCE_LIMIT = 200;
 const NOTE_LIMIT = 200;
 
-/** نص ببليوغرافي جاهز للعرض (APA مبسّط من الحقول نفسها — بدون توليد ذكي). */
-/**
- * يوحّد الهمزات والتاء المربوطة ويزيل التشكيل ⇒ «أسماء» و«اسماء» كلمة واحدة،
- * و«التعليم» و«التعليم» تتطابقان في الترشيح.
- */
+/** Builds a simple APA-style citation from stored fields. */
+/** Normalizes Arabic spelling variants for search. */
 export function normalizeArabic(text) {
   return String(text || '')
     .replace(/[\u064B-\u0652\u0640]/g, '')
@@ -43,7 +34,7 @@ export function citationText(row) {
     .join('. ');
 }
 
-/** مفتاح الخطوة بعد التحقق من انتمائه لمسار الباحث (null بلا ربط). */
+/** Validates and returns an optional step key. */
 async function cleanStepKey(userId, stepKey) {
   const key = String(stepKey || '').trim().slice(0, 100);
   if (!key) return null;
@@ -57,7 +48,7 @@ async function cleanStepKey(userId, stepKey) {
   return key;
 }
 
-/** مرجع جاهز للعرض: دمج بيانات المكتبة مع البيانات اليدوية + نص التوثيق. */
+/** Combines library or manual reference fields for display. */
 function normalizeReference(row) {
   const title = row.title || row.custom_title || 'بدون عنوان';
   const authors = row.authors || row.custom_authors || '';
@@ -77,23 +68,19 @@ function normalizeReference(row) {
     authors,
     year,
     source,
-    // الوصول إلى أصل المرجع: كتاب في مكتبة المنصة (ملف) أو رابط المصدر.
+    // Resolve access to the stored file or original source.
     hasFile: Boolean(row.stored_path),
     externalUrl: row.external_url || '',
     citation: row.citation_text || citationText({ title, authors, year, source })
   };
 }
 
-/**
- * بحث في المكتبة العلمية المركزية + إشارة «في مراجعي» لكل نتيجة.
- * البحث ILIKE على العنوان/المؤلف/المصدر/الملخص (FTS الكامل في المرحلة الثالثة).
- */
+/** Searches the platform library and marks results already in the user's list. */
 export async function searchLibraryItems({ userId, q = '', limit = 30, match = 'all' } = {}) {
   const term = String(q || '').trim().slice(0, 120);
   const max = Math.min(Math.max(Number(limit) || 30, 1), 60);
 
-  // نبحث في النصّ المطبَّع أولاً (يتسامح مع الهمزات والتاء المربوطة والتشكيل)،
-  // ثم في الأعمدة الأصلية احتياطاً للعناصر القديمة التي لا تحمل نصّ بحث.
+  // Search normalized text first, then fall back to original columns for legacy rows.
   const COLUMNS = [
     'li.search_text',
     'li.title',
@@ -106,8 +93,7 @@ export async function searchLibraryItems({ userId, q = '', limit = 30, match = '
   ];
   const needsNormalized = normalizeArabic(term);
 
-  // كلمات مفاتيح مفصولة (ومطبَّعة): يجب أن تحويها كلّها (AND) لا العبارة كاملة،
-  // وإلا لم يطابق «تكنولوجيا المعلومات إدارة التغير» عنصراً عنوانه جزء منه.
+  // Match every normalized keyword rather than requiring the full phrase.
   const words = needsNormalized.split(/\s+/).filter((word) => word.length > 2).slice(0, 6);
   const terms = words.length >= 2 ? words : needsNormalized ? [needsNormalized] : [];
   const joiner = match === 'any' ? ' OR ' : ' AND ';
@@ -115,7 +101,7 @@ export async function searchLibraryItems({ userId, q = '', limit = 30, match = '
   const values = [userId];
   const like = (value) => `%${String(value).replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`;
 
-  // نحسب قيمة كل كلمة مرة، ثم نجمع الشروط: AND (دقيق) أو OR (تساهلي).
+  // Build exact (AND) or relaxed (OR) keyword matching once.
   const params = terms.map(like);
   values.push(...params);
 
@@ -155,7 +141,7 @@ export async function searchLibraryItems({ userId, q = '', limit = 30, match = '
     degreeLevel: row.degree_level || '',
     added: Boolean(row.added),
     myStatus: row.my_status || '',
-    // الوصول: hasFile للمعاينة/التحميل، externalUrl للعناصر بلا ملف.
+    // Use the stored file when available, otherwise the external URL.
     hasFile: Boolean(row.stored_path),
     fileName: row.file_name || '',
     mime: row.mime || '',
@@ -165,7 +151,7 @@ export async function searchLibraryItems({ userId, q = '', limit = 30, match = '
   }));
 }
 
-/** مراجع الباحث (كلها أو لخطوة معيّنة) مع عدد الملاحظات المرتبطة بكل مرجع. */
+/** Lists user references with linked-note counts. */
 export async function listUserReferences(userId, { step = '', status = '' } = {}) {
   const stepKey = String(step || '').trim().slice(0, 100);
   const values = [userId];
@@ -198,7 +184,7 @@ export async function listUserReferences(userId, { step = '', status = '' } = {}
   return rows.map(normalizeReference);
 }
 
-/** عدد المراجع لكل حالة قراءة (تلخيص أعلى صفحة المراجع). */
+/** Counts references by reading status. */
 export async function referenceStatusCounts(userId) {
   const { rows } = await pool.query(
     'SELECT status, count(*)::int AS total FROM user_references WHERE user_id = $1 GROUP BY status',
@@ -216,7 +202,7 @@ export async function referenceStatusCounts(userId) {
   return counts;
 }
 
-/** إضافة مرجع من المكتبة المركزية إلى مراجع الباحث (تمنع التكرار لنفس العنصر). */
+/** Adds a library item to the user's references without duplication. */
 export async function addLibraryReference(userId, libraryItemId, { step = '', status = 'to_read' } = {}) {
   const stepKey = await cleanStepKey(userId, step);
 
@@ -239,7 +225,7 @@ export async function addLibraryReference(userId, libraryItemId, { step = '', st
   return rows[0];
 }
 
-/** إضافة مرجع يدوي (عنوان + مؤلف + سنة + مصدر) مع ربط اختياري بخطوة من المسار. */
+/** Adds a manually entered reference with an optional step link. */
 export async function addCustomReference(
   userId,
   { title, authors = '', year = '', source = '', note = '', step = '' } = {}
@@ -273,7 +259,7 @@ export async function addCustomReference(
   return rows[0];
 }
 
-/** تغيير حالة قراءة مرجع (مرشّح/قيد القراءة/مقروء/مستخدم في البحث). */
+/** Updates a reference's reading status. */
 export async function updateReferenceStatus(userId, referenceId, status) {
   if (!isUuid(referenceId)) return null;
   if (!REFERENCE_STATUSES.has(status)) {
@@ -296,7 +282,7 @@ export async function updateReferenceStatus(userId, referenceId, status) {
   return rows[0];
 }
 
-/** حذف مرجع من مراجع الباحث (بيانات المكتبة نفسها لا تتأثر). */
+/** Deletes a user reference without changing the library item. */
 export async function deleteReference(userId, referenceId) {
   if (!isUuid(referenceId)) return false;
   const { rowCount } = await pool.query('DELETE FROM user_references WHERE id = $2 AND user_id = $1', [
@@ -307,7 +293,7 @@ export async function deleteReference(userId, referenceId) {
   return rowCount > 0;
 }
 
-/** ملاحظة جاهزة للعرض مع اسم خطوتها ومقتطف نصّي. */
+/** Normalizes a note for display. */
 function normalizeNote(row) {
   return {
     id: row.id,
@@ -326,7 +312,7 @@ function normalizeNote(row) {
   };
 }
 
-/** ملاحظات الباحث مع بحث نصي وفلترة بخطوة أو بمرجع، والمثبّتة أولاً. */
+/** Lists notes with text, step, and reference filters. */
 export async function listNotes(userId, { q = '', step = '', referenceId = '', pinnedOnly = false } = {}) {
   const term = String(q || '').trim().slice(0, 120);
   const stepKey = String(step || '').trim().slice(0, 100);
@@ -365,7 +351,7 @@ export async function listNotes(userId, { q = '', step = '', referenceId = '', p
   return rows.map(normalizeNote);
 }
 
-/** ملاحظة واحدة بملكيتها (null إن لم تكن له). */
+/** Loads one note only when owned by the user. */
 export async function getNote(userId, noteId) {
   if (!isUuid(noteId)) return null;
   const { rows } = await pool.query('SELECT * FROM notes WHERE id = $2 AND user_id = $1', [userId, noteId]);
@@ -373,7 +359,7 @@ export async function getNote(userId, noteId) {
   return rows.length ? normalizeNote(rows[0]) : null;
 }
 
-/** وسوم الملاحظة: نص مفصول بفواصل، مقصوص بطول 12 وسمًا × 40 حرفًا. */
+/** Normalizes comma-separated note tags. */
 function cleanTags(value) {
   return String(value || '')
     .split(',')
@@ -383,7 +369,7 @@ function cleanTags(value) {
     .join(', ');
 }
 
-/** إنشاء ملاحظة جديدة مع ربط اختياري بخطوة ومرجع. */
+/** Creates a note with optional step and reference links. */
 export async function createNote(
   userId,
   { title = '', body = '', tags = '', pinned = false, step = '', referenceId = null } = {}
@@ -417,7 +403,7 @@ export async function createNote(
   return normalizeNote(rows[0]);
 }
 
-/** تعديل ملاحظة قائمة (العنوان/النص/الوسوم/التثبيت/الخطوة). */
+/** Updates an existing note. */
 export async function updateNote(userId, noteId, { title, body, tags, pinned, step } = {}) {
   if (!isUuid(noteId)) return null;
   const existing = await getNote(userId, noteId);
@@ -430,7 +416,7 @@ export async function updateNote(userId, noteId, { title, body, tags, pinned, st
   const cleanTitle = String(title ?? existing.title).trim().slice(0, 300);
   const cleanBody = String(body ?? existing.body).trim().slice(0, 20000);
   const cleanTagsValue = cleanTags(tags ?? existing.tags.join(', '));
-  // step غير مُرسل = الإبقاء على الربط الحالي، و step فارغ = إزالة الربط.
+  // Omitted step preserves the current link; an empty step removes it.
   const stepKey = step === undefined ? existing.stepKey : await cleanStepKey(userId, step);
 
   const { rows } = await pool.query(
@@ -443,7 +429,7 @@ export async function updateNote(userId, noteId, { title, body, tags, pinned, st
   return normalizeNote(rows[0]);
 }
 
-/** تبديل تثبيت الملاحظة (قائمة الوصول السريع أعلى المفكرة). */
+/** Toggles a note's pinned state. */
 export async function toggleNotePin(userId, noteId) {
   if (!isUuid(noteId)) return null;
   const { rows } = await pool.query(
@@ -460,7 +446,7 @@ export async function toggleNotePin(userId, noteId) {
   return normalizeNote(rows[0]);
 }
 
-/** حذف ملاحظة. */
+/** Deletes a note. */
 export async function deleteNote(userId, noteId) {
   if (!isUuid(noteId)) return false;
   const { rowCount } = await pool.query('DELETE FROM notes WHERE id = $2 AND user_id = $1', [userId, noteId]);

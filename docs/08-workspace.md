@@ -1,36 +1,35 @@
-# 08 — مساحة العمل: قلب المنتج
+# 08 — Workspace: The Heart of the Product
 
-> القاعدة التي يحفظها هذا الملف: **مساحة العمل هي المنتج، والمحادثة إحدى أدواتها.** الفلسفة في `01`، والسلوك في `06`، والرحلة في `07` — وهنا: أين يعيش كل شيء وكيف يرتبط بالمشروع.
+> The rule this file establishes: **the workspace is the product, and conversation is one of its tools.** The philosophy is in `01`, the behavior in `06`, and the journey in `07`—here: where everything lives and how it is connected to the project.
 
-## ما هي مساحة العمل؟
+## What is the workspace?
 
-المكان الواحد الذي يجتمع فيه مشروع الباحث كله: ملفه الأكاديمي، وخطوات رحلته وحالتها، وملفاته المرفوعة، ومراجعه وقراءاتها، وملاحظاته وأفكاره، ومحادثاته مع المشرفة، ومهامه المتفق عليها، وتقييمات عمله، وذاكرة مشرفته عنه، وتقدمه الإجمالي.
+The single place where the researcher's entire project comes together: their academic profile, journey steps and statuses, uploaded files, references and reading records, notes and ideas, conversations with the supervisor, agreed tasks, work evaluations, the supervisor's memory of them, and their overall progress.
 
-> «المشروع البحثي» هنا مفهوم وظيفي: يجمع بيانات الرحلة (التعريف الكامل في `01 §5`) في صورة واحدة متماسكة — لا كياناً منفصلاً بذاته. و«المهام» هي ما اتُفق عليه للمرة القادمة، و«التقييمات» هي مراجعات المشرفة المحفوظة ضمن المحادثات والذاكرة.
+> “Research project” here is a functional concept: it brings together journey data (fully defined in `01 §5`) as one coherent whole—not a separate entity in itself. “Tasks” are what has been agreed for next time, and “evaluations” are the supervisor's reviews saved within conversations and memory.
 
-باحث يفتح مساحته يرى **قصة بحثه كاملة**: أين بدأ، وأين هو الآن، وماذا تبقى — لا شاشة دردشة فارغة تنتظر سؤالاً.
+When a researcher opens their workspace, they see **the complete story of their research**: where they began, where they are now, and what remains—not an empty chat screen waiting for a question.
 
-## مكونات المساحة (كلها تنتمي للمشروع)
+## Workspace components (all belong to the project)
 
-- **المشروع نفسه:** عنوانه ومرحلته الحالية وتقدمه — الخيط الذي يربط كل ما دونه.
-- **الملفات:** فصوله ومسوداته وجداوله مرفوعة ومحفوظة — وهي ما يراجعه المشرف فعلاً (يقرأ محتواها ويقتبس منها بالاسم).
-- **المراجع:** قائمته الخاصة (من المكتبة المركزية أو بيانات يدوية) مع حالة قراءة كل مرجع وربطه بخطوته — لا قائمة روابط منفصلة.
-- **المفكرة:** أفكاره وملاحظاته مثبتة وموسومة، ومرتبطة بالخطوة أو المرجع الذي تخصه — فلا تضيع فكرة المنهج بين ملاحظات الكتابة.
-- **المحادثات:** سجل حواراته مع المشرفة — **أداة تواصل** مع المشروع لا المشروع نفسه (مثل اجتماعات المشرف الجامعي: مهمة لكنها ليست البحث).
-- **المهام:** ما اتُفق عليه للمرة القادمة — تظهر عند العودة فيُسأل عنها بدل أن تُنسى.
-- **التقييمات:** مراجعات المشرفة لعمله مصنّفة (منهجي/أدلة/صياغة) وتقييم المناقشة النهائي — سجل جودة يراكم لا رأي عابر.
-- **الذاكرة:** ملخص حالته وقراراته ونقاط ضعفه — ما يجعل كل جلسة تبني على السابقة.
-- **التقدم:** صورة رقمية (مراحل منجزة، مراجع مقروءة، نشاط أسبوعي) — يرى فيها حركته الحقيقية لا إحساسه.
+- **The project itself:** its title, current stage, and progress—the thread connecting everything beneath it.
+- **Files:** uploaded and saved chapters, drafts, and tables—the materials the supervisor actually reviews (reading their content and quoting them by name).
+- **References:** the researcher's own list (from the central library or manually entered data), with each reference's reading status and linked step—not a separate list of links.
+- **Notes:** the researcher's ideas and notes, pinned and tagged, linked to the step or reference they concern—so a methodology idea does not get lost among writing notes.
+- **Conversations:** the researcher's history of exchanges with the supervisor—**a communication tool** for the project, not the project itself (like meetings with an academic supervisor: important, but not the research itself).
+- **Tasks:** what has been agreed for next time—shown when the researcher returns, so they are asked about it rather than it being forgotten.
+- **Evaluations:** the supervisor's reviews of the researcher's work, categorized (methodology/evidence/writing), and the final defense evaluation—a cumulative quality record, not a passing opinion.
+- **Memory:** a summary of the researcher's status, decisions, and weaknesses—what allows each session to build on the previous one.
+- **Progress:** a numeric view (stages completed, references read, weekly activity)—showing actual progress rather than a feeling.
 
-## المحادثة كأداة لا كمنتج
+## Conversation as a tool, not a product
 
-المحادثة تفعل شيئاً واحداً: **تنقل شيئاً من المساحة وإليها**. تقرأ قبل الرد: الملف، والمرحلة، والذاكرة، والمرفقات — وتكتب بعد الرد: الرسالتين، وأي موضوع صرّح به، وأي مهمة اتُفق عليها، وأي تقييم أُنجز. محادثة لا تقرأ المساحة ولا تكتب فيها = دردشة عامة، وهي ما ترفض المنصة أن تكونه.
+Conversation does one thing: **moves something from or into the workspace**. Before responding, it reads the profile, stage, memory, and attachments; after responding, it writes the two messages and any stated topic, agreed task, or completed evaluation. A conversation that neither reads from nor writes to the workspace is general chat, which the platform refuses to be.
 
-## كيف يترابط كل شيء؟
+## How is everything connected?
 
-الرابط المشترك هو **خطوة البحث**: المرجع مربوط بخطوته، والملاحظة بخطوتها، والملف بخطوته، والمحادثة **تُوسم بخطوتها كسياق فقط** (يُحفظ `step_key` معها لتساعد المشرفة على معرفة أين هو — لا صفحة تجمع محادثات خطوة)، والتقدم يُحسب من الخطوات. بهذا يرى الباحث «كل ما يخص الدراسات السابقة» في مكان واحد: مراجعها وملاحظاتها وملفاتها — لا مبعثراً في أربع صفحات.
+The shared link is the **research step**: a reference is linked to its step, a note to its step, a file to its step, and a conversation is **tagged with its step for context only** (`step_key` is saved with it to help the supervisor know where the researcher is—it is not a page that groups conversations by step). Progress is calculated from the steps. This lets the researcher see “everything related to the literature review” in one place: its references, notes, and files—not scattered across four pages.
 
-## مرجع تقني مختصر (للمطور فقط)
+## Brief technical reference (for developers only)
 
-المراجع والمفكرة `services/workspace.js` (توثيق `citationText` بلا توليد، وبحث عربي متسامح `normalizeArabic`) · الملفات `services/files.js` (حدود من الباقة والإعدادات، وبصمة ثنائية `upload-guard.js`) · القراءة للمشرف `documents.js` والمعاينة `spreadsheet.js` · المكتبة المركزية `services/library.js` ومصادرها `09-literature`.
-
+References and notes: `services/workspace.js` (`citationText` documentation without generation, and tolerant Arabic search via `normalizeArabic`) · files: `services/files.js` (plan and settings limits, binary fingerprint `upload-guard.js`) · supervisor reading: `documents.js` and preview: `spreadsheet.js` · central library: `services/library.js` and its sources: `09-literature`.

@@ -1,9 +1,4 @@
-/**
- * فلترة لحظية لحقل واتساب صفحة الدفع — نفس منطق صفحة التسجيل (onboarding.js):
- * أرقام فقط، يُقصّ حسب طول الدولة المختارة، وإن لُصق بمفتاح دولته يُقصّ المفتاح،
- * مع تحديث المفتاح المعروض (+#) ونص التوضيح عند تغيير الدولة.
- * المعرّفات هنا ببادئة pay- حتى لا تتعارض مع حقول التسجيل.
- */
+/** Normalizes the payment WhatsApp number using payment-specific field IDs. */
 (function () {
   'use strict';
 
@@ -13,7 +8,7 @@
   var hintEl = document.getElementById('pay-wa-hint');
   if (!countrySelect || !numberInput) return;
 
-  /** خصائص الدولة الحالية من خيارات القائمة (data-* مضمّنة في HTML). */
+  /** Reads the selected country's metadata from its option element. */
   function currentCountry() {
     var option = countrySelect.options[countrySelect.selectedIndex];
     if (!option) return { dial: '218', lengths: [9], name: 'ليبيا', sample: '912345678' };
@@ -25,7 +20,7 @@
     };
   }
 
-  /** تطبيع الرقم: أرقام فقط + قصّ المفتاح الملصوق إن وُجد + حذف الأصفار البادئة + حذف الزائد. */
+  /** Normalizes the number and removes a pasted country code when present. */
   function sanitizeNumber(raw, country) {
     var digits = String(raw).replace(/\D/g, '');
     if (digits.slice(0, 2) === '00') digits = digits.slice(2); // صيغة 00
@@ -39,7 +34,7 @@
     return digits;
   }
 
-  /** تحديث المفتاح المعروض + maxlength + placeholder + نص التوضيح حسب الدولة. */
+  /** Updates the displayed calling code and field hints. */
   function syncCountry() {
     var country = currentCountry();
     if (dialBadge) dialBadge.textContent = '+' + country.dial;
@@ -52,7 +47,7 @@
         ' أرقام بعد المفتاح +' + country.dial + (country.sample ? ' (مثال: ' + country.sample + ')' : '') +
         '. سيظهر لك كود تفعيل من 6 أرقام بعد الإرسال — أرسله عبر واتساب لخدمة العملاء.';
     }
-    // إعادة تطبيع القيمة الحالية عند تغيير الدولة (طولها قد يصبح غير صالح)
+    // Revalidate the current number when the selected country changes.
     var cleaned = sanitizeNumber(numberInput.value, country);
     if (cleaned !== numberInput.value) numberInput.value = cleaned;
   }

@@ -13,15 +13,12 @@ import { icon } from './icons.js';
 import { LIBRARY_EXTENSIONS } from '../services/library.js';
 import { fileMaxLabel, formatStorageMb, planFeaturesFromPermissions, storageLabel } from '../services/plans.js';
 
-/**
- * صفحات لوحة الإدارة مولَّدة على الخادم (Server-Side Rendering) — بدون React
- * وبدون أي خطوة بناء. تُقرأ البيانات مباشرة من PostgreSQL وتُطبع كـ HTML.
- */
+/** Server-rendered admin pages backed directly by PostgreSQL. */
 
-/** أيام الأسبوع بالعربية — تُحلَّل من تاريخ YYYY-MM-DD لمخطط النشاط. */
+/** Arabic weekday labels for the activity chart. */
 const WEEKDAYS_AR = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
-/** رسالة نجاح لكل عملية إجراء (تظهر كتنبيه أعلى الصفحة). */
+/** Success messages displayed after admin actions. */
 const OK_TEXT = {
   activated: 'تم تفعيل الحساب — يستطيع الباحث الدخول فوراً.',
   suspended: 'تم إيقاف الحساب — يمنع الدخول من كل الأجهزة في طلبه القادم.',
@@ -48,14 +45,14 @@ const OK_TEXT = {
   supervisor_missing: 'هذا البريد ليس في قائمة المشرفين.'
 };
 
-/** بطاقة مؤشر بقيمة نصية (تُستعمل في إحصاءات المكتبة: إجمالي · بملف · بيانات فقط). */
+/** Renders a text-valued KPI card for library statistics. */
 function statRaw(label, value) {
   return `<div class="stat"><p class="stat-label">${escapeHtml(label)}</p><p class="stat-value">${escapeHtml(
     String(value)
   )}</p></div>`;
 }
 
-/** مخطط أعمدة للنقاط المستهلكة في آخر ٧ أيام — CSS خالص من الخادم (بلا مكتبات ولا سكربتات). */
+/** Renders a server-side CSS chart of token usage over the last seven days. */
 function renderActivityBars(days = []) {
   if (!days.length) return '<div class="empty">لا تتوفّر بيانات نشاط بعد.</div>';
 
@@ -382,11 +379,11 @@ export function renderAdminHome({
         <h2>أحدث الباحثين</h2>
         <a class="btn btn-sm" href="/admin/users">إدارة كل الباحثين</a>
       </div>
-      ${renderTable({
+      <div class="table-scroll">${renderTable({
         columns: ['الباحث', 'الجامعة', 'الباقة', 'الرصيد', 'التسجيل'],
         rows,
         emptyMessage: 'لا يوجد باحثون مسجّلون بعد.'
-      })}
+      })}</div>
     </div>
     <div class="card">
       <div class="card-head">
@@ -487,11 +484,11 @@ export function renderAdminUsage({
       <h2>توزيع الاستهلاك حسب النوع</h2>
       <p class="muted">من أين جاءت النقاط المحسوبة كلها (${escapeHtml(formatNumber(shareTotal))} نقطة) — لكل نوع نسبته.</p>
       ${renderDonut(summary.map((row) => ({ label: usageLabel(row.type), tokens: row.tokens })), { total: shareTotal })}
-      ${renderTable({
+      <div class="table-scroll">${renderTable({
         columns: ['النوع', 'عدد العمليات', 'النقاط'],
         rows: summaryRows,
         emptyMessage: 'لا يوجد استهلاك مسجّل بعد.'
-      })}
+      })}</div>
     </div>
   </div>
   <div class="card mt-16">
@@ -659,13 +656,13 @@ export function renderAdminUsers({
       </div>
     </details>
     ${toolbar}
-    ${renderTable({
+    <div class="table-scroll">${renderTable({
       columns: ['الباحث', 'الجامعة / المجال', 'الباقة', 'النقاط', 'التسجيل', 'الإجراءات'],
       rows,
       emptyMessage: search
         ? 'لا يوجد باحثون مطابقون للبحث. جرّب مصطلحاً آخر أو ألغِ الفلتر.'
         : 'لا يوجد باحثون مسجّلون بعد.'
-    })}
+    })}</div>
     ${pagination}
   </div>`;
 
@@ -945,11 +942,11 @@ export function renderAdminPlans({
       <h2>الباقات</h2>
       <a class="btn btn-primary" href="#add-plan">إضافة باقة</a>
     </div>
-    ${renderTable({
+    <div class="table-scroll">${renderTable({
       columns: ['الكود', 'الاسم', 'السعر', 'النقاط', 'مساحة التخزين', 'أقصى ملف', 'الدور', 'الحالة', 'المشتركون', 'إجراءات'],
       rows,
       emptyMessage: 'لا توجد باقات بعد — شغّل npm run db:seed لإضافة الباقات الافتراضية.'
-    })}
+    })}</div>
   </div>
   ${forms}
   ${addForm}`;
@@ -1007,10 +1004,10 @@ export function renderAdminSettings({
     ? supervisors
         .map(
           (row) => `<tr>
-    <td><p class="strong">${escapeHtml(row.full_name || row.email)}</p><p class="muted">${escapeHtml(row.email)}</p></td>
-    <td>${row.is_active === false ? '<span class="badge badge-off">لم يسجّل الدخول</span>' : '<span class="badge badge-active">نشط</span>'}</td>
-    <td>${escapeHtml(row.plan_code || '—')}</td>
-    <td class="row-actions">
+    <td data-label="المشرف"><p class="strong">${escapeHtml(row.full_name || row.email)}</p><p class="muted">${escapeHtml(row.email)}</p></td>
+    <td data-label="الحالة">${row.is_active === false ? '<span class="badge badge-off">لم يسجّل الدخول</span>' : '<span class="badge badge-active">نشط</span>'}</td>
+    <td data-label="الباقة">${escapeHtml(row.plan_code || '—')}</td>
+    <td data-label="إجراء" class="row-actions">
       <form method="post" action="/admin/settings/supervisors/delete${token}"
         data-confirm="إزالة ${escapeHtml(row.email)} من المشرفين؟ سيعود دوره إلى دور باقته.">
         <input type="hidden" name="email" value="${escapeHtml(row.email)}" />
@@ -1157,10 +1154,10 @@ const supervisorsSection = `<div class="card mt-16">
     <div class="card-head">
       <h2>المشرفون (${escapeHtml(formatNumber(supervisors.length))})</h2>
     </div>
-    <table class="ref-table">
+    <div class="table-scroll"><table class="ref-table">
       <thead><tr><th>المشرف</th><th>الحالة</th><th>الباقة</th><th>إجراء</th></tr></thead>
       <tbody>${supervisorRows}</tbody>
-    </table>
+    </table></div>
     ${permissionsEditor({
       permissions: supervisorPermissions,
       addAction: `/admin/settings/supervisors/permissions${token}`,
@@ -1353,11 +1350,11 @@ export function renderAdminUserDetail({
   const recentCard = `
   <div class="card mt-16">
     <h2>آخر عمليات الاستهلاك</h2>
-    ${renderTable({
+    <div class="table-scroll">${renderTable({
       columns: ['التاريخ', 'النوع', 'النقاط', 'الملخص'],
       rows: recentRows,
       emptyMessage: 'لا توجد عمليات لهذا الباحث بعد.'
-    })}
+    })}</div>
   </div>`;
 
   const dangerCard = isSelf

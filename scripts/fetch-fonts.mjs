@@ -1,17 +1,6 @@
 /**
- * تنزيل خطوط هوية Zena AI من Google Fonts إلى public/fonts وتوليد public/fonts.css.
- *
- * الهدف: أن تعمل الواجهة بخطوط الهوية الرسمية دون أي طلب خارجي (لا CDN ولا مخاوف CSP،
- * وتعمل كذلك على جهاز بدون إنترنت).
- *
- * الخطوط المستخدمة حسب «Zena AI — الهوية البصرية»:
- * - Manrope (400..800) للحروف اللاتينية وواجهة المنتج — نكتفي بمجموعتي latin وlatin-ext.
- * - IBM Plex Sans Arabic (400/500/600/700) للنص العربي — نكتفي بمجموعة arabic،
- *   والحروف اللاتينية تأتي من Manrope لأنها أول خط في سلسلة font-family.
- *
- * الترخيص: الخطّان تحت رخصة SIL Open Font License 1.1 ويُسمح باستضافتهما محلياً.
- *
- * الاستخدام: node scripts/fetch-fonts.mjs   (يحتاج اتصال إنترنت مرة واحدة فقط)
+ * Downloads the brand fonts to public/fonts and generates public/fonts.css.
+ * Run once with an internet connection; fonts are then served locally.
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -22,7 +11,7 @@ const UA =
 const FONTS_DIR = path.join(process.cwd(), 'public', 'fonts');
 const CSS_FILE = path.join(process.cwd(), 'public', 'fonts.css');
 
-/** الخطوط المطلوبة ومجموعات الحروف التي نحتاجها من كل خط. */
+/** Required fonts and character subsets. */
 const REQUESTS = [
   {
     css: 'https://fonts.googleapis.com/css2?family=Manrope:wght@400..800&display=swap',
@@ -36,16 +25,16 @@ const REQUESTS = [
   }
 ];
 
-/** يفصل ملف Google Fonts إلى كتل @font-face مع اسم مجموعة الحروف في التعليق. */
+/** Extracts @font-face blocks and subset labels from Google Fonts CSS. */
 const FACE_RE = /\/\*\s*([a-z0-9-]+)\s*\*\/\s*@font-face\s*\{([^}]*)\}/gi;
 
-/** يقرأ قيمة خاصية واحدة من كتلة @font-face. */
+/** Reads a property from an @font-face block. */
 function readProperty(block, property) {
   const match = block.match(new RegExp(`${property}\\s*:\\s*([^;]+)`, 'i'));
   return match ? match[1].trim() : '';
 }
 
-/** يحوّل كتلة @font-face إلى بيانات قابلة للتحويل لملف محلي. */
+/** Parses an @font-face block into local font metadata. */
 function parseFace(subset, block) {
   const src = block.match(/url\(([^)]+)\)/i);
 
@@ -75,7 +64,7 @@ async function fetchBinary(url) {
   return Buffer.from(await response.arrayBuffer());
 }
 
-/** يولّد ملف CSS واحداً بنفس ترتيب Google Fonts مع روابط محلية. */
+/** Generates local CSS in Google Fonts order. */
 function renderCss(faces) {
   const blocks = faces.map(
     (face) => `/* ${face.subset} */

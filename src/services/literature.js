@@ -1,57 +1,26 @@
-/**
- * أداة المراجع للباحث — الطبقة التي تربط «سؤال الباحث عن المراجع» بمصادر علمية
- * حقيقية، ثم تعطي الذكاء الاصطناعي **بيانات موثّقة** لا روابط متخيَّلة.
- *
- * لماذا هذه الأداة؟ أكثر ما يشتكي منه الباحث هو: أين يوجد المرجع؟ ومن رابطه؟
- * ومن مؤلفه؟ وفي أي مجلة وأي سنة؟ لذلك:
- *
- *   1) searchLiterature() يبحث في عدة مصادر بالتوازي مع دمج النتائج وإزالة التكرار.
- *   2) normalise() يوحّد الشكل: العنوان · المؤلفون · المجلة أو المؤتمر · الناشر ·
- *      السنة · المجلد/العدد/الصفحات · DOI · رابط الناشر · رابط PDF المفتوح ·
- *      عدد الاستشهادات.
- *   3) referenceLine() يبني سطر استشهاد جاهز (APA مبسّط) لكل نتيجة.
- *   4) literatureBlock() يحوّلها إلى كتلة تُحقن في رسالة المشرف الذكي، فلا يختلق
- *      رابطاً ولا اسم مجلة من ذاكرته، ويقول للباحث ما لم يجده بدل التخمين.
- *
- * المصادر (بلا مفاتيح إلزامية): Crossref · OpenAlex · IEEE Xplore · ACM Digital
- * Library · Semantic Scholar · arXiv · Europe PMC · DOAJ · Zenodo · Open Library،
- * مع Unpaywall للعثور على النسخة المفتوحة القانونية من أي DOI.
- */
+/** Searches scholarly sources, normalizes citations, and filters results by research topic. */
 
-// مبلغات المصادر: بحث خارجي بلا مفاتيح.
-// ملاحظة مهمة: يُنظَّف الاستعلام أولاً، فالبحث عن «اديني اسماء مراجع» يجب أن يخصّصه
-// ملف الباحث (عنوان البحث + التخصص)، وأن تُفلتر النتائج بما يطابق موضوعه فعلاً.
-/**
- * ملاحظات: بحث خارجي بلا مفاتيح.
- *
- * ثلاث قواعد تحلّ مشكلة «المراجع لا تأتي حسب تخصّصي»:
- *   1) تنظيف الاستعلام: نحوّل «اديني اسماء مراجع» إلى موضوع فعلي.
- *   2) عند غموض الطلب نستخدم **ملف الباحث** (عنوان البحث + التخصص) لا لفظ «مراجع».
- *   3) ترشيح بالملاءمة: نُسقط أي نتيجة لا تتقاطع كلماتها مع الموضوع.
- */
+/** Query cleanup and relevance filtering keep generic reference requests on-topic. */
 import { LIBRARY_SOURCES, fetchCitationMetadata, googleScholarUrl, normalizeYearRange, searchExternalLibrary } from './library-sources.js';
 import { registeredTopic } from './journey.js';
 import { normalizeArabic, searchLibraryItems } from './workspace.js';
 
-// نُعيد التصدير لأن بقية الخدمات (والمكتبة) تستخدم نفس التطبيع العربي.
+// Re-export shared Arabic normalization for library services.
 export { normalizeArabic };
 
-// الموضوع المسجَّل في خطته هو المصدر المعتمد للبحث (يُعاد تصديره لواجهة الأداة).
+// The registered journey topic is the authoritative search topic.
 export { registeredTopic };
 
-/** المصادر التي نبحث فيها بالتوازي افتراضياً (الأسرع والأغنى بيانات). */
+/** Default sources searched in parallel. */
 export const DEFAULT_SEARCH_SOURCES = ['crossref', 'openalex', 'semantic'];
 
-/** كل المصادر المتاحة للباحث في واجهة البحث — تُشتق من السجل الموحّد فلا تتقادم. */
+/** Source IDs exposed by the library interface. */
 export const WEB_SOURCES = LIBRARY_SOURCES.map((entry) => entry.id);
 
-/** مهلة قصوى لمصدر واحد داخل البحث المتعدد (لا نبطئ الباحث بسبب مصدر متعطّل). */
+/** Per-source deadline in multi-source searches. */
 const SOURCE_BUDGET_MS = 12000;
 
-/** مهلة قصوى للبحث المتعدد ككل — بعدها نردّ ما وصل فعلاً. */
-const TOTAL_BUDGET_MS = 15000;
-
-/** يضمن انتهاء التنفيذ خلال مهلة معيّنة مهما تعطّل المصدر (يُرجع قيمة بديلة). */
+/** Resolves with a fallback when a source exceeds its time budget. */
 function withBudget(promise, ms, fallback) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(fallback), ms);
@@ -67,7 +36,7 @@ function withBudget(promise, ms, fallback) {
   });
 }
 
-/** حدّ طول استعلام البحث. */
+/** Maximum search-query length. */
 function cleanQuery(value, max = 200) {
   return String(value || '')
     .replace(/\s+/g, ' ')
@@ -76,24 +45,17 @@ function cleanQuery(value, max = 200) {
 }
 
 
-/**
- * عبارات الطلب التي ليست موضوعاً — تُحذف قبل البحث.
- * بدون هذه الخطوة يذهب «اديني اسماء مراجع» إلى Crossref كما هو، فتأتي كتب
- * عن «أسماء» لا مراجع بحث (وهو ما اشتكى منه الباحثون فعلاً).
- */
+/** Removes request phrasing so only the research topic is searched. */
 const REQUEST_PHRASES =
   /(اديني|اعطني|اعطنى|اريد|أريد|ابغى|أبغى|بدي|محتاج|محتاجه|محتاجة|محتاجي|ابحث لي عن|ابحث عن|اقترح لي|اقترح|أقترح|ابحث|أبحث|استخرج|ساعدني في|ساعدني|لو سمحت|من فضلك|قائمه|قائمة|اسماء|أسماء|الاسماء|مراجع|مصدر|مصادر|اوراق|أوراق|مقالات|ابحاث|أبحاث|نتائج|اعمال|أعمال|رسائل)/g;
 
-/**
- * كلمات قصيرة تُحذف **ككلمات مستقلة فقط** — حذفها كنصّ يقطع الكلمات:
- * «لي» من «التعليم»، «في» من «الفيزياء»، «على» من «التطبيقات».
- */
+/** Stopwords are removed only as complete words to avoid corrupting longer terms. */
 const SHORT_STOPWORDS = [
   'في', 'عن', 'مع', 'من', 'على', 'الى', 'إلى', 'كل', 'بعض', 'لي', 'لك', 'أي', 'او', 'أو', 'حول', 'هذا', 'هذه', 'ذلك', 'عند', 'حيث',
   'how', 'on', 'in', 'of', 'the', 'for', 'and', 'or', 'my', 'a', 'an', 'to', 'about', 'part', 'chapter'
 ];
 
-/** حذف الكلمات القصيرة بحدود عربية صحيحة (ليست جزءاً من كلمة أطول). */
+/** Removes stopwords using Unicode letter boundaries. */
 function removeShortStopwords(text) {
   let out = String(text || '');
   for (const word of SHORT_STOPWORDS) {
@@ -103,7 +65,7 @@ function removeShortStopwords(text) {
   return out;
 }
 
-/** استخراج موضوع البحث من سؤال الباحث (يحذف عبارات الطلب وكلمات الربط). */
+/** Extracts the research topic from the user's request. */
 export function extractTopic(userText) {
   return removeShortStopwords(normalizeArabic(userText).replace(REQUEST_PHRASES, ' '))
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
@@ -112,11 +74,7 @@ export function extractTopic(userText) {
     .slice(0, 160);
 }
 
-/**
- * ترجمة المصطلحات الأكاديمية العربية الشائعة إلى الإنجليزية.
- * قواعد البيانات العالمية (IEEE · ACM · Crossref · OpenAlex) تفهرس العناوين
- * الإنجليزية أساساً، فالبحث العربي بلا هذا الجسر يعطي نتائج بعيدة عن الموضوع.
- */
+/** Maps common Arabic academic terms to English search terms. */
 const ARABIC_TERMS = {
   'التعلم الاله': 'machine learning',
   'التعلم الآله': 'machine learning',
@@ -173,10 +131,7 @@ const ARABIC_TERMS = {
   'الماليه': 'financial'
 };
 
-/**
- * يبني استعلام البحث النهائي: الموضوع + مصطلحات إنجليزية مكافئة من العنوان/التخصص.
- * هذا ما يجعل النتائج «حسب تخصّص الباحث» فعلاً لا حسب الكلمات العامة.
- */
+/** Builds a topic query with English terms derived from title and field. */
 export function buildSearchQuery({ topic = '', title = '', field = '' } = {}) {
   const parts = [cleanQuery(topic, 160)];
   const haystack = `${topic} ${title} ${field}`.toLowerCase();
@@ -184,16 +139,14 @@ export function buildSearchQuery({ topic = '', title = '', field = '' } = {}) {
 
   const hay = normalizeArabic(haystack);
   for (const [ar, en] of Object.entries(ARABIC_TERMS)) {
-    // مطابقة العبارة ككلمات متتابعة مع حدود عربية صحيحة:
-    // «التعلم العميق» تُطابق، و«الطب» لا تطابق «الطبيعيه».
-    // توحيد أي مسافات (أو فواصل) بين كلمات العبارة لمطابقتها مهما تغيّر التنسيق.
+    // Match normalized phrases at Unicode word boundaries.
     const key = normalizeArabic(ar).split(/\s+/).join('\\s+');
     if (new RegExp(`(?<!\\p{L})${key}(?!\\p{L})`, 'u').test(hay)) {
       en.split(' ').forEach((word) => english.add(word));
     }
   }
 
-  // كلمات إنجليزية أصلاً في العنوان/التخصص (كثير من الباحثين يكتبون عنوانهم إنجليزياً).
+  // Preserve English terms already present in the title or field.
   `${title} ${field}`
     .toLowerCase()
     .replace(/[^\p{L}\s]/gu, ' ')
@@ -208,13 +161,9 @@ export function buildSearchQuery({ topic = '', title = '', field = '' } = {}) {
   return parts.filter(Boolean).join(' ').trim().slice(0, 220);
 }
 
-/**
- * درجة ملاءمة النتيجة لموضوع البحث (0–100).
- * العنوان أعلى وزناً لأنه موضوع الورقة، والملخص أقل وزناً.
- * التطبيع عربي (همزات/تاء مربوطة/تشكيل) حتى «أسماء» = «اسماء».
- */
+/** Scores result relevance, weighting titles above abstracts. */
 
-/** الجزء الإنجليزي فقط من استعلام مختلط (يُستخدم للبحث الثاني في الأدوات العالمية). */
+/** Extracts English terms for a second global-source search. */
 function englishTermsOf(query) {
   return String(query || '')
     .split(' ')
@@ -223,9 +172,7 @@ function englishTermsOf(query) {
     .slice(0, 200);
 }
 
-/**
- * درجة ملاءمة النتيجة بموضوع البحث (0–100): العنوان أعلى وزناً لأنه موضوع الورقة.
- */
+/** Scores a result against the research topic. */
 export function relevanceScore(item, topic) {
   const haystacks = {
     title: normalizeArabic(item.title),
@@ -234,7 +181,7 @@ export function relevanceScore(item, topic) {
   };
 
   const terms = [...new Set(normalizeArabic(topic).split(' ').filter((word) => word.length > 2))];
-  if (!terms.length) return 100; // بلا موضوع محدّد ⇒ لا ترشيح (نأخذ كل النتائج).
+  if (!terms.length) return 100; // No topic means no filtering.
 
   let score = 0;
   for (const term of terms) {
@@ -246,7 +193,7 @@ export function relevanceScore(item, topic) {
   return Math.min(100, Math.round((score / (terms.length * 3)) * 100));
 }
 
-/** مفتاح تطبيع العنوان لاكتشاف تكرار العمل الواحد بين المصادر. */
+/** Normalizes titles for cross-source deduplication. */
 function titleKey(title) {
   return String(title || '')
     .toLowerCase()
@@ -257,7 +204,7 @@ function titleKey(title) {
     .join(' ');
 }
 
-/** يوحّد سجل مصدر خارجي إلى سجل مرجع واحد (نفس الشكل لكل المصادر). */
+/** Normalizes external-source records to a shared reference shape. */
 function normalise(record, sourceId) {
   const authors = String(record.authors || '')
     .split(/[،,]/)
@@ -287,7 +234,7 @@ function normalise(record, sourceId) {
   };
 }
 
-/** سطر استشهاد واحد (APA مبسّط) — يصلح للنسخ في فصل الرسالة. */
+/** Builds a simple APA-style citation line. */
 export function referenceLine(item) {
   const first = item.authors[0] || 'مؤلف غير محدد';
   const surname = first.split(' ').pop() || first;
@@ -301,25 +248,27 @@ export function referenceLine(item) {
   return `${surname}${more} (${item.year || '؟'}). ${item.title}. ${item.venue || item.publisher || ''}${volume}${issue}${pages}.${link}`;
 }
 
-/** هل المرجعان نفس العمل؟ (نفس DOI أو عنوان متطابق). */
+/** Checks whether two records refer to the same work. */
 function isDuplicate(a, b) {
   if (a.doi && b.doi && a.doi.toLowerCase() === b.doi.toLowerCase()) return true;
   const key = titleKey(a.title);
   return Boolean(key) && key === titleKey(b.title);
 }
 
-/**
- * بحث مراجع في عدة مصادر بالتوازي مع دمج النتائج وإزالة التكرار:
- * يعيد { query, sources, items, tried, errors } ولا يرمي أبداً.
- */
-export async function searchLiterature({ query, sources = DEFAULT_SEARCH_SOURCES, limit = 8, subject = '', topic = '', minRelevance = 25, yearFrom = 0, yearTo = 0 } = {}) {
+/** Searches selected sources in parallel, merges duplicates, and returns source errors. */
+export async function searchLiterature({ query, sources, limit = 8, allSources = false, subject = '', topic = '', minRelevance = 25, yearFrom = 0, yearTo = 0 } = {}) {
   const q = cleanQuery(query);
-  const ids = (Array.isArray(sources) ? sources : [sources]).map((id) => String(id || '').trim()).filter(Boolean);
-  const list = (ids.length ? ids : DEFAULT_SEARCH_SOURCES).slice(0, 6);
-  const size = Math.min(Math.max(Number(limit) || 8, 1), 15);
-  // موضوع الترشيح: إن لم يُمرَّر نستخدم الاستعلام نفسه (سلوك البحث اليدوي).
+  const defaultIds = allSources ? WEB_SOURCES : DEFAULT_SEARCH_SOURCES;
+  const sourceIds = sources == null ? defaultIds : Array.isArray(sources) ? sources : [sources];
+  const requestedIds = sourceIds
+    .map((id) => String(id || '').trim())
+    .filter((id, index, values) => id && values.indexOf(id) === index && WEB_SOURCES.includes(id));
+  const selectedIds = requestedIds.length ? requestedIds : defaultIds;
+  const list = allSources ? selectedIds : selectedIds.slice(0, 6);
+  const size = Math.min(Math.max(Number(limit) || 8, 1), 25);
+  // Use the query as the relevance topic when none is provided.
   const filterTopic = cleanQuery(topic || q, 160);
-  // فلتر سنة الإصدار: موحّد عبر normalizeYearRange (المعكوس يُقلب والشاذ يُلغى).
+  // Normalize the requested publication-year range.
   const years = normalizeYearRange(yearFrom, yearTo);
   const hasYearFilter = Boolean(years.from || years.to);
 
@@ -332,7 +281,7 @@ export async function searchLiterature({ query, sources = DEFAULT_SEARCH_SOURCES
   const settled = await Promise.allSettled(
     list.map(async (id) => {
       const started = Date.now();
-      // مهلة لكل مصدر + مهلة شاملة: نردّ ما وصل فعلاً ولا نُبقي الباحث منتظراً.
+      // Bound each source request so one slow source does not delay the response.
       const response = await withBudget(
         searchExternalLibrary({ source: id, q, subject, limit: size, yearFrom: years.from, yearTo: years.to }),
         SOURCE_BUDGET_MS,
@@ -344,9 +293,7 @@ export async function searchLiterature({ query, sources = DEFAULT_SEARCH_SOURCES
     })
   );
 
-  // حارس إضافي: لو تعلّق نداءٌ ما رغم المهلة، نكمل بما جمعناه.
-  const guard = new Promise((resolve) => setTimeout(() => resolve([]), TOTAL_BUDGET_MS));
-  const outcomes = await Promise.race([settled, guard]);
+  const outcomes = await settled;
 
   const merged = [];
   for (const outcome of outcomes) {
@@ -357,7 +304,7 @@ export async function searchLiterature({ query, sources = DEFAULT_SEARCH_SOURCES
 
       const existing = merged.find((candidate) => isDuplicate(candidate, item));
       if (existing) {
-        // نفس العمل من مصدر آخر: نأخذ أفضل رابط PDF وDOI وأعلى عدد استشهادات.
+        // Merge access links and citation data from duplicate records.
         if (!existing.pdfUrl && item.pdfUrl) existing.pdfUrl = item.pdfUrl;
         if (!existing.doi && item.doi) existing.doi = item.doi;
         if (!existing.isOpenAccess && item.isOpenAccess) existing.isOpenAccess = true;
@@ -366,13 +313,12 @@ export async function searchLiterature({ query, sources = DEFAULT_SEARCH_SOURCES
         continue;
       }
 
-      // درجة الملاءمة مع موضوع الباحث (تُحسب مرة واحدة لكل نتيجة).
+      // Calculate relevance once per unique record.
       merged.push({ ...item, relevance: relevanceScore(item, filterTopic) });
     }
   }
 
-  // فلتر فترة الإصدار (إن وُجد): النتيجة بلا سنة مؤكَّدة أو خارج المدى تُستبعد —
-  // إخراج خارج الفترة المطلوبة أسوأ من غيابه، وترشيح هنا يغطي المصادر بلا فلتر خادمي.
+  // Exclude records without a confirmed year when a year range is requested.
   const ranged = hasYearFilter
     ? merged.filter(
         (item) =>
@@ -382,7 +328,7 @@ export async function searchLiterature({ query, sources = DEFAULT_SEARCH_SOURCES
       )
     : merged;
 
-  // ترتيب بالأولوية: ملاءمة الموضوع أولاً، ثم مفتوح الوصول، ثم الأحدث، ثم الاستشهادات.
+  // Rank by relevance, open access, recency, then citation count.
   ranged.sort(
     (a, b) =>
       (b.relevance || 0) - (a.relevance || 0) ||
@@ -391,11 +337,9 @@ export async function searchLiterature({ query, sources = DEFAULT_SEARCH_SOURCES
       b.citations - a.citations
   );
 
-  // ترشيح: عند وجود موضوع محدّد نستبعد النتائج التي لا تحتوي أي كلمة منه.
-  // مهم: لا «نعود» للنتائج غير المطابقة أبداً — إرسال مراجع لا علاقة بالموضوع أسوأ
-  // من سؤال الباحث عن موضوعه، فيعود فارغاً إن لم يجد مطابقة حقيقية.
+  // Never fall back to unrelated references when a topic is specified.
   const scored = filterTopic ? ranged.filter((item) => (item.relevance || 0) >= minRelevance) : ranged;
-  const finalItems = scored.slice(0, size);
+  const finalItems = scored.slice(0, allSources ? size * list.length : size);
 
   return {
     query: q,
@@ -409,14 +353,12 @@ export async function searchLiterature({ query, sources = DEFAULT_SEARCH_SOURCES
   };
 }
 
-/**
- * كتلة مراجع محقّقة تُحقن في رسالة المشرف الذكي، مع تعليمات تمنع تخمين الروابط.
- */
+/** Formats verified references for prompt injection without inventing links. */
 export function literatureBlock(result, { max = 6, libraryItems = [], topicSource = '' } = {}) {
   const items = (result?.items || []).slice(0, max);
   if (!items.length && !libraryItems.length) return '';
 
-  // إن لم تتجاوز أي نتيجة حدّ الملاءمة ⇒ نتائج ضعيفة الصلة بالموضوع.
+  // Mark the result set as weak when every item falls below the relevance threshold.
   const weak = Boolean(items.length) && items.every((item) => (item.relevance || 0) < 25);
 
   const lines = items.map((item, index) => {
@@ -433,7 +375,7 @@ export function literatureBlock(result, { max = 6, libraryItems = [], topicSourc
     return `- ${bits.join(' | ')}`;
   });
 
-  // كتب مكتبة المنصة: ما يستطيع الباحث قراءته وتحميله فوراً بلا روابط خارجية.
+  // Platform-library books are immediately readable without external links.
   const libraryLines = libraryItems.map((item) => {
     const access = item.hasFile
       ? 'متاح للقراءة والتحميل داخل المنصة'
@@ -464,7 +406,7 @@ export function literatureBlock(result, { max = 6, libraryItems = [], topicSourc
     weak
       ? 'تنبيه جودة: صلة هذه النتائج بموضوع الباحث ضعيفة (قواعد البيانات لم تجد مطابقة قوية) — قولي له ذلك بصراحة واطلب منه كلمات مفتاحية أدق أو عنواناً إنجليزياً لبحثه.'
       : '',
-    // نُفصح للباحث عن العبارة التي بُني عليها البحث حتى يصحّحها إن أخطأنا.
+    // Expose the search phrase so the user can correct it if needed.
     topicSource === 'profile'
       ? 'ملاحظة: بُني هذا البحث على ملف الباحث (عنوان بحثه وتخصصه) — اذكري ذلك في أول جملة واطلبه التأكيد.'
       : topicSource === 'context'
@@ -480,10 +422,7 @@ export function literatureBlock(result, { max = 6, libraryItems = [], topicSourc
   ].join('\n');
 }
 
-/**
- * هل يطلب الباحث مراجع/مصادر فعلاً؟ كلمات مفتاحية عربية وإنجليزية —
- * الهدف تشغيل الأداة تلقائياً بلا سؤال إضافي للباحث.
- */
+/** Detects explicit reference and source requests. */
 export function wantsLiterature(text) {
   const raw = String(text || '').toLowerCase();
   if (!raw) return false;
@@ -495,27 +434,16 @@ export function wantsLiterature(text) {
   return arabic.test(raw) || english.test(raw);
 }
 
-/**
- * هل سألتِ المشرفة الباحث سابقاً عن **العنوان الذي يريد مراجعه**؟
- *
- * كانت البوابة في chat.js تكتفي بوجود (عنوان|موضوع) + (مراجع|مصادر) + «؟» في أي
- * ردّ سابق، فكان السؤال الأكاديمي العادي — مثل سؤال المناقشة «…ورقتك بعنوان…
- * ومراجعات العدالة…؟» — يُفعّلها زوراً، فتُعامَل إجابة الباحث كطلب مراجع لم
- * يطلبه وتُستبدل رسالته كلها بتعليمات الأداة. الآن نشترط صيغة طلب حقيقية:
- *   - السؤال الصريح: «في أي عنوان… / أي عنوان بالتحديد…»، أو
- *   - طلب مباشر للمراجع مع أداة سؤال («هل تحتاج مراجع…؟»)، أو
- *   - ذكر مراجع حقيقي (لا «مراجعات») + عنوان/موضوع + صيغة طلب + «؟».
- * إخفاق هنا آمن: نعيد السؤال لاحقاً فقط — أما اختطاف رسالة الباحث فهو الخطر.
- */
+/** Detects whether the assistant previously asked for a specific reference topic. */
 export function askedForReferenceTitle(messages = [], limit = 3) {
   return messages.slice(-limit).some((message) => {
     if (message?.role !== 'assistant') return false;
     const text = String(message.content || '');
     if (!text || !/[؟?]/.test(text)) return false;
     if (/في أي عنوان|أي عنوان بالتحديد/.test(text)) return true;
-    // طلب مباشر للمراجع ضمن ٣٠ حرفاً من أداة السؤال
+    // Require a direct reference request near the question word.
     if (/(?:تريد|تحتاج|أعطني|أرني|ابحث لي|اقترح لي).{0,30}(?:مراجع|مصادر|روابط)/.test(text)) return true;
-    // «مراجعات» (تحوّل/مراجعة العدالة…) ليست طلب مراجع — استثناء بالـ (?!\s*ات)
+    // Exclude words such as "مراجعات" that are not requests for references.
     const wantsRefs = /(?:مراجع|مصادر|مرجع|مصدر)(?!ات)/.test(text);
     const mentionsTitle = /(عنوان|موضوع)/.test(text);
     const requestForm = /(ما هو|ما\s+(?:عنوان|موضوع)|اذكر|حدّد|حدد|تريد|تطلب|تحتاج)/.test(text);
@@ -523,10 +451,7 @@ export function askedForReferenceTitle(messages = [], limit = 3) {
   });
 }
 
-/**
- * يدمج قائمتي نتائج (بحث عربي + بحث إنجليزي) مع إزالة التكرار بالـ DOI/العنوان،
- * مع الحفاظ على أعلى درجة ملاءمة لكل عمل.
- */
+/** Merges search results, removes duplicates, and keeps the best relevance score. */
 export function mergeItems(...lists) {
   const merged = [];
 
@@ -558,16 +483,12 @@ export function mergeItems(...lists) {
   );
 }
 
-/** القيم التي تعني «غير محدد» في ملف الباحث — لا تصلح موضوعاً للبحث. */
+/** Profile placeholder values that are not valid search topics. */
 const PLACEHOLDERS = /^(غير محدد|غير محدده|محدد|محدد؟|-{1,2}|—|؟|\?|n\/?a|غير معروف|غير محدد\?)$/i;
 
 /**
- * يحدّد **موضوع البحث** من مصادر بالترتيب، ويعيد مصدره ليتصرّف معه المشرف:
- *   1) subject  ⇒ الموضوع موجود في سؤال الباحث نفسه («مراجع عن التعلم العميق»).
- *   2) profile  ⇒ لا موضوع في السؤال ⇒ نستخدم **ملف الباحث** (العنوان + التخصص).
- *   3) context  ⇒ لا شيء في الملف ⇒ نستنبطه من **سياق المحادثات** (المهمة المتفق عليها
- *                    وملخّص الذاكرة وآخر أسئلة الباحث).
- *   4) none     ⇒ لا نعرف التخصّص ⇒ **لا نرسل أي مرجع**، ونطلب الموضوع من الباحث.
+ * Resolves the research topic from the question, profile, or conversation context.
+ * Returns its origin so the caller can handle missing topics appropriately.
  */
 export function resolveTopic({ question = '', title = '', field = '', context = '' } = {}) {
   const explicit = extractTopic(question);
@@ -582,32 +503,25 @@ export function resolveTopic({ question = '', title = '', field = '', context = 
     return { topic: cleanQuery(`${hasTitle ? cleanTitle : ''} ${hasField ? cleanField : ''}`, 160).trim(), origin: 'profile' };
   }
 
-  // من سياق المحادثة: نأخذ أهم الجمل فقط (المهمة المتفق عليها ثم آخر كلام للباحث).
+  // Use the agreed task and the researcher's latest message from conversation context.
   const fromContext = extractTopic(context);
   if (fromContext.length >= 8) return { topic: fromContext.slice(0, 160), origin: 'context' };
 
   return { topic: '', origin: 'none' };
 }
 
-/** (unused) كان بوابة المرحلة — أُلغيت: المراجع متاحة في كل مرحلة عدا topic.
- * kept for backward compatibility of imports; الأداة لم تعد تستدعيها. */
+/** Legacy stage helper retained for import compatibility; the search tool does not use it. */
 export const REFERENCE_STEPS = ['literature'];
 
 export function isReferenceStage(stepKey) {
   return REFERENCE_STEPS.includes(String(stepKey || '').trim());
 }
 
-/**
- * أداة المراجع — تُشغَّل في **أي مرحلة** بلا بوابة، بشرط واحد:
- * أن يذكر الباحث **العنوان** الذي يريد مراجعه. إن لم يذكره ⇒ نسأل ولا نرسل شيئاً.
- * والمراجع تبقى ضمن نطاق تخصصه (ملفه البحثي) لأنه يُضاف إلى الاستعلام والترشيح.
- */
+/** Searches references after the researcher specifies a topic and field. */
 
 /**
- * هل الموضوع **محدَّد بما يكفي** للبحث؟ حقل عام مثل «تقنية المعلومات» (كلمتان)
- * لا ينتج مراجع في تخصّصه، لأن قواعد البيانات ترجّع أي شيء. نقيس:
- *   - عدد الكلمات العربية/الإنجليزية ذات المعنى (بعد حذف الكلمات الوظيفية).
- *   - هل هو مجرد اسم تخصص عام بلا متخصص فرعي؟
+ * Checks whether a topic is specific enough for a useful literature search.
+ * Broad fields alone tend to return unrelated results.
  */
 export function isTopicSpecific(topic, { minWords = 4 } = {}) {
   const words = normalizeArabic(topic)
@@ -616,15 +530,11 @@ export function isTopicSpecific(topic, { minWords = 4 } = {}) {
 
   if (words.length >= minWords) return true;
 
-  // كلمتان بالضبط («تقنية المعلومات») = اسم تخصص عام ⇒ نحتاج توضيحاً.
+  // Two-word fields such as "information technology" need clarification.
   return false;
 }
 
-/**
- * يستخرج موضوع البحث **كما كتبه الباحث** من رسالته، ليمكن تسجيله في خطته:
- *   - «موضوعي: …» / «سأبحث عن …» / «موضوع بحثي …» / «بعنوان …» / «my topic is …»
- * يعيد نصاً فارغاً إن لم يصرّح بموضوع (لا نخمّن ولا نؤلّف من عندنا).
- */
+/** Extracts an explicitly stated research topic without inferring one. */
 export function extractStatedTopic(text) {
   const raw = String(text || '').trim();
   if (!raw || raw.length > 600) return '';
@@ -642,38 +552,29 @@ export function extractStatedTopic(text) {
       .replace(/[؟?!.،,؛;]+$/g, '')
       .trim();
 
-    // نقبل عبارة واحدة واضحة (٦ أحرف فأكثر) بلا قوائم أسئلة.
+    // Accept one clear phrase of at least six characters, not a question.
     if (value.length >= 6 && value.length <= 200 && !/[؟?]/.test(value)) return value;
   }
 
   return '';
 }
 
-/**
- * الأداة كاملة كما تُستدعى من شات المشرف الذكي.
- * تُرجع { block, items } عند وجود موضوع، أو { needsTopic } حين لا نعرف التخصّص
- * أو لم نجد مطابقة حقيقية (وقتها يطلب المشرف من الباحث موضوعه بدل مراجع عامة).
- */
+/** Searches for relevant references or asks for a more specific topic. */
 export async function literatureToolFor(
   userText,
   { limit = 6, userId = null, field = '', title = '', context = '', askedBefore = false } = {}
 ) {
-  // إن سألناه سابقاً عن العنوان فأي جواب ذي معنى يُعامَل كطلب مراجع
-  // (مثل «ضمن تخصصي» الذي لا يحتوي كلمة «مراجع»).
+  // Treat a meaningful answer to a previous topic prompt as a reference request.
   const isAnswerToOurQuestion = askedBefore && normalizeArabic(userText).trim().length >= 4;
   if (!wantsLiterature(userText) && !isAnswerToOurQuestion) return null;
 
   /*
-   * القاعدة الجديدة (قرار صاحب المنصة):
-   *   - المراجع تُقترح في أي مرحلة عدا «تحديد المشكلة» (topic): بوابة chat.js
-   *     تمنع الأداة قبل اكتمال تعريف المشكلة وحدودها.
-   *   - لكن **نسأل عن العنوان أولاً**: لا نرسل مراجع عامة أبداً.
-   *   - العنوان يأتي من كلام الباحث نفسه، والمراجع تُبقي داخل نطاق تخصّصه
-   *     (نضيف تخصّصه للاستعلام ونستخدمه في الترشيح).
+   * Search only after the topic is defined, and never return generic references.
+   * Use the researcher's stated topic and keep results within their field.
    */
   const asked = extractTopic(userText);
 
-  // «ضمن تخصصي / في مجالي / تخصص تقنية المعلومات» = إجابة عن سؤالنا ⇒ نبحث في نطاق ملفه.
+  // Scope-only replies use the research topic saved in the profile.
   const wantsScope = /(ضمن\s*(?:تخصص|مجال|بحث)|تخصصي|مجالي|مجال\s*(?:بحث|تخصص))/i.test(userText);
   const profileScope = cleanQuery(`${title || ''} ${field || ''}`, 200).trim();
 
@@ -687,7 +588,7 @@ export async function literatureToolFor(
     topic = asked;
     origin = 'subject';
   } else if (askedBefore && profileScope) {
-    // أجاب بلا عنوان ⇒ لا نسأل مرة ثانية، بل نبحث في نطاق بحثه المسجَّل.
+    // Do not repeat the prompt; fall back to the saved research topic.
     topic = profileScope;
     origin = 'profile';
   } else {
@@ -696,15 +597,14 @@ export async function literatureToolFor(
 
   if (!isTopicSpecific(topic)) return { needsTopic: true, reason: 'need_title', topic };
 
-  // 3) الاستعلام النهائي = الموضوع + مصطلحاته الإنجليزية (لتطابق قواعد البيانات العالمية).
+  // Include English equivalents to improve coverage in global databases.
   const query = buildSearchQuery({ topic, title, field });
   const filterTopic = origin === 'profile' ? topic : `${topic} ${field} ${title}`.trim();
   const hasArabic = /[\u0600-\u06FF]/.test(topic);
 
   const started = Date.now();
 
-  // 4) بحثان متوازيان: بالموضوع المختلط (عربي+إنجليزي)، وبالإنجليزية وحدها
-  //    حين يكون الموضوع عربياً — لالتقاط أوراق IEEE/ACM التي لا تُفهرَس بالعربية.
+  // Search mixed-language terms and, for Arabic topics, English-only terms in parallel.
   const [mixed, englishOnly] = await Promise.all([
     searchLiterature({ query, limit: limit + 2, topic: filterTopic }),
     hasArabic
@@ -714,11 +614,10 @@ export async function literatureToolFor(
 
   const items = mergeItems(mixed.items, englishOnly.items).slice(0, limit);
 
-  // لم نجد مطابقة حقيقية للموضوع ⇒ لا مراجع عشوائية: نطلب توضيحاً من الباحث.
+  // Ask for clarification instead of returning unrelated references.
   if (!items.length) return { needsTopic: true, reason: 'no_match', topic, topicSource: origin };
 
-  // بالتوازي: ما عندنا في مكتبة المنصة (يُقرأ ويُحمَّل فوراً) — وبنفس شرط الملاءمة
-  // حتى لا يدخل عنصر المكتبة غير المرتبط بالموضوع.
+  // Search the platform library in parallel and apply the same relevance threshold.
   const libraryItems = (await searchPlatformLibrary({ query: topic, field, userId, limit: 6 }))
     .filter((item) => relevanceScore(item, topic) >= 25)
     .slice(0, 4);
@@ -738,17 +637,13 @@ export async function literatureToolFor(
 
 export { googleScholarUrl };
 
-/**
- * مراجع من مكتبة المنصة (ما أضافه المدير): تُبحث بسؤال الباحث وبتخصّصه،
- * وهي قابلة للقراءة والتحميل فوراً بلا روابط خارجية.
- */
+/** Searches the platform library for references relevant to the topic and field. */
 export async function searchPlatformLibrary({ query, field = '', userId = null, limit = 4 } = {}) {
   const q = cleanQuery(query, 120);
   const size = Math.min(Math.max(Number(limit) || 4, 1), 8);
   const items = [];
 
-  // ثلاث محاولات متتالية حتى نجد ما في المكتبة:
-  //  1) بالعبارة كاملة (كل الكلمات) — 2) بمصطلحاتها الإنجليزية — 3) بأي كلمة (تساهل).
+  // Try the full phrase, its English terms, then individual keywords.
   const english = q
     .split(' ')
     .filter((word) => /^[a-z]/i.test(word))
@@ -772,10 +667,9 @@ export async function searchPlatformLibrary({ query, field = '', userId = null, 
 
   const unique = [...new Map(items.map((item) => [item.id, item])).values()];
   const chosen = unique.sort((a, b) => Number(Boolean(b.hasFile)) - Number(Boolean(a.hasFile))).slice(0, size);
-  // نُعيد نسخاً قابلة للتعديل: الإثراء يأتي من الرابط ولا يمسّ بيانات المنصة.
+  // Enrich copies only; external metadata must not change platform records.
 
-  // عناصر المكتبة التي بلا ملف ⇒ **نقرأ بياناتها من رابطها** (وسوم citation_*)
-  // فيحصل الباحث على المجلة والمؤلفين والسنة وDOI بدل سطر ناقص.
+  // Fill missing citation metadata from source links when no file is available.
   const enrichedById = new Map();
   await Promise.all(
     chosen
@@ -786,8 +680,7 @@ export async function searchPlatformLibrary({ query, field = '', userId = null, 
         try {
           const meta = await fetchCitationMetadata(item.externalUrl);
           if (!meta?.title) return;
-          // العنوان المسجَّل في المنصة يبقى المرجع للترشيح والمطابقة،
-          // والرابط يملأ ما هو ناقص فقط (المجلّة · السنة · DOI · رابط PDF).
+          // Keep the stored title for matching; use the link only to fill missing metadata.
           item.linkTitle = meta.title;
           item.authors = item.authors?.length ? item.authors : meta.authors;
           item.authorsText = item.authorsText || meta.authorText;

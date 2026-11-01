@@ -1,27 +1,14 @@
 import { pool } from '../db/client.js';
 import { runSupervisor } from './ai.js';
 
-/**
- * ذاكرة المشرف الذكي — ما لا يحسبه البرومبت بل قاعدة البيانات.
- *
- * ثلاثة أشياء:
- *   1) memory + open_task: ملخّص ما استقرّ في جلسات سابقة + المهمة المتفق عليها
- *      المرة القادمة. تُبنى باستدعاء رخيص واحد عند إغلاق الجلسة.
- *   2) strikes: عدّاد التنبيه على الخروج عن النطاق/الاستهجار. المشرف نفسه
- *      يضع وسم [[strike]] في آخر ردّه، والكود يحذفه قبل العرض ويزيد العدّاد
- *      (فلا تكلفة استدعاء إضافي). يُصفَّر بعد فترة هدوء.
- *
- * الاستدعاءات الداخلية هنا (تلخيص الجلسة) تتحمّلها المنصة ولا تُخصم من
- * الباحث — تُسجَّل في usage_logs بنوع chat_summary وبنقاط صفر، حتى تبقى
- * تكلفة المنصة ظاهرة في سجل الاستهلاك.
- */
+/** Persistent supervisor memory and strike tracking, separate from prompt-derived state. */
 
-/** مدّة الهدوء التي تصفّر العدّاد (الساعات). */
+/** Idle hours before strike count resets. */
 const STRIKE_TTL_HOURS = Number(process.env.SUPERVISOR_STRIKE_TTL_HOURS || 24);
-/** أقل عدد رسائل في الجلسة تستحق تلخيصاً (وإلا فلا فائدة). */
+/** Minimum conversation length worth summarizing. */
 const MIN_MESSAGES_TO_SUMMARIZE = 4;
 
-/** ذاكرة الباحث: صف واحد لكل مستخدم (ينشأ عند أول كتابة). */
+/** Returns the user's supervisor memory. */
 export async function getMemory(userId) {
   const { rows } = await pool.query(
     'SELECT memory, open_task, strikes, strikes_updated_at FROM supervisor_memory WHERE user_id = $1',
@@ -39,10 +26,7 @@ export async function getMemory(userId) {
   };
 }
 
-/**
- * عدّاد التنبيهات مع تصفير تلقائي بعد فترة هدوء: من عدّ مرتين وعاد
- * جدّياً بعد يوم يُعامل كبداية نظيفة.
- */
+/** Returns the strike count, resetting it after the idle period. */
 export async function getStrikes(userId) {
   const { strikes, strikesUpdatedAt } = await getMemory(userId);
   if (!strikes) return 0;
@@ -58,7 +42,7 @@ export async function getStrikes(userId) {
   return 0;
 }
 
-/** يزيد عدّاد التنبيهات (يُستدعى عند وجود وسم [[strike]] في رد المشرف). */
+/** Increments the strike count when the internal marker is present. */
 export async function addStrike(userId) {
   const { rows } = await pool.query(
     `INSERT INTO supervisor_memory (user_id, strikes, strikes_updated_at, updated_at)
@@ -74,11 +58,7 @@ export async function addStrike(userId) {
   return Number(rows[0]?.strikes || 0);
 }
 
-/**
- * تصفير يدوي للعدّاد — احتياط غير مستخدم حالياً في المسارات
- * (لا يستدعيه أحد في src/)؛ التصفير الفعلي الوحيد تلقائي بعد الهدوء 24 ساعة.
- * موجود لاستدعاء يدوي مستقبلاً (مثال المقترح في تعليقها: تصفير عند إنجاز خطوة).
- */
+/** Manually resets the user's strike count. */
 export async function resetStrikes(userId) {
   await pool.query(
     `INSERT INTO supervisor_memory (user_id, strikes, strikes_updated_at, updated_at)
@@ -88,7 +68,7 @@ export async function resetStrikes(userId) {
   );
 }
 
-/** يحفظ الملخّص والمهمة القادمة (يستبدل memory، ولا يمسّ عدّاد التنبيهات). */
+/** Saves the summary and next task without changing strikes. */
 export async function saveMemory(userId, { memory = '', openTask = '' } = {}) {
   await pool.query(
     `INSERT INTO supervisor_memory (user_id, memory, open_task, updated_at)
@@ -105,7 +85,7 @@ const SUMMARY_SYSTEM = `أنت مُحلِّل جلسات لمشرفة بحثية
 أجيبي بـ JSON فقط: {"memory": ["…","…","…"], "open_task": "…"}.
 لا تضيفي نصاً خارج JSON. لا تحكمي على الباحث ولا نصائح.`;
 
-/** يحلّل نص JSON آمناً (الموديل قد يغلّفه بـ ```json). */
+/** Parses model JSON, including fenced JSON responses. */
 function parseJsonLoose(text) {
   const cleaned = String(text || '')
     .replace(/```json/gi, '')
@@ -122,9 +102,7 @@ function parseJsonLoose(text) {
   }
 }
 
-/** تحديث حالة المشرف (ذاكرة/مهمة/تنبيه) بعد أكتمال الرد.
- *  الجدول `supervisor_memory` لا يملك عمود `status`، لذا تعمل الدالة على
- *  حقول مقبولة: memory (1500 حرف)، open_task (300 حرف)، strikes. */
+/** Updates only columns supported by supervisor_memory. */
 export async function updateSupervisorState(userId, { memory = '', openTask = '', strikes = 0 } = {}) {
   const safeStrikes = Number.isFinite(strikes) ? Math.max(0, Math.floor(strikes)) : 0;
   await pool.query(
@@ -139,10 +117,7 @@ export async function updateSupervisorState(userId, { memory = '', openTask = ''
   );
 }
 
-/**
- * تلخيص جلسة منتهية: يستدعي نموذجاً رخيصاً ويعيد { memory, openTask } أو null.
- * يفشل بصمت (null) حتى لا يُفشل ختام الجلسة ولا يُكلّف الباحث شيئاً.
- */
+/** Summarizes a completed conversation without failing the current request. */
 export async function summarizeConversation(userId, { messages = [], profile = {} } = {}) {
   const transcript = messages
     .slice(-24)

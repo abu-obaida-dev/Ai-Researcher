@@ -1,26 +1,19 @@
 import ExcelJS from 'exceljs';
 
-/**
- * قراءة جداول البيانات للمعاينة داخل الموقع (1E).
- * ندعم xlsx (بمكتبة exceljs) و csv (محلّل خفيف بدون مكتبة).
- * xls (الصيغة القديمة الثنائية) لا يدعمه exceljs ⇒ رسالة إرشادية بدل انهيار.
- *
- * حدود المعاينة (حماية من الملفات الضخمة):
- *   MAX_SHEETS ورقة · MAX_ROWS صفوف · MAX_COLS أعمدة · MAX_CELL حرف للخلية.
- */
+/** Bounded XLSX and CSV parsing for in-app previews. */
 
-/** أقصى عدد أوراق نعرضها. */
+/** Maximum sheets per workbook. */
 const MAX_SHEETS = 6;
-/** أقصى صفوف لكل ورقة. */
+/** Maximum rows per sheet. */
 const MAX_ROWS = 200;
-/** أقصى أعمدة لكل صف. */
+/** Maximum columns per row. */
 const MAX_COLS = 30;
-/** أقصى طول نص الخلية. */
+/** Maximum text length per cell. */
 const MAX_CELL = 120;
-/** أقصى حجم ملف جدولي نقبل تحليله (10 MB). */
+/** Maximum spreadsheet size accepted for parsing. */
 const MAX_BYTES = 10 * 1024 * 1024;
 
-/** يحوّل قيمة خلية إلى نصّ مقروء ومختصر. */
+/** Converts a cell value to bounded readable text. */
 function cellText(value) {
   if (value === null || value === undefined) return '';
 
@@ -42,7 +35,7 @@ function cellText(value) {
   return text.length > MAX_CELL ? `${text.slice(0, MAX_CELL)}…` : text;
 }
 
-/** محلّل CSV بسيط (فواصل/علامات اقتباس/أسطر جديدة) — كافٍ لملفات البحث. */
+/** Parses standard CSV delimiters, quoted fields, and line breaks. */
 function parseCsv(text) {
   const rows = [];
   let row = [];
@@ -81,7 +74,7 @@ function parseCsv(text) {
 }
 
 /**
- * يحلّل ملف جدولي ويعيد أوراقه كنص:
+ * Parses a spreadsheet and returns its sheets or a typed error:
  * { sheets: [{ name, rows: [[...]], truncated }], truncated, error }
  * error = 'too_large' | 'xls_unsupported' | 'corrupt' عند التعذّر.
  */
@@ -124,7 +117,7 @@ export async function readSpreadsheet(buffer, fileName = '') {
           if (col > MAX_COLS) return;
           values[col - 1] = cellText(cell.value);
         });
-        // نحذف الأعمدة الفارغة في ذيل الصف
+        // Trim empty trailing columns.
         while (values.length && values[values.length - 1] === '') values.pop();
         if (values.length) rows.push(values);
       });
@@ -139,7 +132,7 @@ export async function readSpreadsheet(buffer, fileName = '') {
   }
 }
 
-/** رسالة عربية جاهزة لكل حالة خطأ في قراءة الجدول. */
+/** Maps spreadsheet errors to user-facing messages. */
 export function spreadsheetErrorMessage(error) {
   if (error === 'too_large') return 'حجم الملف كبير جداً على المعاينة (الحد 10 ميجابايت) — حمّله وافتحه في Excel.';
   if (error === 'xls_unsupported') return 'صيغة xls القديمة غير مدعومة في المعاينة — احفظ الملف بصيغة xlsx أو csv ثم ارفعه.';

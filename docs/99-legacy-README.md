@@ -1,20 +1,20 @@
-# مشرفي AI — منصة الإشراف البحثي الذكي
+# AI Supervisor — Intelligent Research Supervision Platform
 
-خدمة **Node.js + PostgreSQL** خالصة. تمت إزالة Next.js و React و Firebase من الاعتماديات ومن شجرة الكود بالكامل.
+A pure **Node.js + PostgreSQL** service. Next.js, React, and Firebase have been removed from the dependencies and the entire code tree.
 
-## البنية والتقنيات
+## Architecture and technology
 
-| الطبقة | التقنية |
+| Layer | Technology |
 | --- | --- |
-| الخادم | Node.js 20+ مع Express |
-| قاعدة البيانات | PostgreSQL 14+ |
-| اتصال الـ DB | `pg` (Pool) |
-| المتغيرات | `dotenv` |
-| الأمان | `helmet` + `cors` |
-| التشغيل في التطوير | `node --watch` — مدمج في Node، لا يحتاج أي حزمة إضافية |
-| التشغيل في الإنتاج | `node server.js` |
+| Server | Node.js 20+ with Express |
+| Database | PostgreSQL 14+ |
+| DB connection | `pg` (Pool) |
+| Environment variables | `dotenv` |
+| Security | `helmet` + `cors` |
+| Development runtime | `node --watch` — built into Node; no additional package required |
+| Production runtime | `node server.js` |
 
-## شجرة المشروع
+## Project tree
 
 ```
 server.js               نقطة تشغيل الخادم (Express): الهوية + CSP + المسارات + /status + /api/*
@@ -84,16 +84,16 @@ storage/                ملفات المشروع المرفوعة (الميتا
 backup/                 نسخة مضغوطة من كود الواجهة القديمة (Next.js/React)
 ```
 
-## المتطلبات
+## Requirements
 
-- **Node.js 20 أو أحدث** (المشروع مُختبر على Node 22).
-- **PostgreSQL 14 أو أحدث** — إما مثبّت محلياً، أو عبر Docker، أو قاعدة مستضافة (Neon / Supabase / Railway).
-- إذا كان Node في مسار مخصص على هذا الجهاز، فعّل المسار أولاً:
+- **Node.js 20 or later** (the project is tested on Node 22).
+- **PostgreSQL 14 or later** — installed locally, through Docker, or as a hosted database (Neon / Supabase / Railway).
+- If Node is installed in a custom path on this machine, activate that path first:
   ```bash
   export PATH=/home/obaida/.local/node-v22.23.2-linux-x64/bin:$PATH
   ```
 
-## التشغيل السريع
+## Quick start
 
 ```bash
 # 1) تثبيت الحزم
@@ -111,17 +111,17 @@ npm run db:seed          # اختياري: الباقات الافتراضية
 npm run dev
 ```
 
-الخادم سيعمل على:
+The server will be available at:
 
 - http://localhost:3000
-- فحص الحالة: http://localhost:3000/api/health
+- Health check: http://localhost:3000/api/health
 
-## إعداد PostgreSQL — اختر طريقة واحدة
+## PostgreSQL setup — choose one method
 
-### 1) أمر واحد على Ubuntu / Zorin / Debian (موصى به)
+### 1) One command on Ubuntu / Zorin / Debian (recommended)
 
-سكربت جاهز يثبّت PostgreSQL إن لم يكن مثبّتاً، يشغّل الخدمة ويفعّلها بعد إعادة تشغيل الجهاز،
-ويضبط كلمة مرور المستخدم `postgres` لتطابق `.env`:
+A ready-to-use script installs PostgreSQL if needed, starts the service and enables it after reboot,
+and sets the `postgres` user's password to match `.env`:
 
 ```bash
 npm run db:setup     # يطلب كلمة مرور sudo مرة واحدة
@@ -129,7 +129,7 @@ npm run db:init      # ينشئ قاعدة ai_researcher + الجداول
 npm run db:seed      # الباقات الافتراضية (اختياري)
 ```
 
-وهذا هو المكافئ اليدوي إن أردت تنفيذ الخطوات بنفسك:
+The equivalent manual steps, if you prefer to run them yourself:
 
 ```bash
 sudo apt install postgresql
@@ -138,82 +138,82 @@ sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
 npm run db:init
 ```
 
-> لا حاجة لإنشاء قاعدة `ai_researcher` يدوياً — `db:init` ينشئها تلقائياً عبر الاتصال بقاعدة الصيانة `postgres` (يحتاج صلاحية `CREATEDB` وهي متوفرة للمستخدم `postgres`).
+> There is no need to create the `ai_researcher` database manually — `db:init` creates it automatically by connecting to the `postgres` maintenance database (`CREATEDB` permission is required and is available to the `postgres` user).
 
-### 2) عبر Docker
+### 2) Using Docker
 
-يتطلب تثبيت Docker أولاً (`sudo apt install docker.io docker-compose-v2`)، ثم:
+Docker must first be installed (`sudo apt install docker.io docker-compose-v2`), then:
 
 ```bash
 npm run db:up      # يشغّل خدمة db من docker-compose.yml
 npm run db:down    # لإيقافها
 ```
 
-الإعداد الافتراضي يطابق `.env.example`: المستخدم `postgres`، كلمة المرور `postgres`، القاعدة `ai_researcher`، المنفذ `5432`.
+The default settings match `.env.example`: user `postgres`, password `postgres`, database `ai_researcher`, port `5432`.
 
-### 3) قاعدة بيانات مستضافة
+### 3) Hosted database
 
-أنشئ قاعدة على المزوّد ثم ضع رابط الاتصال في `.env`:
+Create a database with the provider, then put the connection URL in `.env`:
 
 ```env
 DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require
 ```
 
-## أوامر npm
+## npm commands
 
-| الأمر | الوظيفة |
+| Command | Purpose |
 | --- | --- |
-| `npm run dev` | تشغيل الخادم مع `node --watch` (إعادة تشغيل تلقائية عند تعديل الملفات) |
-| `npm run dev:free` | تحرير المنفذ 3000 من أي عملية عالقة (ينفّذها تلقائياً عند EADDRINUSE) |
-| `npm start` | تشغيل الإنتاج |
-| `npm run db:setup` | تثبيت وتشغيل PostgreSQL وضبط كلمة المرور (يحتاج sudo مرة واحدة) |
-| `npm run db:init` | إنشاء قاعدة البيانات (إن لزم) + `users` و`profiles` و`plans` و`usage_logs` |
-| `npm run db:seed` | إدخال الباقات الافتراضية (آمن للتشغيل المتكرر) |
-| `npm run db:reset` | `db:init` ثم `db:seed` |
-| `npm run db:up` / `db:down` | تشغيل/إيقاف PostgreSQL عبر Docker |
-| `npm run smoke:phase1` | اختبار دخان حيّ لمسارات الباحث (مسار البحث · المراجع · المفكرة · الملفات · الشات) — يحتاج الخادم شغّالاً |
-| `npm run storage:clean` | فحص ملفات التخزين غير المرتبطة بقاعدة البيانات (يتيم) — **فحص فقط** |
-| `npm run storage:clean -- --delete` | حذف الملفات اليتيمة فعلياً + المجلدات الفارغة (دورياً) |
-| `npm run doctor` | تشخيص شامل: اتصال قاعدة البيانات + فحص كل مزوّد ذكاء اصطناعي بالاسم وسبب الفشل |
-| `npm run verify:dashboard` | تحقق حيّ من مخططات صفحة الإحصائية (يحتاج الخادم شغّالاً + `.env`) |
-| `npm run set-admin -- someone@example.com` | ترقية باحث إلى مدير المنصة |
-| `npm run fonts:fetch` | إعادة تنزيل خطوط الهوية إلى `public/fonts` |
+| `npm run dev` | Run the server with `node --watch` (automatically restarts when files change) |
+| `npm run dev:free` | Free port 3000 from any stuck process (runs automatically on EADDRINUSE) |
+| `npm start` | Run in production |
+| `npm run db:setup` | Install and start PostgreSQL and set the password (requires sudo once) |
+| `npm run db:init` | Create the database if needed + `users`, `profiles`, `plans`, and `usage_logs` |
+| `npm run db:seed` | Insert default plans (safe to run repeatedly) |
+| `npm run db:reset` | Run `db:init`, then `db:seed` |
+| `npm run db:up` / `db:down` | Start/stop PostgreSQL through Docker |
+| `npm run smoke:phase1` | Live smoke test of researcher routes (research journey · references · notebook · files · chat) — server must be running |
+| `npm run storage:clean` | Check storage files not linked to the database (orphans) — **check only** |
+| `npm run storage:clean -- --delete` | Actually delete orphan files + empty directories (periodically) |
+| `npm run doctor` | Full diagnostics: database connection + each AI provider by name and failure reason |
+| `npm run verify:dashboard` | Live verification of analytics page charts (requires running server + `.env`) |
+| `npm run set-admin -- someone@example.com` | Promote a researcher to platform administrator |
+| `npm run fonts:fetch` | Download the brand fonts again to `public/fonts` |
 
-> ملاحظة: `db:seed` اختياري تماماً. تعريفات مسارات البحث في `src/data/research-paths.js`
-> تعمل مباشرة في صفحة «مسار البحث»، والبذرة فقط تنقلها إلى جداول `research_paths`.
+> Note: `db:seed` is entirely optional. Research-path definitions in `src/data/research-paths.js`
+> work directly on the “Research Journey” page; seeding only copies them into the `research_paths` tables.
 
-## متغيرات البيئة
+## Environment variables
 
-| المتغير | الوصف |
+| Variable | Description |
 | --- | --- |
-| `PORT` | منفذ الخادم (افتراضي 3000) |
-| `NODE_ENV` | `development` أو `production` (يفعّل SSL في الإنتاج) |
-| `JWT_SECRET` | مفتاح توقيع الجلسات (JWT) — غيّره في الإنتاج |
-| `DATABASE_URL` | رابط اتصال PostgreSQL |
-| `ADMIN_EMAILS` | إيميلات المديرين مفصولة بفواصل (تُقرأ على الخادم فقط) |
-| `OPENROUTER_API_KEYS` | مفاتيح OpenRouter مفصولة بفواصل (ويقبل `OPENROUTER_API_KEY` لواحد) |
-| `GROQ_API_KEY` | مفتاح Groq (`gsk_…`) من groq.com — وهو **ليس** Grok من xai.com (`xai-…`) |
-| `ADMIN_TOKEN` | رمز دخول لوحة الإدارة؛ إن ترك فارغاً صارت `/admin` متاحة من localhost فقط |
-| `AI_HEDGE_MS` | بعد كم مللي ثانية يُطلق المزوّد التالي بالتوازي (افتراضي ٣٥٠٠) |
-| `AI_COOLDOWN_MIN` | خروج المزوّد عن الدوران بعد فشل مؤقّت بالدقائق (افتراضي ١٠) |
-| `AI_HARD_COOLDOWN_MIN` | نفسه بعد فشل دائم 402/403/401 (افتراضي ١٠ — ليست للأبد) |
-| `AI_MODEL_*` | قائمة النماذج لكل مزوّد مفصولة بفواصل تُجرَّب بالترتيب |
-| `AI_PRICE_MULTIPLIER` | معامل تسعير الاستهلاك (١ = بدون تعديل) |
-| `ADMIN_TOKEN` | رمز حماية صفحات `/admin`. فارغ = السماح من الجهاز المحلي فقط |
-| `OPENROUTER_API_KEYS` / `GEMINI_API_KEY` / `GEMINI_API_KEY_FALLBACK` / `GROQ_API_KEY` | مفاتيح وكلاء الذكاء الاصطناعي (على الخادم فقط). `GROK_API_KEY` (xAI) **غير مفعّل**: الحساب بلا رصيد/ترخيص ⇒ حُذف. |
-| `SESSION_SECRET` | سر توقيع كوكي الجلسة؛ إن تُرك فارغاً يُستخدم `JWT_SECRET` — **مطلوب في الإنتاج** (يرفض الخادم الإقلاع بدونه) |
-| `TRUST_PROXY` | عدد الوكلاء العكسيين أمام التطبيق (غالباً `1` عند النشر خلف Nginx/Caddy). لا يُقبل `true`. فارغ = لا نثق بأي ترويسة وكيل |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | دخول جوجل OAuth 2.0 (من Google Cloud Console) — بدونهما تظهر صفحة الدخول بلا زر جوجل |
-| `APP_BASE_URL` | الرابط العام للموقع لبناء عنوان عودة OAuth — فارغ = يُشتق من الطلب |
-| `FIREBASE_API_KEY` … `FIREBASE_APP_ID` (7 مفاتيح) | إعدادات Firebase الويب العامة للإشعارات (تُرسل للمتصفح عبر `/api/firebase-config`) |
-| `FCM_PROJECT_ID` / `FCM_CLIENT_EMAIL` / `FCM_PRIVATE_KEY` | حساب خدمة FCM للإرسال من الخادم (سرّية ولا تخرج للمتصفح) |
-| `AI_MAX_TOKENS` / `AI_TIMEOUT_MS` | سقف طول الردّ (افتراضي 4000) ومهلة الطلب بالمللي ثانية (افتراضي 60000) |
-| `MAX_UPLOAD_MB` / `MAX_STORAGE_MB` | حدّ الملف الواحد + **الحصة العامة (fallback)** — الحصة الحقيقية لكل باقة في `plans.storage_mb` وتُعدَّل من `/admin/plans` |
-| `SUPERVISOR_STRIKE_TTL_HOURS` | بعد كم ساعة هدوء يُصفَّر عدّاد تنبيهات الاستهتار (افتراضي 24) |
-| `UNPAYWALL_EMAIL` | بريد التواصل الذي تطلبه خدمة Unpaywall للعثور على النسخة المفتوحة من أي DOI (ويوسّع حدود Crossref). falls إلى `SUPPORT_EMAIL` |
-| `SEMANTIC_SCHOLAR_API_KEY` | اختياري: مفتاح Semantic Scholar — بلا مفتاح البحث يعمل لكن الحدود صارمة وتتوقف أحياناً بـ 429 |
+| `PORT` | Server port (default 3000) |
+| `NODE_ENV` | `development` or `production` (enables SSL in production) |
+| `JWT_SECRET` | Session-signing key (JWT) — change it in production |
+| `DATABASE_URL` | PostgreSQL connection URL |
+| `ADMIN_EMAILS` | Comma-separated administrator emails (read on the server only) |
+| `OPENROUTER_API_KEYS` | Comma-separated OpenRouter keys (or use `OPENROUTER_API_KEY` for one key) |
+| `GROQ_API_KEY` | Groq key (`gsk_…`) from groq.com — **not** Grok from xai.com (`xai-…`) |
+| `ADMIN_TOKEN` | Admin dashboard access token; if empty, `/admin` is available only from localhost |
+| `AI_HEDGE_MS` | Delay in milliseconds before launching the next provider in parallel (default 3500) |
+| `AI_COOLDOWN_MIN` | Minutes a provider is removed from rotation after a temporary failure (default 10) |
+| `AI_HARD_COOLDOWN_MIN` | Same after a permanent 402/403/401 failure (default 10 — not forever) |
+| `AI_MODEL_*` | Comma-separated model list per provider, tried in order |
+| `AI_PRICE_MULTIPLIER` | Usage-pricing multiplier (1 = no adjustment) |
+| `ADMIN_TOKEN` | Protects `/admin` pages. Empty = allow access from the local machine only |
+| `OPENROUTER_API_KEYS` / `GEMINI_API_KEY` / `GEMINI_API_KEY_FALLBACK` / `GROQ_API_KEY` | AI provider keys (server-side only). `GROK_API_KEY` (xAI) is **disabled**: the account had no balance/license, so it was removed. |
+| `SESSION_SECRET` | Session-cookie signing secret; if empty, `JWT_SECRET` is used — **required in production** (the server refuses to start without it) |
+| `TRUST_PROXY` | Number of reverse proxies in front of the app (usually `1` behind Nginx/Caddy). `true` is not accepted. Empty = trust no proxy headers |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth 2.0 sign-in (from Google Cloud Console) — without them, the login page has no Google button |
+| `APP_BASE_URL` | Public site URL used to build the OAuth callback — empty = derived from the request |
+| `FIREBASE_API_KEY` … `FIREBASE_APP_ID` (7 keys) | Public Firebase web notification settings (sent to the browser through `/api/firebase-config`) |
+| `FCM_PROJECT_ID` / `FCM_CLIENT_EMAIL` / `FCM_PRIVATE_KEY` | FCM service account for server-side delivery (secret and never exposed to the browser) |
+| `AI_MAX_TOKENS` / `AI_TIMEOUT_MS` | Response-length limit (default 4000) and request timeout in milliseconds (default 60000) |
+| `MAX_UPLOAD_MB` / `MAX_STORAGE_MB` | Per-file limit + **global quota (fallback)** — the actual per-plan quota is in `plans.storage_mb` and is managed through `/admin/plans` |
+| `SUPERVISOR_STRIKE_TTL_HOURS` | Idle hours before the carelessness-warning counter resets (default 24) |
+| `UNPAYWALL_EMAIL` | Contact email required by Unpaywall to find an open version of a DOI (also increases Crossref limits). Falls back to `SUPPORT_EMAIL` |
+| `SEMANTIC_SCHOLAR_API_KEY` | Optional Semantic Scholar key — search works without one, but limits are strict and may return 429 |
 
-## مخطط قاعدة البيانات
+## Database schema
 
 ```sql
 users (
@@ -274,369 +274,368 @@ payment_requests (     -- طلبات الاشتراك: باقة + طريقة + �
 settings.site_currency -- عملة الموقع: LYD أو USD (تظهر في كل الأسعار)
 ```
 
-## SEO و PWA
+## SEO and PWA
 
-| الملف | السلوك |
+| File | Behavior |
 | --- | --- |
-| `GET /manifest.webmanifest` | تطبيق ويب قابل للتثبيت: `display: standalone` · `dir: rtl` · أيقونات 192/512 + maskable · اختصارات (المشرف الذكي · مراجعي · مسار البحث) |
-| `GET /robots.txt` | يفتح العامة، ويغلق `/admin` وكل صفحات الجلسة (`/dashboard` `/chat` `/journey` `/defense` `/references` `/notes` `/files` `/payments` `/api/`)، ويشير إلى الخريطة |
-| `GET /sitemap.xml` | الصفحات العامة فقط (`/` و`/login`) بروابط **مطلقة** — تستعمل `SITE_URL` وإلا مضيف الطلب |
-| `og:` + `twitter:` | في `<head>` لكل صفحة: `og:title/description/image/url` · `twitter:card=summary_large_image` · `link rel=canonical` |
-| `apple-touch-icon.png` | أيقونة لمس **PNG 180×180** مولّدة محلياً (المتصفحات لا تقبل webp للأيقونات) |
+| `GET /manifest.webmanifest` | Installable web app: `display: standalone` · `dir: rtl` · 192/512 + maskable icons · shortcuts (AI Supervisor · My References · Research Journey) |
+| `GET /robots.txt` | Allows public pages, blocks `/admin` and all session pages (`/dashboard` `/chat` `/journey` `/defense` `/references` `/notes` `/files` `/payments` `/api/`), and points to the sitemap |
+| `GET /sitemap.xml` | Public pages only (`/` and `/login`) with **absolute** URLs — uses `SITE_URL` or else the request host |
+| `og:` + `twitter:` | In each page's `<head>`: `og:title/description/image/url` · `twitter:card=summary_large_image` · `link rel=canonical` |
+| `apple-touch-icon.png` | Locally generated **180×180 PNG** touch icon (browsers do not accept WebP for icons) |
 
-> **مهم**: ضع `SITE_URL=https://your-domain.com` في ملف البيئة وإلا صارت وسوم المشاركة **نسبية**
-> (تعمل، لكن مشاركة واتساب/فيسبوك لن تُظهر الصورة الكاملة). serp/OG يحتاج رابطاً مطلقاً.
+> **Important**: Set `SITE_URL=https://your-domain.com` in the environment file; otherwise, sharing tags will be **relative**
+> (they work, but WhatsApp/Facebook shares will not show the full image). SERP/OG requires an absolute URL.
 
-## زر واتساب للدعم الفني
+## WhatsApp support button
 
-زر عائم أسفل الشاشة في **كل صفحة الزائر والباحث** (وليس في لوحة الإدارة — الفريق لا يحتاجه).
+Floating button at the bottom of **every visitor and researcher page** (not in the admin dashboard — the team does not need it).
 
-| التفصيل | القرار |
+| Detail | Decision |
 | --- | --- |
-| **الرقم** | يُعدّله المدير من **الإعدادات ← الدعم الفني (واتساب)** ⇒ يُحفظ في `settings` ويسري فوراً بلا إعادة تشغيل (البيئة `SUPPORT_WHATSAPP` كسقوط) |
-| **الرابط** | `whatsappLink()` يحوّل الرقم: يحذف الرموز، ويضيف رمز الدولة `218` إن بدأ بـ `0`، ثم يبني `wa.me/<رقم>` |
-| **الرسالة** | عربية جاهزة: «مرحباً، لدي مشكلة في المنصة وأحتاج مساعدة.» — فلا يكتب الباحث من الصفر |
-| **بلا رقم** | حقل فارغ ⇒ **لا يظهر الزر إطلاقاً** (لا رابط مكسور يُرسل المستخدم لرقم وهمي) |
-| **التحقّق** | أرقام فقط 8–15 (يقبل `+218 99 88 77 66` ويتنظّفها) وردّ عربي واضح على الرفض + رابط «معاينة» قبل الحفظ |
-| **الشكل** | مثبّت أسفل يسار الشاشة (RTL)، بنصّ «مشكلة؟ راسلنا» يختفي تحت 560px لتبقى دائرة فقط |
+| **Number** | Administrator edits it in **Settings ← Support (WhatsApp)** ⇒ saved in `settings` and applied immediately without a restart (`SUPPORT_WHATSAPP` environment variable is the fallback) |
+| **Link** | `whatsappLink()` normalizes the number: removes symbols, adds country code `218` if it starts with `0`, then builds `wa.me/<number>` |
+| **Message** | Prewritten in Arabic: “Hello, I have a problem with the platform and need help.” — so researchers do not have to write one from scratch |
+| **No number** | Empty field ⇒ **button does not appear at all** (no broken link sending users to a fake number) |
+| **Validation** | Digits only, 8–15 (accepts and normalizes `+218 99 88 77 66`); clear Arabic rejection message + “Preview” link before saving |
+| **Appearance** | Fixed at the bottom left of the screen (RTL), with the text “Problem? Contact us” hidden below 560px, leaving only the circle |
 
-والرقم نفسه في تذييل الموقع صار **رابطاً قابلاً للضغط**، وكذلك في قسم الباقات بالصفحة العامة.
+The same number in the site footer is now a **clickable link**, as it is in the plans section of the public page.
 
-## إشعارات الهاتف (Firebase Cloud Messaging)
+## Phone notifications (Firebase Cloud Messaging)
 
-البنية كانت جاهزة (مسارات + service worker + جدول `device_tokens`) لكن الربط كان ناقصاً. صار الآن كاملاً:
+The infrastructure was ready (routes + service worker + `device_tokens` table), but the integration was incomplete. It is now complete:
 
-| القطعة | التفاصيل |
+| Component | Details |
 | --- | --- |
-| **مفتاح الإرسال (سرّي)** | يُقرأ من ملف حساب خدمة خارج المشروع عبر `FIREBASE_SERVICE_ACCOUNT_FILE` (مثال: `~/.config/zena/…`) — وخط نجاة: البحث في الجذر بتحذير صريح. **لا يُنسخ إلى `.env`** ولا يُرفع إلى Git |
-| **مفاتيح الواجهة (عامة)** | في ملف البيئة `FIREBASE_*` مع بقية الإعدادات — تعديلها يكون في `.env` |
-| **مسار التفعيل** | **محذوف من الواجهة** بقرار المنصة — أُزيل زر «تفعيل إشعارات الهاتف» من قائمة الجرس. `public/js/push-notifications.js` لم يُحذف من القرص (يرجع فوراً بلا الزر). وهذا **لا يُلغي** ما هو مفعّل سلفاً (انظر الملاحظة) |
-| **المسارات** | `GET /api/firebase-config` · `POST /api/notifications/register` · `/unregister` |
+| **Sending key (secret)** | Read from an out-of-project service-account file through `FIREBASE_SERVICE_ACCOUNT_FILE` (e.g. `~/.config/zena/…`) — fallback: search the project root with an explicit warning. **Do not copy it to `.env`** or commit it to Git |
+| **Frontend keys (public)** | `FIREBASE_*` values in the environment file with the other settings — edit them in `.env` |
+| **Activation flow** | **Removed from the interface** by product decision — the “Enable phone notifications” button was removed from the bell menu. `public/js/push-notifications.js` was not deleted from disk (it returns immediately without the button). This **does not disable** notifications already enabled (see note) |
+| **Routes** | `GET /api/firebase-config` · `POST /api/notifications/register` · `/unregister` |
 
-مسار التنبيه: `notifyUser()` ← حفظ في `notifications` ← `sendPushToUser()` ← FCM → التوكنات الميتة تُحذف تلقائياً.
+Notification flow: `notifyUser()` ← saved in `notifications` ← `sendPushToUser()` ← FCM → dead tokens are automatically deleted.
 
-> **واجهة التهيئة (firebase-admin v14):** `initializeApp` + `cert` من جذر الحزمة و`getMessaging`
-> من `firebase-admin/messaging`. النمط القديم (`admin.apps` / `admin.credential` / `admin.messaging`)
-> أُزيل في v14 وكان يفشل بصمتاً عند الإرسال — أُصلح ومغطى باختبار حارس في `scripts/unit-tests.mjs`
-> (والتحقق الحيّ: `sendPushToTokens` بتوكن وهمي يعيد `failed:1` بلا `skipped`).
+> **Initialization API (firebase-admin v14):** `initializeApp` + `cert` from the package root and `getMessaging`
+> from `firebase-admin/messaging`. The old pattern (`admin.apps` / `admin.credential` / `admin.messaging`)
+> was removed in v14 and silently failed during sending — fixed and covered by a guard test in `scripts/unit-tests.mjs`
+> (live verification: `sendPushToTokens` with a fake token returns `failed:1` without `skipped`).
 
-> **الأجهزة المسجّلة سلفاً ما زالت تستقبل الإشعارات**: الـ Service Worker
-> (`public/firebase-messaging-sw.js`) والتوكنات في `device_tokens` والإرسال من الخادم
-> كلها باقية كما هي. ما زال الحذف مؤثّراً على **الجديد فقط**: لا توجد واجهة لتسجيل
-> جهاز جديد من داخل الموقع. لإرجاع زر التفعيل: أعد عنصر `#bell-push` في
-> `renderBellMenu()` (`src/views/layout.js`) وأعِد `/js/push-notifications.js` إلى
-> `extraScripts` في نفس الملف.
+> **Previously registered devices still receive notifications**: the Service Worker
+> (`public/firebase-messaging-sw.js`), tokens in `device_tokens`, and server-side sending
+> all remain unchanged. The removal affects **new registrations only**: there is no interface for registering
+> a new device on the site. To restore the activation button, add `#bell-push` back to
+> `renderBellMenu()` (`src/views/layout.js`) and add `/js/push-notifications.js` back to
+> `extraScripts` in the same file.
 
-> **كل جهاز يفعّل بنفسه**: التفعيل يتم في **متصفح ذلك الجهاز** (.permission + Service Worker + توكن
-> خاص به). فتح المنصة على الحاسوب وتفعيل الزر ⇒ يصل الإشعار للحاسوب، لا للهاتف.
-> للتحقق من الاشتراك: استعلام واحد —
-> `SELECT count(*) FROM device_tokens WHERE enabled = true;` (أو جرّب الإرسال وشاهد نتيجة `push.sent`).
+> **Each device registers itself**: activation happens in **that device's browser** (.permission + Service Worker + its own token).
+> Opening the site on a computer and activating the button means notifications go to the computer, not the phone.
+> To check subscriptions, run one query —
+> `SELECT count(*) FROM device_tokens WHERE enabled = true;` (or try sending and check the `push.sent` result).
 
-**ما ينقص يدوياً** (لا يُستنتج من ملف حساب الخدمة): `apiKey` و`appId` و`messagingSenderId` من
-Firebase Console ‹ Project settings ‹ Your apps ‹ Web app، و`vapidKey` من Cloud Messaging ‹ Web Push certificates.
+**Values that must be supplied manually** (they cannot be inferred from the service-account file): `apiKey`, `appId`, and `messagingSenderId` from
+Firebase Console ‹ Project settings ‹ Your apps ‹ Web app, and `vapidKey` from Cloud Messaging ‹ Web Push certificates.
 
-## أداة المراجع العلمية (KI Researcher)
+## Scholarly reference tool (KI Researcher)
 
-المشكلة التي يحلّها: الباحث لا يعرف أين يجد مرجعاً، ولا رابطه، ولا مؤلفه ولا سنته.
-لذلك المنصة تبحث **أنت** في قواعد بيانات علمية حقيقية وتمنح الذكاء الاصطناعي **بيانات موثّقة** بدل أن يخترع من ذاكرته.
+Problem addressed: researchers may not know where to find a reference, its link, author, or year.
+The platform therefore searches real scholarly databases **for you** and provides AI with **verified data** instead of letting it invent details from memory.
 
-### المصادر (كلها مجانية وبلا مفاتيح إلزامية)
+### Sources (all free and require no keys)
 
-| المصدر | ماذا يقدّم | ملاحظة |
+| Source | What it provides | Note |
 | --- | --- | --- |
-| **Crossref** | بيانات الاستشهاد الرسمية: المجلة · الناشر · المجلد · العدد · الصفحات · DOI | طلب بريد (polite pool) + إعادة محاولة عند 429 + ترتيب بالدرجة |
-| **OpenAlex** | فهرس مفتوح يغطي IEEE وACM وSpringer وElsevier + **رابط PDF مفتوح** | يفضّل النتائج المفتوحة أولاً |
-| **IEEE Xplore** | أوراق IEEE الرسمية (بادئة DOI `10.1109`) + رابط `ieeexplore.ieee.org` | بحث Crossref بالبادئة — بلا API key |
-| **ACM Digital Library** | أوراق ACM الرسمية (بادئة DOI `10.1145`) + رابط `dl.acm.org` | نفس الطريقة |
-| **Semantic Scholar** | بحث دلالي + ملخصات + عدد الاستشهادات + DOI/arXiv | اختياري: `SEMANTIC_SCHOLAR_API_KEY` يرفع الحدود |
-| **arXiv** | مسودات preprint برابط PDF مباشر | علوم حاسوب · ذكاء اصطناعي · فيزياء |
-| **Europe PMC** | طب وعلوم حيوية + نص كامل مفتوح | PubMed Central |
-| **DOAJ** · **Zenodo** · **Open Library** | مجلات مفتوحة · منشورات CERN · كتب | كانت موجودة من قبل |
-| **Unpaywall** | يحوّل أي DOI إلى **رابط نسخة مفتوحة قانونية** | يحتاج `UNPAYWALL_EMAIL` فقط |
+| **Crossref** | Official citation metadata: journal · publisher · volume · issue · pages · DOI | Email request (polite pool) + retry on 429 + relevance ranking |
+| **OpenAlex** | Open index covering IEEE, ACM, Springer, Elsevier + **open PDF link** | Prefers open results first |
+| **IEEE Xplore** | Official IEEE papers (DOI prefix `10.1109`) + `ieeexplore.ieee.org` link | Crossref search by prefix — no API key |
+| **ACM Digital Library** | Official ACM papers (DOI prefix `10.1145`) + `dl.acm.org` link | Same approach |
+| **Semantic Scholar** | Semantic search + abstracts + citation count + DOI/arXiv | Optional: `SEMANTIC_SCHOLAR_API_KEY` increases limits |
+| **arXiv** | Preprints with direct PDF links | Computer science · AI · physics |
+| **Europe PMC** | Medicine and life sciences + open full text | PubMed Central |
+| **DOAJ** · **Zenodo** · **Open Library** | Open-access journals · CERN publications · books | Already available |
+| **Unpaywall** | Converts any DOI to a **legal open-access version link** | Requires only `UNPAYWALL_EMAIL` |
 
-> **عن Google Scholar:** لا توجد واجهة برمجية رسمية، و«الزحف» على صفحاته يخالف شروطه ويحجب الخادم.
-> لذلك نختار له ما يفعله: نفتح لك **رابط بحث Scholar جاهزاً بضغطة**، والمراجع نفسها تأتي من Crossref وOpenAlex
-> (وهما ما يفهرسه Scholar فعلياً).
+> **About Google Scholar:** it has no official API, and crawling its pages violates its terms and gets the server blocked.
+> Instead, we provide what it does: a **ready-to-use Scholar search link with one click**. The references themselves come from Crossref and OpenAlex
+> (the sources Scholar actually indexes).
 
-### كيف تعمل
+### How it works
 
-1. **`/references`** — لوحة «ابحث في قواعد البيانات العلمية»: بحث بالكلمات في كل المصادر (أو مصدر واحد محدّد)،
-   ونموذج ثانٍ «لديّ DOI أو رابط» يستخرج البيانات الكاملة مباشرة. كل نتيجة: العنوان · المؤلفون · المجلة/المؤتمر ·
-   السنة · DOI · رابط المصدر · رابط PDF مفتوح، وزر **«أضف إلى مراجعي»** يحمل البيانات جاهزة.
-   **وكتب المنصة نفسها قابلة للقراءة والتحميل**: زرّا `معاينة` + `تحميل` لكل كتاب في نتائج المكتبة
-   (ومن جدول «مراجعي» مباشرة) عبر `/library/:id/file`.
-2. **شات المشرف الذكي** — يكتب الباحث «ابحث لي عن مراجع …» فتُحقن النتائج في رسالة المشرف
-   (`services/literature.js`)، فيذكرها بعنوانها ومؤلفها وسنتها ومجلتها ورابطها، ويحفظها في
-   `conversations.references_found` فتظهر تحت الرد كقائمة روابط قابلة للفتح.
-3. **لوحة الإدارة `/admin/library`** — نفس المصادر للجلب والاستيراد مع ملف العمل تلقائياً
-   (أو النسخة المفتوحة عبر Unpaywall) وتخزينها لمشتركي المنصة.
+1. **`/references`** — “Search scholarly databases” panel: keyword search across all sources (or one selected source),
+   plus a second “I have a DOI or link” form that extracts complete metadata directly. Each result includes title · authors · journal/conference ·
+   year · DOI · source link · open PDF link, and an **“Add to my references”** button that carries over the metadata.
+   **The platform's own books can also be read and downloaded**: `معاينة` + `تحميل` buttons for each book in library results
+   (and directly from the “My References” table) through `/library/:id/file`.
+2. **AI supervisor chat** — the researcher writes “Find references for me …” and the results are injected into the supervisor's message
+   (`services/literature.js`). It cites each reference's title, author, year, journal, and link, and saves it in
+   `conversations.references_found`, where it appears below the response as a list of clickable links.
+3. **Admin dashboard `/admin/library`** — the same sources can be searched and imported with the full text automatically
+   (or an open version through Unpaywall) and stored for platform subscribers.
 
-### هل الجدول (قواعد البيانات) يرشّح؟ نعم
+### Does the database table rank results? Yes
 
-المشرف يبحث في **مكانين معاً** في كل سؤال مراجع:
-1. **مكتبة المنصة أولاً** (`searchPlatformLibrary`): ما رفعه المدير، ويظهر له في الرد بعلامة
-   «متاح للقراءة والتحميل داخل المنصة» + زر «اقرأ الكتاب / تحميل» في قائمة المراجع أسفل الرد.
-2. **قواعد البيانات الخارجية** (Crossref · OpenAlex · IEEE · ACM · arXiv …) بالروابط الحقيقية.
+The supervisor searches **two places at once** for every reference request:
+1. **Platform library first** (`searchPlatformLibrary`): administrator-uploaded content appears in the response with a
+   “Available to read and download on the platform” label + a “Read book / Download” button in the reference list below the response.
+2. **External databases** (Crossref · OpenAlex · IEEE · ACM · arXiv …) with real links.
 
- البحث في المكتبة يتم بسؤال الباحث ثم بتخصّصه، والعناصر ذات الملف تُقدَّم أولاً.
+The library search uses the researcher's query and then their field; items with files are ranked first.
 
-#### الروابط التي في صفحة المراجع تُقرأ فعلاً (لا تُعرض فقط)
+#### Links on the references page are actually read (not merely displayed)
 
-كل عنصر في المكتبة يحمل `external_url` (رابط المجلة/الناشر/المستودع). عند البحث نقرأ هذا الرابط
-نفسه ونستخرج منه **بيانات المرجع كاملة** من وسوم `citation_*` القياسية (نفس معيار Highwire/Scholar):
+Each library item has an `external_url` (journal/publisher/repository link). During search, the link itself is read
+and **complete reference metadata** is extracted from standard `citation_*` tags (the same Highwire/Scholar standard):
 `citation_title` · `citation_author` · `citation_journal_title` · `citation_publication_date` ·
-`citation_volume` · `citation_issue` · `citation_firstpage` · `citation_doi` · `citation_pdf_url`
-مع احتياط `og:*` و`dc:*`.
+`citation_volume` · `citation_issue` · `citation_firstpage` · `citation_doi` · `citation_pdf_url`,
+with `og:*` and `dc:*` as fallbacks.
 
-| المرحلة | التفصيل |
+| Stage | Details |
 | --- | --- |
-| **من أين يُبحث** | `searchLibraryItems` يبحث في العنوان والمؤلفين والمصدر والملخّص والوسوم والتخصص **ورابط المصدر** |
-| **كيف يُطابق** | كلمات مفاتيح **AND** أولاً، ثم المصطلحات الإنجليزية، ثم **OR** تساهلياً — فلا يضيع عنصر بسبب اختلاف ترتيب الكلمات |
-| **تسامح الإملاء العربي** | عمود `library_items.search_text` مطبَّع (بلا همزات ولا تاء مربوطة ولا تشكيل) ⇒ «اداره التغير» تجد «إدارة التغيير» |
-| **ماذا يُقرأ من الرابط** | العنوان المسجَّل يبقى مرجع المطابقة، والرابط **يملأ الناقص فقط**: المجلة · السنة · DOI · رابط PDF · الملخّص |
-| **ماذا يظهر للباحث** | «بيانات المجلة مقروءة من رابط المصدر» + زر **المصدر ↗** (ويبقى متاحاً حتى مع وجود ملف) |
+| **Search fields** | `searchLibraryItems` searches title, authors, source, abstract, tags, field, **and source URL** |
+| **Matching** | **AND** keyword matching first, then English terms, then permissive **OR** matching — items are not missed because of word order |
+| **Arabic spelling tolerance** | `library_items.search_text` is normalized (removing hamzas, taa marbuta, and diacritics) ⇒ `اداره التغير` matches `إدارة التغيير` |
+| **What the link provides** | The stored title remains the matching reference; the link **fills missing fields only**: journal · year · DOI · PDF link · abstract |
+| **What researchers see** | “Journal data read from the source link” + **Source ↗** button (remains available even when a file exists) |
 
-> الجلب آمن ومحصور: تحقق `assertPublicUrl` (عامة فقط)، مهلة 12 ثانية، حد 3 ميجابايت، ولا يُعطِّل البحث أبداً.
+> Fetching is safe and constrained: `assertPublicUrl` validation (public URLs only), 12-second timeout, 3 MB limit, and it never blocks search.
 
-### تنظيف النص العربي قبل البحث (سبب النتائج العشوائية سابقاً)
+### Arabic text cleanup before search (previous cause of random results)
 
-كان استخراج الموضوع يقطع الكلمات لأن قوائم الإيقاف تحذف مقاطع قصيرة كنصّ:
-«التعليم» ⇒ «التع م» (حذف «لي») و«معالجة» ⇒ «الجه» (حذف «مع»).
+Topic extraction used to split words because stop-word lists removed short substrings:
+`التعليم` ⇒ `التع م` (removing `لي`) and `معالجة` ⇒ `الجه` (removing `مع`).
 
-الحل المعتمد الآن:
-- `REQUEST_PHRASES`: عبارات الطلب الطويلة فقط (مراجع · أوراق · ابحث …).
-- `SHORT_STOPWORDS`: كلمات قصيرة **ككلمات مستقلة فقط** بحدود `\p{L}` — فلا تقطع «لي» من «التعليم».
-- `normalizeArabic` موحّد (همزات · تاء مربوطة · تشكيل) في الخدمات وفي `library_items.search_text`.
-- الترجمة الإنجليزية بمطابقة العبارة بحدود صحيحة ⇒ «التعلم العميق» ⇐ `deep learning`،
-  «تقنية المعلومات» ⇐ `information technology`، بينما «الطبيعيه» **لا** تُطابق `الطب` ⇐ `medicine`.
+The adopted solution:
+- `REQUEST_PHRASES`: long request phrases only (references · papers · search …).
+- `SHORT_STOPWORDS`: short words **only as standalone words**, bounded by `\p{L}` — so `لي` is not removed from `التعليم`.
+- A unified `normalizeArabic` (hamzas · taa marbuta · diacritics) in services and `library_items.search_text`.
+- English translation uses proper phrase-boundary matching: `التعلم العميق` ⇐ `deep learning`,
+  `تقنية المعلومات` ⇐ `information technology`, while `الطبيعيه` does **not** match `الطب` ⇐ `medicine`.
 
-### لا تُرسل مراجع بلا تخصّص — تسأل الباحث بدلها
+### Do not send references without a field — ask the researcher instead
 
-المنطق الجديد في `resolveTopic()` (services/literature.js) — بالترتيب:
+New logic in `resolveTopic()` (`services/literature.js`), in order:
 
-| الأولوية | المصدر | مثال |
+| Priority | Source | Example |
 | --- | --- | --- |
-| 1 | **موضوع في السؤال** | «مراجع عن التعلم العميق» |
-| 2 | **ملف الباحث** (العنوان + التخصص) | «اديني مراجع» + تخصصه محفوظ |
-| 3 | **سياق المحادثات** (المهمة المتفق عليها + ملخّص الذاكرة + آخر سؤالين) | باحث ملفه ناقص لكنه يتكلم عن تخصصه |
-| 4 | **لا شيء** ⇒ `needsTopic` | **لا تُرسل مراجع إطلاقاً**، والمشرف يسأل سؤالاً واحداً ويقترح صياغة كلمات مفتاحية |
+| 1 | **Topic in the request** | “References on deep learning” |
+| 2 | **Researcher profile** (title + field) | “Give me references” + saved field |
+| 3 | **Conversation context** (agreed task + memory summary + last two questions) | Researcher's profile is incomplete, but they have mentioned their field |
+| 4 | **Nothing available** ⇒ `needsTopic` | **Send no references**; the supervisor asks one question and suggests keyword phrasing |
 
-- «غير محدد» و`-` و`؟` تُعتبر قيماً فارغة ولا تصلح موضوعاً (كانت تُعامل كمبحث!).
-- عند البناء من الملف أو السياق، يذكر المشرف للباحث أنه اعتمد عليه ويطلب التأكيد حتى يصحّح إن أخطأنا.
+- “Unspecified,” `-`, and `؟` are treated as empty values and are not valid topics (they were previously treated as research fields).
+- When using the profile or context, the supervisor tells the researcher and asks for confirmation so they can correct any mistake.
 
-**تنسيق المراجع في الشات**: لوحة `<details>` **مطويّة افتراضياً** فوق صندوق الكتابة، بارتفاع أقصى 34vh وتمرير داخلي —
-فلا تغطي الحوار ولا تمنع التمرير، وتفتح بضغطة واحدة. وفتحها يمرّرها هي فقط دون تحريك صندوق المحادثة.
+**Reference display in chat**: a `<details>` panel is **collapsed by default** above the input, with a maximum height of 34vh and internal scrolling —
+so it does not cover the conversation or block scrolling, and opens with one click. Opening it scrolls only the panel, not the conversation.
 
-### متى تُقترح المراجع؟ (بلا بوابة مرحلة)
+### When are references suggested? (no stage gate)
 
-| طلب الباحث | ما يحدث |
+| Researcher's request | Behavior |
 | --- | --- |
-| «اقترحلي مراجع» (بلا عنوان) | **0 مراجع** + سؤال واحد: «في أي عنوان بالتحديد تريد المراجع؟» مع ذكر تخصّصه |
-| «ضمن تخصصي» / «في مجالي» (إجابة عن سؤالنا) | **بحث فوري في نطاق بحثه المسجَّل** (لا سؤال ثانٍ ⇒ لا حلقة) |
-| «مراجع عن تبنّي ERP في الجامعات» | بحث فوري، ويبدأ الرد بـ: «العنوان الذي بحثتُ فيه هو: …» |
-| «انا محتاج اسماء مراجع» بعد سؤالنا | لا يُعاد السؤال: يُبحث في نطاق ملفه (عنوان بحثه + تخصصه) |
-| «مراجع عن كذا» بلا نتائج مطابقة | **0 مراجع** + طلب كلمات أدق (لا مراجع عامة) |
+| “Suggest references” (no title) | **0 references** + one question: “Which specific title do you need references for?” and mention of the researcher's field |
+| “Within my specialization” / “In my field” (answer to our question) | **Immediate search within the registered research scope** (no second question ⇒ no loop) |
+| “References on ERP adoption in universities” | Immediate search; response begins: “The title I searched for is: …” |
+| “I need reference names” after our question | Do not repeat the question: search within the profile (research title + field) |
+| “References on [topic]” with no matching results | **0 references** + request for more precise keywords (no generic references) |
 
-- **بوابة topic واحدة**: المراجع متاحة في أي مرحلة من خطته عدا «تحديد المشكلة» — فيها لا مراجع ولا روابط قبل اكتمال تعريف المشكلة وحدودها (وتسجيل موضوع عام وحده لا يكفي).
-- **نطاق البحث**: تخصّصه وعنوان بحثه من ملفه يُضافان للاستعلام ويُستخدمان في الترشيح، وإن خرج العنوان عن تخصّصه نبّهه المشرف قبل الترشيح.
-- شرط القبول الوحيد: **عنوان محدّد من كلام الباحث** ⇒ لا ترشيح عام من ذاكرة النموذج أبداً.
+- **Single `topic` gate**: references are available at any plan stage except “Problem definition” — no references or links are provided there until the problem and its scope are defined (registering a general topic alone is not enough).
+- **Search scope**: the researcher's field and title from their profile are added to the query and used for ranking; if the title falls outside their field, the supervisor flags this before ranking.
+- The only acceptance condition: **a specific title stated by the researcher** ⇒ never provide generic recommendations from model memory.
 
-### قراءة الملفات المرفقة (PDF · Word · Excel · نصّ)
+### Reading attached files (PDF · Word · Excel · text)
 
-خدمة `src/services/documents.js` — **بلا مكتبات ثقيلة**:
+Service `src/services/documents.js` — **without heavy libraries**:
 
-| الصيغة | كيف تُقرأ | حدود |
+| Format | How it is read | Limits |
 | --- | --- | --- |
-| **docx** | JSZip ⇒ `word/document.xml` ⇒ فقرات وجداول كنصّ | دقيق |
-| **pdf** | **محرك pdf.js (Mozilla)** للمحرك الأساسي: جداول مراجع مضغوطة، تدفّقات كائنات (ObjStm)، خطوط CID مع **ToUnicode**، خطوط قياسية. محرّك خفيف (zlib + مشغّلات `Tj/TJ`) احتياط | PDF **الممسوح ضوئياً** (صورة) لا يُنتج نصاً أبداً؛ حتى ٤٠ صفحة كحدّ أقصى |
+| **docx** | JSZip ⇒ `word/document.xml` ⇒ paragraphs and tables as text | Accurate |
+| **pdf** | **pdf.js (Mozilla) primary engine**: compact reference tables, object streams (ObjStm), CID fonts with **ToUnicode**, standard fonts. Lightweight fallback engine (zlib + `Tj/TJ` operators) | **Scanned PDFs** (images) never produce text; maximum 40 pages |
 | xlsx / xls | ExcelJS | — |
 | txt / md / csv | UTF-8 | — |
-| png / jpg / zip / doc القديم | — | تُابلَّغ للباحث صراحةً («PDF بلا نصّ… اطلب نسخة Word») بدل تمرير حروف عشوائية |
+| png / jpg / zip / old doc | — | Researcher is explicitly told (“PDF has no text… request a Word copy”) instead of receiving garbled characters |
 
-- حدود الأمان: ٢٠MB لكل ملف · ١٢٠ ألف حرف لكل ملف · ٣ ملفات لكل رسالة.
-- كان `buildFilesBlock` يقرأ txt/csv/xlsx فقط ⇒ **PDF و Word كانا يُرفضان** والشرف لا يرى شيئاً.
-- اعتمادات جديدة: `pdfjs-dist` (قراءة PDF) و `jszip` (قراءة Word) — مذكورتان في `package.json`.
+- Safety limits: 20 MB per file · 120,000 characters per file · 3 files per message.
+- `buildFilesBlock` previously read only txt/csv/xlsx ⇒ **PDF and Word were rejected**, so the supervisor could not see their contents.
+- New dependencies: `pdfjs-dist` (PDF reading) and `jszip` (Word reading) — listed in `package.json`.
 
-### حدود مقصودة
+### Intentional limits
 
-- كل بحث مقيَّد بمهلة (12 ثانية لكل مصدر · 15 ثانية للمجموع) فلا يتعلّق الرد على مصدر بطيء.
-- الأداة **لا تخترع بيانات**: النتيجة تأتي من سجل حقيقي، وما دون ذلك تقول «ابحثت ولم أجد».
-- الأداة **بلا خصم نقاط** (نداء خارجي رخيص) لكنها تُسجَّل في سجل الاستهلاك بنوع `sources` للشفافية.
+- Every search has a timeout (12 seconds per source · 15 seconds total), so a slow source does not hold up the response.
+- The tool **does not invent data**: results come from real records; otherwise it says “I searched but found nothing.”
+- The tool **does not deduct points** (external calls are inexpensive), but logs usage as type `sources` for transparency.
 
-## الباقات: المزايا والحصة تأتي من قاعدة البيانات
+## Plans: features and quota come from the database
 
-بطاقة الباقة في صفحة الهبوط **لا تكتب يدوياً** — ما تراه مولَّد من نفس البيانات التي تُطبَّق على الباحث:
+The plan card on the landing page is **not written manually** — it is generated from the same data applied to the researcher:
 
-| العنصر في البطاقة | مصدره الحقيقي | أين يضبطه المدير |
+| Card item | Actual source | Where administrators configure it |
 | --- | --- | --- |
-| الخدمات المفتوحة (المشرف الذكي · المسار · المكتبة · المفكرة · الملفات · المناقشة) | `plans.role_code` → `role_permissions` → `PLATFORM_SERVICES` | `/admin/plans` (الدور + صلاحياته) |
-| مساحة التخزين | `plans.storage_mb` (500 MB افتراضياً لكل الباقات) | `/admin/plans` فقط |
-| النقاط والسعر والفترة | `plans.tokens` / `price` / `period` | `/admin/plans` |
-| أسطر إضافية (شروط، أولوية دعم…) | `plans.features` (نص بأسطر) — اختيارية وتظهر بعد المولَّدة | `/admin/plans` |
+| Available services (AI supervisor · journey · library · notebook · files · defense) | `plans.role_code` → `role_permissions` → `PLATFORM_SERVICES` | `/admin/plans` (role + permissions) |
+| Storage space | `plans.storage_mb` (500 MB by default for all plans) | `/admin/plans` only |
+| Points, price, and period | `plans.tokens` / `price` / `period` | `/admin/plans` |
+| Additional lines (terms, support priority, etc.) | `plans.features` (multiline text) — optional and displayed after generated features | `/admin/plans` |
 
-- تغيير دور الباقة في اللوحة يغيّر **فوراً** ما هو مفتوح للباحث **وما هو معروض في البطاقة** في الطلب التالي (كاش الصلاحيات 30 ثانية).
-- الحصة تُفرض عند رفع الملفات في `saveUpload()` عبر `planStorageBytes()`؛ والقيمة العامة في `/admin/settings` صارت **fallback** فقط.
-- لإضافة باقة جديدة: أضف صفاً من `/admin/plans` (لا تكتب `features` بالخدمات — تُولَّد)، أو شغّل `npm run db:seed` لتحديث الباقات الافتراضية.
+- Changing a plan's role in the dashboard changes **immediately** what the researcher can access **and what appears on the card** on the next request (30-second permissions cache).
+- The quota is enforced during file uploads in `saveUpload()` through `planStorageBytes()`; the global value in `/admin/settings` is now **fallback** only.
+- To add a plan: add a row in `/admin/plans` (do not enter services in `features` — they are generated), or run `npm run db:seed` to update default plans.
 
-## نقاط الـ API المتاحة الآن
+## API endpoints currently available
 
-| المسار | الوصف |
+| Route | Description |
 | --- | --- |
-| `GET /` | معلومات المشروع (JSON لعميل الـ API، وصفحة الهبوط HTML عند فتحه من المتصفح) |
-| `GET /status` | صفحة حالة الخدمة للمطوّرين (روابط الـ API ولوحة الإدارة) |
-| `GET /api/health` | فحص الخادم وقاعدة البيانات (يعيد 503 عند تعذّر الاتصال) |
-| `GET /api/plans` | قائمة الباقات النشطة (عام) |
-| `GET /api/users` | أحدث 50 مستخدماً — **يحتاج جلسة مدير** (يعيد 403 لغير المدير) |
-| `GET /api/firebase-config` | إعدادات Firebase الويب العامة للإشعارات (بلا أسرار) |
-| `GET /api/notifications` | آخر إشعارات الحساب + عدّاد غير المقروء (يحتاج جلسة) |
-| `POST /api/notifications/register` · `/unregister` | تسجيل/إيقاف توكن جهاز (FCM) |
-| `POST /api/notifications/read-all` · `/:id/read` · `DELETE /:id` | تعليم كمقروء (واحد/الكل) وحذف إشعار |
+| `GET /` | Project information (JSON for API clients, landing-page HTML when opened in a browser) |
+| `GET /status` | Service status page for developers (API and admin-dashboard links) |
+| `GET /api/health` | Server and database health check (returns 503 if the connection fails) |
+| `GET /api/plans` | List of active plans (public) |
+| `GET /api/users` | Latest 50 users — **requires an administrator session** (returns 403 for non-admins) |
+| `GET /api/firebase-config` | Public Firebase web notification settings (no secrets) |
+| `GET /api/notifications` | Latest account notifications + unread count (session required) |
+| `POST /api/notifications/register` · `/unregister` | Register/unregister an FCM device token |
+| `POST /api/notifications/read-all` · `/:id/read` · `DELETE /:id` | Mark one/all as read and delete a notification |
 
-## لوحة الباحث (HTML بدون React)
+## Researcher dashboard (HTML without React)
 
-كل الصفحات تحتاج جلسة فعّالة (`requireAccount`) — والزائر يُحوَّل إلى `/login?next=…`.
-كل النماذج `POST` عادية تنتهي بـ `303 redirect`، فلا تعتمد على JavaScript إطلاقاً.
+All pages require an active session (`requireAccount`) — visitors are redirected to `/login?next=…`.
+All forms use standard `POST` requests ending in `303 redirect`, so they do not depend on JavaScript.
 
-| المسار | الوصف |
+| Route | Description |
 | --- | --- |
-| `GET /dashboard` | الإحصائية: **شريط مؤشرات (KPIs)** + **مخطط أعمدة لنشاط آخر ٧ أيام** + **مخطط دائري (Donut) لتوزيع الاستهلاك حسب النوع** + «مكتبتك البحثية» (مراجع/ملاحظات/ملفات/أسئلة) + الرصيد والباقة + شريط تقدّم مسار البحث + آخر العمليات (كل المخططات CSS/SVG من الخادم بلا مكتبات) |
-| `GET /journey` | خطوات مسار درجة الباحث مع حالته في كل خطوة وملاحظة مخرجاتها |
-| `POST /journey/steps/:key` | تغيير حالة الخطوة (`not_started` / `in_progress` / `done`) |
-| `GET /references` | بحث في مكتبة المنصة + «مراجعي» (إضافة يدوية أو من المكتبة + حالة القراءة) |
-| `POST /references` · `/:id/status` · `/:id/delete` | إدارة المراجع |
-| `GET /notes` | المفكرة: إنشاء/تعديل/تثبيت/بحث/ربط بخطوة |
-| `POST /notes` · `/:id` · `/:id/pin` · `/:id/delete` | إدارة الملاحظات |
-| `GET /files` | ملفات الباحث: رفع (multipart) + تحميل + حذف + معاينة |
-| `GET /files/:id/view` | صفحة معاينة: صورة · PDF · نص · **جدول بيانات (xlsx/xls/csv)** داخل الموقع (doc·pptx·zip ⇒ تحميل فقط) |
-| `GET /files/:id/raw` | البايتات: تحميل (`attachment`) أو عرض (`?inline=1`) مع `nosniff` + CSP معزولة |
-| `POST /files` · `POST /files/:id/delete` | إدارة الملفات (بملكية الجلسة فقط) |
-| `GET /chat` | المشرف الذكي: كارت دردشة بملء الشاشة + قائمة المحادثات في السايدبار (`?c=` لمحادثة، `?step=` للسياق) |
-| `GET /payments` + `POST /payments` | **الاشتراك والدفع**: الدفع **يدوي خارج المنصة** — الباحث يختار باقة + طريقة دفع (مع تفاصيل التحويل) ويكتب رقم العملية، والإدارة تؤكّد الطلب. **حدّ 5 طلبات لكل حساب كل 10 دقائق**، والسعر يُقرأ من `plans` على الخادم لا من المتصفح |
-| `GET /defense` + `POST /defense/start` `/:id/answer` `/:id/delete` | **خدمة المناقشة والتدريب عليها**: محاكاة مناقشة بعد انتهاء البحث — جلسة بأسئلة اللجنة (مراحل: افتتاح ← منهجية ← نتائج ← أدبيات ← تقييم)، عدّاد أسئلة (11)، وتقييم نهائي؛ الخصم بنفس آلية الدردشة |
-| `POST /chat` | إرسال رسالة + ملفات مرفقة (`file_ids`) — **التسعير بالحجز المسبق والتسوية على الاستهلاك الفعلي** |
-| `POST /chat/:id/mode` | تبديل وضع المحادثة: إرشاد ⇄ مناقشة تدريبية (بملكية الجلسة) |
-| `POST /chat/:id/delete` | حذف محادثة — **الحذف لا يُرجِع النقاط** |
+| `GET /dashboard` | Analytics: **KPI strip** + **bar chart for the last 7 days of activity** + **donut chart of usage by type** + “Your research library” (references/notes/files/questions) + balance and plan + research-journey progress bar + latest operations (all charts are server-generated CSS/SVG without libraries) |
+| `GET /journey` | Researcher's degree-specific journey steps, each step's status, and an output note |
+| `POST /journey/steps/:key` | Change a step's status (`not_started` / `in_progress` / `done`) |
+| `GET /references` | Search the platform library + “My References” (add manually or from the library + reading status) |
+| `POST /references` · `/:id/status` · `/:id/delete` | Manage references |
+| `GET /notes` | Notebook: create/edit/pin/search/link to a step |
+| `POST /notes` · `/:id` · `/:id/pin` · `/:id/delete` | Manage notes |
+| `GET /files` | Researcher files: upload (multipart) + download + delete + preview |
+| `GET /files/:id/view` | Preview page: image · PDF · text · **spreadsheet (xlsx/xls/csv)** in the site (doc·pptx·zip ⇒ download only) |
+| `GET /files/:id/raw` | File bytes: download (`attachment`) or inline display (`?inline=1`) with `nosniff` + isolated CSP |
+| `POST /files` · `POST /files/:id/delete` | Manage files (session ownership only) |
+| `GET /chat` | AI supervisor: full-screen chat card + conversation list in the sidebar (`?c=` for a conversation, `?step=` for context) |
+| `GET /payments` + `POST /payments` | **Subscription and payment**: payment is **manual and outside the platform** — the researcher selects a plan + payment method (with transfer details), enters the transaction number, and an administrator confirms the request. **Limit of 5 requests per account every 10 minutes**; price is read from server-side `plans`, not the browser |
+| `GET /defense` + `POST /defense/start` `/:id/answer` `/:id/delete` | **Defense training service**: mock defense after research completion — a session with committee questions (stages: opening → methodology → results → literature → evaluation), question counter (11), and final evaluation; deductions use the same mechanism as chat |
+| `POST /chat` | Send a message + attached files (`file_ids`) — **preauthorization pricing and settlement based on actual usage** |
+| `POST /chat/:id/mode` | Switch conversation mode: guidance ⇄ mock defense (session ownership enforced) |
+| `POST /chat/:id/delete` | Delete a conversation — **deletion does not refund points** |
 
-### المشرف الذكي (Zena)
+### AI supervisor (Zena)
 
-| الملف | الدور |
+| File | Role |
 |---|---|
-| `src/services/supervisor-prompt.js` | شخصية المشرفة: الهوية · اللغة · حدود المساعدة · الخروج عن النطاق · الصدق الأكاديمي — بأقسام شرطية (الترحيب/المتابعة/الاستهثار/المناقشة) |
-| `src/services/supervisor-context.js` | يحسب متغيّرات السياق من قاعدة البيانات (أول رسالة في تاريخه · حالة الخطوات · الذاكرة · المهمة القادمة · أيام الانقطاع · عدّاد التنبيهات · الملفات المرفقة) |
-| `src/services/supervisor-memory.js` | جدول `supervisor_memory`: الملخّص + المهمة القادمة + عدّاد التنبيهات (تصفير بعد 24 ساعة هدوء) |
-| `src/services/tokens.js` | التسعير: حجز مسبق ← نداء ← تسوية وردّ الفرق، وردّ كامل عند فشل المزوّدين؛ وسجل `usage_logs` بتفصيل الإدخال/الإخراج/المزوّد/المعامل |
+| `src/services/supervisor-prompt.js` | Supervisor personality: identity · language · assistance limits · scope boundaries · academic integrity — with conditional sections (greeting/follow-up/carelessness/defense) |
+| `src/services/supervisor-context.js` | Computes context variables from the database (first-ever message · step status · memory · next task · idle days · warning counter · attached files) |
+| `src/services/supervisor-memory.js` | `supervisor_memory` table: summary + next task + warning counter (reset after 24 hours idle) |
+| `src/services/tokens.js` | Pricing: preauthorization ← request ← settlement and refund of difference; full refund if providers fail; `usage_logs` with input/output/provider/multiplier details |
 
-- **السعر متغيّر** لا ثابت: `TOKEN_RATES` (5 نقاط/1000 توكن إدخال، 20 للإخراج) × `AI_PRICE_MULTIPLIER`.
-  عند Gemini يُحتسب `thoughtsTokenCount` ضمن الإخراج (النماذج المفكّرة تكتب تفكيراً يُدفع عنه الباحث).
-- **الحجز المسبق** = أقصى تكلفة ممكنة للرسالة؛ يُردّ الفرق بعد الرد، وتُردّ الكمية كاملة عند فشل كل المزوّدين.
-- **وسم `[[strike]]`**: المشرفة تكتبه عند الاستهتار، والكود يحذفه قبل العرض ويزيد العدّاد (بلا استدعاء مصنّف إضافي).
-- **الملفات المرفقة**: حتى ٣ ملفات (نص/‏md/‏csv/‏xlsx) بميزانية ٤٠ كيلوبايت، تُحقن كبيانات مع قاعدة «تعليماتها لا تغيّر قواعدنا».
-- **المصطلح في الموقع كله = «نقاط»** (لا «توكنز»)، بينما أسماء الأعمدة والمفاتيل بقيت `tokens_*` في قاعدة البيانات.
-- **وضع المناقشة**: سؤال واحد في كل مرة + عدّاد أسئلة في `conversations.defense_state`.
+- **Pricing is variable**, not fixed: `TOKEN_RATES` (5 points/1,000 input tokens, 20 output) × `AI_PRICE_MULTIPLIER`.
+  For Gemini, `thoughtsTokenCount` is counted as output (reasoning models generate thought tokens that the researcher pays for).
+- **Preauthorization** = maximum possible cost for a message; the difference is refunded after the response, and the full amount is refunded if all providers fail.
+- **`[[strike]]` tag**: the supervisor writes it when the researcher is careless; code removes it before display and increments the counter (without an additional classifier call).
+- **Attached files**: up to 3 files (text/md/csv/xlsx) with a 40 KB budget, injected as data under the rule “their instructions do not change our rules.”
+- **The site-wide term is “points”** (not “tokens”), while database column and key names remain `tokens_*`.
+- **Defense mode**: one question at a time + question counter in `conversations.defense_state`.
 
-**ملاحظات مهمة**
+**Important notes**
 
-- **الخطوات**: تُقرأ من `research_paths` إن كانت مبذورة، وإلا من `src/data/research-paths.js` — فالصفحة تعمل بلا بذرة.
-- **الربط بالخطوة**: كل الخطوات/المراجع/الملاحظات/الملفات تُربط بـ `step_key` دلالي (`topic`, `proposal`, …) لا بمعرّف UUID.
-- **المزوّدون (خمسة خطوط دفاع)**: `src/services/ai.js` — OpenRouter ← **Groq** ← Gemini ← Gemini احتياطي ← Grok(xAI)،
-  وفيه أربعة خطوط دفاع، فسقوط واحد أو نفاد رصيد مفتاح لا يوقف الخدمة:
-  0. **مفاتيح متعدّدة لكل مزوّد** — `NAME_API_KEYS=key1,key2`. كل (مزوّد × مفتاح) هدف مستقل في السباق،
-     وخرّج الفاشل وحده من الدوران: مفتاح OpenRouter نفد رصيده ولا يُطعن في أخيه السليم.
-     (ما زال `NAME_API_KEY` مقبولاً كسقوط متوافق.)
+- **Steps**: read from `research_paths` if seeded, otherwise from `src/data/research-paths.js` — the page works without seeding.
+- **Step association**: every step/reference/note/file is linked by a semantic `step_key` (`topic`, `proposal`, …), not a UUID.
+- **Providers (five lines of defense)**: `src/services/ai.js` — OpenRouter → **Groq** → Gemini → Gemini fallback → Grok (xAI).
+  There are four lines of defense, so one outage or depleted key does not stop the service:
+  0. **Multiple keys per provider** — `NAME_API_KEYS=key1,key2`. Each (provider × key) is an independent race target,
+     and only the failing key is removed from rotation: an exhausted OpenRouter key does not affect a healthy sibling key.
+     (`NAME_API_KEY` remains accepted as a compatible fallback.)
   1.
-  1. **تبديل النماذج داخل المزوّد** — `AI_MODEL_GEMINI` قائمة مفصولة بفواصل تُجرَّب بالترتيب.
-     ازدحام نموذج (503) لا يعني ازدحام المفتاح: قِسنا 3.8 و3.7 وflash-latest فكانوا 503 في نفس
-     اللحظة التي ردّ فيها `gemini-3.6-flash` فوراً.
-  2. **طلب مموَّه (hedge)** — بعد `AI_HEDGE_MS` (٣٫٥ ث) يُطلق المزوّد التالي **بالتوازي**، وأول من يردّ
-     يفوز، والباقي يُلغى. فإزحام Gemini لا يعني انتظاره: OpenRouter يردّ في نفس اللحظة.
-  3. **قائمة خروج (circuit breaker)** — المزوّد الفاشل يخرج ١٠ دقائق فلا يضيّع وقت الباحث
-     ولا رصيده في كل رسالة. ليست للأبد: من شحن حسابه يعود الموقع للعمل وحده بلا إعادة تشغيل.
-  - لا إعادة محاولة للأخطاء الدائمة (402 لا رصيد · 403 لا ترخيص · 401 مفتاح · 404 نموذج) — تُستهلك
-    الثواني بلا فائدة. إعادة واحدة فقط لـ 429/5xx.
-  - إذا فشلوا كلهم **تُعاد نقاط الباحث** ويُسجَّل `chat_failed` في `usage_logs`.
-  - **Groq**: نقطة نهاية متوافقة مع OpenAPI وسرعة الأعلى — `qwen/qwen3.8-27b` يردّ عربياً في ≈٣٠٠–٦٠٠ مللي.
-  - **التشخيص**: `npm run doctor` يطبع لكل مفتاح على حدة `✔#1` / `✘#2 402`،
-    وسجل الاستهلاك في `/admin/usage` يعرض حالة كل طلب وعمود المزوّد.
-  - **المفاتيح تُضبط في `.env` فقط** (`NAME_API_KEYS` أو `NAME_API_KEY`) —
-    **لا صفحة مزوّدين في اللوحة** (حُذفت بقرار المنصة) ولا روابط مفاتيح خاصة.
-- **الرفع**: حدّان لكل باقة على حدة يضبطهما المدير من `/admin/plans` ويُحفظان في جدول `plans` (يسريان فوراً بلا إعادة تشغيل):
-  - `max_file_mb` — حجم الملف الواحد (افتراضي **100** ميجابايت، والحدّ الأعلى 2048)، ولا يتجاوز حصة الباقة — يُقتطع إليها.
-  - `storage_mb` — المساحة الإجمالية لكل مشترك باقته (افتراضي **500** ميجابايت؛ 1024 = 1 جيجابايت)، وتُقتطع أولاً عند كل رفع.
-  - قسم حدود التخزين حُذف من `/admin/settings` بقرار المنصة، والأنواع المسموحة في `constants.js`.
+  1. **Switch models within a provider** — `AI_MODEL_GEMINI` is a comma-separated list tried in order.
+     Model congestion (503) does not mean the key is congested: we tested 3.8, 3.7, and flash-latest, which returned 503 at the same
+     moment that `gemini-3.6-flash` responded immediately.
+  2. **Hedged request** — after `AI_HEDGE_MS` (3.5 seconds), the next provider is launched **in parallel**; the first response
+     wins and the rest are cancelled. Gemini congestion therefore does not mean waiting for it: OpenRouter can respond at the same time.
+  3. **Circuit breaker** — a failing provider is removed for 10 minutes so it does not waste the researcher's time
+     or balance on every message. This is not permanent: after replenishing the account, the site resumes automatically without a restart.
+  - No retries for permanent errors (402 insufficient balance · 403 no authorization · 401 invalid key · 404 model not found) — waiting would waste time. One retry only for 429/5xx.
+  - If all providers fail, **the researcher's points are refunded** and `chat_failed` is logged in `usage_logs`.
+  - **Groq**: OpenAPI-compatible endpoint and the fastest option — `qwen/qwen3.8-27b` responds in Arabic in approximately 300–600 ms.
+  - **Diagnostics**: `npm run doctor` prints a separate status for each key (`✔#1` / `✘#2 402`),
+    and `/admin/usage` shows each request's status and a provider column.
+  - **Keys are configured only in `.env`** (`NAME_API_KEYS` or `NAME_API_KEY`) —
+    **there is no provider page in the dashboard** (removed by product decision) and no private key links.
+- **Uploads**: two per-plan limits are set by the administrator in `/admin/plans` and stored in `plans` (effective immediately, without restart):
+  - `max_file_mb` — maximum size of one file (default **100** MB, maximum 2048), capped at the plan quota.
+  - `storage_mb` — total space per subscriber on their plan (default **500** MB; 1024 = 1 GB), checked first on each upload.
+  - The storage-limit section was removed from `/admin/settings` by product decision; allowed file types are in `constants.js`.
 
-## لوحة الإدارة (HTML بدون React)
+## Admin dashboard (HTML without React)
 
-صفحات مولَّدة على الخادم (Server-Side Rendering) بنفس هوية المنصة البصرية، بدون أي حزمة واجهة وبدون خطوة بناء — بديل مسارات `/admin` القديمة:
+Server-rendered pages with the same platform visual identity, no frontend package and no build step — replacing the old `/admin` routes:
 
-| الصفحة | الوصف |
+| Page | Description |
 | --- | --- |
-| `GET /admin` | نظرة عامة حية: 12 بطاقة إحصائية (باحثون/نشطون/مشتركون/باقات/مزوّدون/رسائل/طلبات ناجحة...) + مخطط نشاط 7 أيام + **مخطط دائري لتوزيع استهلاك الأسبوع** + أحدث الباحثين + آخر العمليات **مع فلترة (تاريخ + من/إلى ساعة + عدد نتائج) وصندوق تمرير داخلي** + نموذج إرسال إشعار فوري للجميع |
-| `GET /admin/users` | جدول الباحثين مع بحث (`?q=`)، فلترة (`?filter=all\|active\|disabled`) وترقيم (`?page=`) — وإجراء **حذف مع تأكيد** لكل صف |
-| `GET /admin/users/:id` | تفصيل باحث: الحساب والملف والأرقام + إجراءات التحكم الكاملة |
-| `POST /admin/users/:id/status` `/points` `/plan` `/notify` `/delete` | إيقاف/تفعيل · منح أو خصم نقاط · تغيير باقة · إشعار داخلي · **حذف نهائي من قاعدة البيانات** (بتأكيد قبل الإرسال — بايتات الملفات ثم الصف والسجلات بـ CASCADE) |
-| `GET /admin/*` (كل صفحة) | **بوابة صلاحيات `requireAdminPermission`**: المدير يتجاوزها، والمشرف يرى ما مُنح له فقط (السايدبار تُصفّى تلقائياً)، وكل محاولة POST محجوبة على الخادم لا على المتصفح |
-| `GET /admin/payments` + `POST /admin/payments/:id/confirm` `/reject` | **طلبات الدفع والتأكيد** (صلاحية `admin:payments`): بحث/فلترة/ترقيم، والتأكيد **ذرّي** — يفعّل الباقة ويضيف النقاط في معاملة واحدة (`SELECT … FOR UPDATE`) ويمنع التأكيد المزدوج؛ والرفض بملاحظة دون أي خصم |
-| `POST /admin/settings/currency` + `/admin/settings/payment-methods` `/payment-methods/delete` | **طرق الدفع من الإعدادات**: إضافة/تعديل طريقة (الاسم، العملة، تفاصيل التحويل، الترتيب، التفعيل) + **عملة الموقع (دينار ليبي / دولار)** — تسري على كل الأسعار فوراً |
-| `GET /admin/plans` + `POST /admin/plans/add` + `/:code` + `/:code/delete` | الباقات وعدد المشتركين + **مودال** تعديل لكل باقة + **مودال إضافة باقة جديدة** + **حذف باقة**: أي باقة تُحذف بقرار المدير (منها المجانية) بتأكيد صريح `confirm=1`، ومشتركوها يُنقلون للمجانية (أو يُفرَّغ `plan_code` إن لم تكن المجانية موجودة) داخل معاملة واحدة |
-| `GET /admin/library` | المكتبة العلمية المركزية: بحث داخلي (`?q=`)، فلترة (`?status=all\|active\|off`)، ترقيم + **الجلب من مواقع مجانية** (`?esrc=openlibrary\|doaj\|zenodo&q=&subject=`) — Open Library (كتب + Internet Archive) · DOAJ (أبحاث مفتوحة) · Zenodo (منشورات CERN) |
-| `POST /admin/library/add` | رفع كتاب: `multipart` (ملف حتى 200MB + عنوان/مؤلف/سنة/تخصص/وسوم/توثيق APA يُولَّد تلقائياً) — الملف يُحفظ مرة واحدة في `storage/library/references/` ويقرأه كل الباحثين |
-| `POST /admin/library/import` | استيراد نتيجة خارجية: يجلب الملف (PDF مباشر أو من صفحة المقال عبر `citation_pdf_url`) ويضيفه للبيانات؛ إن تعذّر التنزيل يُستورد العنصر **بيانات فقط** مع ملاحظة عربية |
-| `POST /admin/library/:id/edit` `/toggle` `/delete` + `GET /admin/library/:id/file` | تعديل البيانات · تفعيل/تعطيل (يختفي فوراً من نتائج الباحثين) · حذف نهائي مع ملفه من القرص · **تحميل الملف** للإدارة |
-| `GET /admin/usage` | سجل الاستهلاك: **بحث `?q=`** (إيميل/نوع/ملخص) + **فلترة تاريخ/ساعات/عدد نتائج** + **أعمدة 14 يوماً** + **مخطط دائري للأنواع** + عمليات داخل صندوق تمرير (حتى 500) |
-| `POST /admin/notifications` | إرسال إشعار فوري لكل الباحثين (من نموذج النظرة العامة) |
+| `GET /admin` | Live overview: 12 statistic cards (researchers/active/subscribers/plans/providers/messages/successful requests...) + 7-day activity chart + **pie chart of weekly usage distribution** + latest researchers + latest operations **with filters (date + from/to hour + result count) and an internal scroll box** + form to send an instant notification to everyone |
+| `GET /admin/users` | Researcher table with search (`?q=`), filters (`?filter=all\|active\|disabled`), and pagination (`?page=`) — plus a **delete with confirmation** action on each row |
+| `GET /admin/users/:id` | Researcher details: account, profile, metrics + full control actions |
+| `POST /admin/users/:id/status` `/points` `/plan` `/notify` `/delete` | Suspend/activate · grant or deduct points · change plan · send internal notification · **permanently delete from the database** (confirmation before submission — file bytes, then row and records via CASCADE) |
+| `GET /admin/*` (each page) | **`requireAdminPermission` permission gate**: administrators bypass it; supervisors see only what they have been granted (sidebar filtered automatically); every POST attempt is blocked on the server, not the browser |
+| `GET /admin/payments` + `POST /admin/payments/:id/confirm` `/reject` | **Payment requests and confirmation** (`admin:payments` permission): search/filter/pagination; **atomic** confirmation activates the plan and adds points in one transaction (`SELECT … FOR UPDATE`), preventing duplicate confirmation; rejection adds a note without deductions |
+| `POST /admin/settings/currency` + `/admin/settings/payment-methods` `/payment-methods/delete` | **Payment methods in Settings**: add/edit a method (name, currency, transfer details, order, active state) + **site currency (Libyan dinar / dollar)** — applied immediately to all prices |
+| `GET /admin/plans` + `POST /admin/plans/add` + `/:code` + `/:code/delete` | Plans and subscriber counts + **modal** to edit each plan + **modal to add a plan** + **delete a plan**: any plan deleted by administrator decision (including the free plan) requires explicit `confirm=1`; its subscribers move to the free plan (or have `plan_code` cleared if no free plan exists) in one transaction |
+| `GET /admin/library` | Central scholarly library: search (`?q=`), filter (`?status=all\|active\|off`), pagination + **fetch from free sites** (`?esrc=openlibrary\|doaj\|zenodo&q=&subject=`) — Open Library (books + Internet Archive) · DOAJ (open research) · Zenodo (CERN publications) |
+| `POST /admin/library/add` | Upload a book: `multipart` (file up to 200 MB + title/author/year/field/tags/automatically generated APA citation) — saved once to `storage/library/references/` and available to all researchers |
+| `POST /admin/library/import` | Import an external result: fetches the file (direct PDF or from the article page through `citation_pdf_url`) and adds it to the data; if download fails, imports **metadata only** with a notice |
+| `POST /admin/library/:id/edit` `/toggle` `/delete` + `GET /admin/library/:id/file` | Edit metadata · activate/deactivate (disappears immediately from researcher results) · permanently delete with its disk file · **download the file** for administrators |
+| `GET /admin/usage` | Usage log: **search `?q=`** (email/type/summary) + **date/hour/result-count filters** + **14-day columns** + **type pie chart** + operations in a scrollable box (up to 500) |
+| `POST /admin/notifications` | Send an instant notification to all researchers (from the overview form) |
 
-الصفحات تُقرأ من PostgreSQL مباشرة، وكل تعديل عبر **POST محمي** ثم إعادة توجيه برسالة نجاح أو خطأ عربية.
-وكل نموذج حذف أو إجراء خطير يحمل `data-confirm` فيسأل المتصفح تأكيداً قبل الإرسال (بلا سكربتات مخصصة)،
-والمودالات كلها تعتمد على `:target` من CSS — بلا JavaScript على الإطلاق.
+Pages read directly from PostgreSQL, and every change uses a **protected POST** followed by a redirect with a success or error notice.
+Every delete form or dangerous action has `data-confirm`, prompting the browser for confirmation before submitting (without custom scripts),
+and all modals use CSS `:target` — no JavaScript at all.
 
-### حماية الصفحات
+### Page protection
 
-- **بدون `ADMIN_TOKEN`**: الصفحات متاحة من الجهاز المحلي فقط (localhost)، وأي طلب خارجي يحصل على 403.
-- **مع `ADMIN_TOKEN`** يُدخَل الرمز بأحد الأشكال:
-  - الترويسة: `x-admin-token: <الرمز>`
-  - الرابط: `/admin/users?token=<الرمز>` — **يُستبدل فوراً بكوكي `zena_admin` (HttpOnly + SameSite=Strict، 8 ساعات)** ويُعاد التوجيه إلى رابط نظيف، حتى لا يبقى الرمز في سجلات الخادم ولا في `Referer`.
-  - Basic Auth: اسم المستخدم أي شيء وكلمة المرور هي الرمز.
-- **حدّ المحاولات**: 10 محاولات دخول فاشلة لكل IP كل 15 دقيقة (بعدها 429) + حدّ واسع على كل طلبات `/admin` (120 لكل 5 دقائق).
-- **عبر وكيل عكسي**: عرّف `TRUST_PROXY=1` وإلا صار كل الزوار عناوينهم `127.0.0.1` (فتح اللوحة بلا رمز + تعطّل حدود المعدّل).
-- **في الإنتاج**: `SESSION_SECRET` إلزامي (يرفض الخادم الإقلاع بدونه)، و`Origin` إلزامي في كل POST يحمل جلسة (حماية CSRF).
+- **Without `ADMIN_TOKEN`**: pages are available only from the local machine (localhost); external requests receive 403.
+- **With `ADMIN_TOKEN`**, supply the token in one of these ways:
+  - Header: `x-admin-token: <token>`
+  - URL: `/admin/users?token=<token>` — immediately **replaced with a `zena_admin` cookie (HttpOnly + SameSite=Strict, 8 hours)** and redirected to a clean URL, so the token is not left in server logs or the `Referer`.
+  - Basic Auth: any username and the token as the password.
+- **Attempt limit**: 10 failed login attempts per IP every 15 minutes (then 429) + a broad limit on all `/admin` requests (120 per 5 minutes).
+- **Behind a reverse proxy**: set `TRUST_PROXY=1`; otherwise, all visitors appear as `127.0.0.1` (opening the dashboard without a token and disabling rate limits).
+- **In production**: `SESSION_SECRET` is required (the server refuses to start without it), and `Origin` is required on every session-authenticated POST (CSRF protection).
 
-> عند فشل قاعدة البيانات تعرض الصفحات رسالة عربية واضحة بخطوات الحل (بدل صفحة بيضاء أو خطأ خام).
+> If the database fails, the pages show a clear Arabic message with troubleshooting steps instead of a blank page or raw error.
 
-## حل المشاكل الشائعة
+## Common troubleshooting
 
 ### `Error: listen EADDRINUSE: address already in use :::3000`
 
-المنفذ 3000 محجوز من عملية أخرى (غالباً نسخة سابقة من الخادم ما زالت تعمل). الحل:
+Port 3000 is occupied by another process (usually an earlier server instance still running). Fix:
 
 ```bash
 npm run dev:free     # يوقف العملية التي تحتجز المنفذ
 npm run dev
 ```
 
-أو يدوياً: `lsof -ti tcp:3000 | xargs -r kill` — أو شغّل على منفذ آخر: `PORT=3001 npm run dev`.
+Or manually: `lsof -ti tcp:3000 | xargs -r kill` — or use another port: `PORT=3001 npm run dev`.
 
 ### `{"message":"Route not found: /admin/users"}`
 
-هذا المسار كان في واجهة Next.js/React القديمة التي أُزيلت. صار له بديل الآن بصفحة HTML على الخادم:
+This route was part of the old Next.js/React interface, which was removed. It now has a server-rendered HTML replacement:
 
-- `/admin/users` — جدول الباحثين
-- `/admin` و`/admin/plans` و`/admin/usage` و`/admin/library`
+- `/admin/users` — researcher table
+- `/admin`, `/admin/plans`, `/admin/usage`, and `/admin/library`
 
-أما مسارات الواجهة القديمة الأخرى (`/api/send-message` ...) فلم تعد موجودة، وفتحها يعطيك صفحة 404 عربية فيها روابط الصفحات المتاحة. أما صفحات الباحث (`/dashboard` و`/journey` و`/chat` و`/references` و`/notes` و`/files`) فموجودة الآن كصفحات HTML على الخادم — راجع قسم «لوحة الباحث» أعلاه. ومسارات الـ API الحالية (`/api/health` و`/api/plans` و`/api/users` و`/api/notifications`) مفصّلة في جدول «نقاط الـ API المتاحة الآن».
+Other old interface routes (`/api/send-message` ...) no longer exist; opening them displays an Arabic 404 page with links to available pages. Researcher pages (`/dashboard`, `/journey`, `/chat`, `/references`, `/notes`, `/files`) are now server-rendered HTML pages — see “Researcher dashboard” above. Current API routes (`/api/health`, `/api/plans`, `/api/users`, `/api/notifications`) are detailed in the “API endpoints currently available” table.
 
-### `GET /api/users` يعيد `{"message":"هذا المسار متاح لمدير المنصة فقط."}`
+### `GET /api/users` returns `{"message":"هذا المسار متاح لمدير المنصة فقط."}`
 
-هذا سلوك مقصود: بيانات المستخدمين لم تعد عامة. سجّل الدخول بحساب دوره مدير (`ADMIN_EMAILS`) لتقرأها، أو استخدم لوحة الإدارة `/admin/users`. وإذا أعاد `{"hint":"الجداول غير موجودة بعد..."}` فلم تُشغَّل تهيئة قاعدة البيانات بعد: `npm run db:init` ثم اختيارياً `npm run db:seed`.
+This is intentional: user data is no longer public. Sign in with an administrator account (`ADMIN_EMAILS`) to read it, or use `/admin/users`. If it returns `{"hint":"الجداول غير موجودة بعد..."}`, the database has not been initialized: run `npm run db:init`, then optionally `npm run db:seed`.
 
 ### `npm error code ETARGET No matching version found for nodemon@^3.1.16`
 
-السبب: لا يوجد إصدار منشور بهذا الرقم — أحدث إصدار من `nodemon` هو **3.1.14**.
-لأن `npm install` يفشل بالكامل عندها، لم تُثبَّت أي حزمة، فظهر بعدها خطآن تابعان:
+Cause: no release with that version has been published — the latest `nodemon` release is **3.1.14**.
+Because `npm install` fails completely in this case, no packages are installed, leading to two subsequent errors:
 
-- `Cannot find package 'pg'` عند `npm run db:init`.
-- `nodemon: not found` عند `npm run dev`.
+- `Cannot find package 'pg'` when running `npm run db:init`.
+- `nodemon: not found` when running `npm run dev`.
 
-الحل المطبَّق: إزالة `nodemon` من المشروع واستخدام **`node --watch`** المدمج في Node لسكربت التطوير، فأصبح التثبيت لا يعتمد على أي حزمة اختيارية. إن أردت nodemon لاحقاً:
+Applied fix: remove `nodemon` from the project and use Node's built-in **`node --watch`** for the development script, so installation no longer depends on an optional package. If you want nodemon later:
 
 ```bash
 npm install -D nodemon@^3.1.14
@@ -645,58 +644,58 @@ npm install -D nodemon@^3.1.14
 
 ### `ECONNREFUSED 127.0.0.1:5432`
 
-لا يوجد خادم PostgreSQL يعمل: شغّل `npm run db:up` أو `sudo service postgresql start`، أو حدّث `DATABASE_URL` لقاعدة مستضافة. سكربتات `db:init` و`db:seed` تطبع الآن خطوات الحل مباشرة.
+No PostgreSQL server is running: use `npm run db:up` or `sudo service postgresql start`, or update `DATABASE_URL` for a hosted database. The `db:init` and `db:seed` scripts now print troubleshooting steps directly.
 
 ### `password authentication failed for user`
 
-كلمة المرور في `DATABASE_URL` لا تطابق كلمة مرور المستخدم في PostgreSQL.
+The password in `DATABASE_URL` does not match the user's PostgreSQL password.
 
-### تغييرات بيئة الطرفية
+### Environment changes
 
-بعد أي تعديل على `.env` أعد تشغيل الخادم (`node --watch` لا يعيد قراءة `.env` تلقائياً عند تغييره).
+After any change to `.env`, restart the server (`node --watch` does not automatically reread `.env` when it changes).
 
-## ما تم في هذا الإصلاح
+## Changes in this fix
 
-1. **إصلاح `npm install`**: حذف الاعتماد على `nodemon@^3.1.16` غير الموجود، وإزالة `devDependencies` غير اللازمة، و`dev` يعمل الآن بـ `node --watch`.
-2. **حذف `package-lock.json` القديم** الذي كان يخص واجهة Next.js/React/Firebase وجرّ `node_modules` قديمة — وسيُنشئ `npm install` ملف قفل نظيفاً.
-3. **إزالة React/Next/Firebase بالكامل** من الكود: `src/app` و`src/components` و`src/context` و`src/lib` و`src/types` و`next.config.ts` و`tsconfig.json` و`postcss.config.mjs` و`firestore.rules` و`public/firebase-messaging-sw.js` ومجلد `.next` ومجلد `scripts`.
-4. **نسخة احتياطية كاملة** من الملفات المحذوفة في `backup/legacy-nextjs-react-20260923.tar.gz` (126 ملفاً) — استخرجها في أي وقت بـ `tar -xzf` لعرض الكود القديم، ولمنع فقدان أي منطق عمل (مزوّدو الذكاء الاصطناعي، الثوابت، الخدمات) عند إعادة بناء الواجهة لاحقاً بدون React.
-5. **نقل مفاتيح الذكاء الاصطناعي** من `.env.local` (Firebase) إلى `.env` كمتغيرات خادم، وحذف `.env.local`.
-6. **تحسين سكربتات قاعدة البيانات**: إنشاء قاعدة البيانات تلقائياً إن لم تكن موجودة، فهرس على `usage_logs(user_id, created_at)`، ورسائل أخطاء عربية واضحة.
-7. **إضافة `docker-compose.yml`** لتشغيل PostgreSQL بأمر واحد.
-8. **إضافة إغلاق نظيف للخادم** (`SIGINT`/`SIGTERM`) يغلق اتصالات قاعدة البيانات.
-9. **تحديث `.gitignore`** وحذف إعدادات Next.js/TypeScript القديمة، مع تجاهل `backup/` و`storage/` والملفات المرفوعة.
+1. **Fix `npm install`**: remove the nonexistent `nodemon@^3.1.16` dependency, remove unnecessary `devDependencies`, and run `dev` with `node --watch`.
+2. **Delete the old `package-lock.json`** for the Next.js/React/Firebase interface and its outdated `node_modules` tree — `npm install` will create a clean lockfile.
+3. **Remove React/Next/Firebase completely** from the code: `src/app`, `src/components`, `src/context`, `src/lib`, `src/types`, `next.config.ts`, `tsconfig.json`, `postcss.config.mjs`, `firestore.rules`, `public/firebase-messaging-sw.js`, the `.next` directory, and the `scripts` directory.
+4. **Create a full backup** of the deleted files at `backup/legacy-nextjs-react-20260923.tar.gz` (126 files) — extract it at any time with `tar -xzf` to inspect the old code and avoid losing business logic (AI providers, constants, services) when rebuilding the interface later without React.
+5. **Move AI keys** from `.env.local` (Firebase) to `.env` as server variables, and delete `.env.local`.
+6. **Improve database scripts**: create the database automatically if it does not exist, add an index on `usage_logs(user_id, created_at)`, and provide clear Arabic error messages.
+7. **Add `docker-compose.yml`** to run PostgreSQL with one command.
+8. **Add graceful server shutdown** (`SIGINT`/`SIGTERM`) to close database connections.
+9. **Update `.gitignore`** and remove old Next.js/TypeScript configuration, while ignoring `backup/`, `storage/`, and uploaded files.
 
-## الإضافات الأخيرة: لوحة إدارة HTML بدون React
+## Recent additions: HTML admin dashboard without React
 
-10. **بديل مسار `/admin/users`** الذي كان يعيد `Route not found`: صفحات HTML مولَّدة على الخادم (`src/routes/admin.js` + `src/views/*`) بنفس هوية المنصة (زمردي/نحاسي/ورق الرقّ + حبر البرقوق للإدارة) — بدون React وبدون أي حزمة جديدة وبدون خطوة بناء.
-11. **صفحات جديدة**: `/admin` (نظرة عامة)، `/admin/users` (بحث + فلترة + ترقيم)، `/admin/plans`، `/admin/usage`.
-12. **حماية `ADMIN_TOKEN`** مع افتراض آمن: بدون الرمز تعمل الصفحات من localhost فقط.
-13. **أعمدة جديدة في `users`**: `plan_code` (مرتبط بـ `plans.code`) و`tokens_balance` ليظهر الباقة والرصيد في لوحة الإدارة — تُضاف تلقائياً عند `npm run db:init`.
-14. **صفحة جذر ذكية**: `GET /` يعيد HTML للمتصفح وJSON لعملاء الـ API، وصفحة 404 عربية لكل مسار غير معروف بدل رسالة JSON.
-15. **إصلاح خطأ 500 في مسارات الـ API**: صار الرد يحتوي الحقل `hint` بخطوات الحل (تشغيل PostgreSQL، `db:init`، تصحيح كلمة المرور).
+10. **Replace the `/admin/users` route** that returned `Route not found`: server-rendered HTML pages (`src/routes/admin.js` + `src/views/*`) with the platform's visual identity (emerald/copper/parchment + plum ink for administration) — no React, new packages, or build step.
+11. **Add pages**: `/admin` (overview), `/admin/users` (search + filters + pagination), `/admin/plans`, `/admin/usage`.
+12. **Protect with `ADMIN_TOKEN`** using a secure default: without the token, pages work only from localhost.
+13. **Add columns to `users`**: `plan_code` (linked to `plans.code`) and `tokens_balance` so the admin dashboard can show the plan and balance — added automatically by `npm run db:init`.
+14. **Add a smart root page**: `GET /` returns HTML to browsers and JSON to API clients, and an Arabic 404 page for unknown routes instead of a JSON message.
+15. **Fix 500 errors on API routes**: responses now include a `hint` field with troubleshooting steps (start PostgreSQL, run `db:init`, correct the password).
 
-## هوية Zena AI البصرية في الواجهة
+## Zena AI visual identity in the interface
 
-كل تنسيقات الصفحات مأخوذة من `public/Zena AI — الهوية البصرية.md` (ونسختها PDF) بدون أي حزمة جديدة وبدون خطوة بناء:
+All page styling is based on `public/Zena AI — الهوية البصرية.md` (and its PDF copy), with no new package or build step:
 
-| العنصر | التطبيق في الكود |
+| Element | Implementation in code |
 | --- | --- |
-| الألوان | Ink Navy `#102A43` للترويسة والعناوين، Sea Teal `#0D8E93` للأزرار والروابط والحالة النشطة، Fresh Teal `#19B5A5` للإبرازات وشريط البطاقات الإحصائية، Mist `#D8F3EF` للحدود والبطاقات الخفيفة والاقتباسات، Paper `#F7FBFC` للخلفية والعناصر على الكحلي، Apricot Spark `#F4A261` كإشارة صغيرة فقط (خط الترويسة وحدود التنبيهات)، Slate `#526777` للنصوص الثانوية — معرَّفة كمتغيرات CSS في `src/views/layout.js` |
-| الخطوط | Manrope (400..800) للحروف اللاتينية والواجهة وIBM Plex Sans Arabic (400..700) للنص العربي، مستضافان محلياً في `public/fonts` مع تعريفات `public/fonts.css` — بلا أي طلب لـ CDN خارجي (`npm run fonts:fetch` يعيد تنزيلهما) |
-| الشعار | `zena-ai-icon.svg` في الترويسة (داخل وسادة بلون Paper للحفاظ على مساحة الأمان) وفي التذييل وكأيقونة الموقع، `logo2.webp` شعاراً كبيراً في الصفحة الرئيسية، و`logo1.webp` كأيقونة لمس/مشاركة |
-| الجمل التعريفية | «ابحث بعمق. اكتب بوضوح.» كعنوان للصفحة الرئيسية، مع «من الفكرة الأولى إلى فصل متماسك» و«ناقش فكرتك مع Zena» |
-| التوزيع | الشريط العلوي كحلي الحبر (25%)، الخلفية Paper (55%)، الحدود والبطاقات الخفيفة Mist (12%)، الأزرار والحالات النشطة Teal (6%)، والمشمشي (2%) كإشارة صغيرة فقط — كما تقترح نسب الاستخدام في الدليل |
+| Colors | Ink Navy `#102A43` for headers and titles, Sea Teal `#0D8E93` for buttons, links, and active states, Fresh Teal `#19B5A5` for highlights and KPI-card bars, Mist `#D8F3EF` for borders, light cards, and quotations, Paper `#F7FBFC` for the background and elements on navy, Apricot Spark `#F4A261` as a small accent only (header line and alert borders), Slate `#526777` for secondary text — defined as CSS variables in `src/views/layout.js` |
+| Fonts | Manrope (400..800) for Latin text and the interface, and IBM Plex Sans Arabic (400..700) for Arabic text, hosted locally in `public/fonts` with definitions in `public/fonts.css` — no external CDN requests (`npm run fonts:fetch` downloads them again) |
+| Logo | `zena-ai-icon.svg` in the header (inside a Paper-colored safe-area pad), footer, and as the site icon; `logo2.webp` as the large homepage logo; `logo1.webp` as the touch/share icon |
+| Taglines | “Search deeply. Write clearly.” as the homepage headline, with “From the first idea to a coherent chapter” and “Discuss your idea with Zena” |
+| Distribution | Ink Navy top bar (25%), Paper background (55%), Mist borders and light cards (12%), Teal buttons and active states (6%), and apricot (2%) as a small accent only — as recommended by the usage proportions in the guide |
 
-نقاط مهمة:
+Important notes:
 
-- مجلد `public` يُقدَّم الآن كملفات ثابتة من `server.js` عبر `express.static`، لذلك يعمل `/zena-ai-icon.svg` و`/logo1.webp` و`/logo2.webp` و`/fonts.css` و`/fonts/*` مباشرة، و`/favicon.ico` و`/favicon.svg` يعيدان أيقونة الهوية.
-- لا حاجة لتعديل إعدادات `helmet`: سياسة CSP الافتراضية تسمح بالخطوط والصور المحلية وبالأنماط المضمّنة، ولا يوجد أي طلب خارجي أصلاً.
-- لتغيير الشعار لاحقاً: استبدل `public/zena-ai-icon.svg` أو `public/logo2.webp`، أو عدّل كائن `BRAND` في `src/views/layout.js`. ولو أُضيف الملف الأفقي `zena-ai-logo.svg` المذكور في دليل الهوية فيكفي إضافته لكائن `BRAND` واستخدامه مكان الأيقونة+النص في `renderBrand`.
+- `public` is now served as static files by `server.js` through `express.static`, so `/zena-ai-icon.svg`, `/logo1.webp`, `/logo2.webp`, `/fonts.css`, and `/fonts/*` work directly, while `/favicon.ico` and `/favicon.svg` return the brand icon.
+- No need to change `helmet` settings: the default CSP allows local fonts and images as well as inline styles, and there are no external requests.
+- To change the logo later: replace `public/zena-ai-icon.svg` or `public/logo2.webp`, or edit the `BRAND` object in `src/views/layout.js`. If the horizontal `zena-ai-logo.svg` file mentioned in the brand guide is added, add it to `BRAND` and use it in place of the icon + text in `renderBrand`.
 
-## الدفع اليدوي وطلبات التأكيد
+## Manual payment and confirmation requests
 
-الدفع **خارج المنصة** (تحويل بنكي/محفظة/نقدي) ولا توجد بوابة إلكترونية:
+Payment is **outside the platform** (bank transfer/wallet/cash); there is no online payment gateway:
 
 ```text
 الباحث: /payments  →  يختار باقة + طريقة ويكتب رقم العملية  →  طلب (pending)
@@ -705,115 +704,115 @@ npm install -D nodemon@^3.1.14
    رفض   = ملاحظة للباحث فقط (لا خصم ولا تغيير)
 ```
 
-- **السعر يُقرأ من جدول `plans` على الخادم** عند إنشاء الطلب — لا يُرسل من المتصفح، فلا تلاعب.
-- **حد الطلبات**: 5 طلبات معلّقة لكل حساب + حدّ معدّل 5/10 دقائق.
-- **العملة**: `LYD` (د.ل) أو `USD` ($) — يضبطها المدير من `/admin/settings`، وتسري على صفحة الهبوط وبطاقات الباقات وصفحة الدفع فوراً. لكل طريقة دفع عملتها الخاصة.
+- **Price is read from the server-side `plans` table** when the request is created — it is not sent by the browser, preventing tampering.
+- **Request limit**: 5 pending requests per account + rate limit of 5 per 10 minutes.
+- **Currency**: `LYD` (Libyan dinar) or `USD` ($) — configured by the administrator in `/admin/settings`, and applied immediately to the landing page, plan cards, and payment page. Each payment method has its own currency.
 
-## طرق الدفع (تُدار من الإعدادات)
+## Payment methods (managed in Settings)
 
 `/admin/settings ← الدفع وطرق التحويل`:
 
-| الحقل | المعنى |
+| Field | Meaning |
 | --- | --- |
-| `code` | كود إنجليزي صغير (يُستخدم في الرابط) — نفس الكود يحدّث بدل التكرار |
-| `label` | الاسم الظاهر للباحث («تحويل بنكي») |
-| `currency` | عملة الطريقة (`LYD`/`USD`) |
-| `details` | رقم الحساب/الـIBAN/المحفظة — يظهر للباحث عند تقديم الطلب |
-| `is_active` | التفعيل (الطريقة المعطّلة تختفي من صفحة الباحث) |
-| `display_order` | الترتيب |
+| `code` | Short English code (used in the URL) — reusing a code updates the method instead of duplicating it |
+| `label` | Name shown to researchers (“Bank transfer”) |
+| `currency` | Method currency (`LYD`/`USD`) |
+| `details` | Account number/IBAN/wallet — shown to the researcher when submitting a request |
+| `is_active` | Activation (disabled methods disappear from the researcher page) |
+| `display_order` | Display order |
 
-## تنظيف الملفات اليتيمة
+## Cleaning orphaned files
 
-أي ملف في `storage/` غير مذكور في `files.stored_path` أو `library_items.stored_path` هو **يتيم** (حُذف صفه، أو فشل رفع، أو نسخة قديمة):
+Any file in `storage/` not referenced by `files.stored_path` or `library_items.stored_path` is an **orphan** (its row was deleted, an upload failed, or it is an old copy):
 
 ```bash
 npm run storage:clean            # فحص فقط: يطبع الملفات المرشّحة للحذف
 npm run storage:clean -- --delete  # حذفها فعلياً + المجلدات الفارغة
 ```
 
-النتيجة على قاعدة البيانات الحالية: من **193 ملفاً** إلى **5 ملفات** مرتبطة فعلياً (حُذف 188 يتيم).
+Result on the current database: reduced from **193 files** to **5 files** actually linked to records (188 orphans deleted).
 
-## الأمان (ما هو مطبَّق فعلياً)
+## Security (actually implemented)
 
-كل ما يلي **مطبَّق في الكود** لا موصوف فقط:
+Everything below is **implemented in code**, not merely described:
 
-| الطبقة | التنفيذ | الملف |
+| Layer | Implementation | File |
 | --- | --- | --- |
-| ترويسات | `helmet` + CSP (بلا سكربتات مضمّنة) + `X-Frame-Options: DENY` + `nosniff` + `Referrer-Policy` + `Permissions-Policy` | `server.js` · `src/middleware/security.js` |
-| حماية CSRF | أي `POST/PUT/PATCH/DELETE` يجب أن يأتي من **نفس الأصل** (`Origin`/`Referer` مطابقة للمضيف) وإلا 403 | `middleware/security.js` |
-| حدود المعدّل | دخول/تسجيل: 20–60 لكل IP؛ رفع الملفات: 20 لكل حساب/10د؛ الشات: 30 رسالة/5د؛ طلبات الدفع: 5/10د؛ جلسات المناقشة: 5/30د | `routes/*.js` |
-| الجلسات | كوكي `HttpOnly` + `SameSite=Lax` + `Secure` في الإنتاج، موقّع HMAC مع `exp` | `src/routes/auth.js` · `src/auth/google.js` |
-| الصلاحيات | بوابة `requireAdminPermission` على **كل** مسار إداري + `requireService` على خدمات الباحث (لا تُعتمد على إخفاء الرابط) | `routes/admin.js` · `middleware/auth.js` |
-| المعاملات | تأكيد الدفع داخل معاملة واحدة مع `SELECT … FOR UPDATE` (يمنع التأكيد المزدوج/نصف التنفيذ) | `services/payments.js` |
-| الملفات | قائمة امتدادات + حد حجم + فحص المسار داخل `storage/` + ترويسات `nosniff`/CSP عند التحميل | `services/files.js` · `services/library.js` |
-| الحجب الذاتي | الجلب الخارجي يحجب الروابط الداخلية (SSRF) ويفحص بصمة الملف (%PDF/PK) | `services/library-sources.js` |
-| الأسرار | لا مفاتيح في الواجهة ولا في Git؛ كل الاستدعاءات على الخادم | `.env` (مستثنى) |
-| خصوصية البيانات | `/api/users` لم يعد عاماً: يحتاج جلسة **مدير** ويعيد 403 لغيره، ويُخرج أعمدة محدودة فقط (لا `google_sub` ولا بيانات حساسة) | `server.js` |
+| Headers | `helmet` + CSP (no inline scripts) + `X-Frame-Options: DENY` + `nosniff` + `Referrer-Policy` + `Permissions-Policy` | `server.js` · `src/middleware/security.js` |
+| CSRF protection | Every `POST/PUT/PATCH/DELETE` must come from the **same origin** (`Origin`/`Referer` must match the host), or it receives 403 | `middleware/security.js` |
+| Rate limits | Login/registration: 20–60 per IP; file uploads: 20 per account/10m; chat: 30 messages/5m; payment requests: 5/10m; defense sessions: 5/30m | `routes/*.js` |
+| Sessions | `HttpOnly` + `SameSite=Lax` cookie + `Secure` in production, HMAC-signed with `exp` | `src/routes/auth.js` · `src/auth/google.js` |
+| Permissions | `requireAdminPermission` gate on **every** admin route + `requireService` on researcher services (do not rely on hiding links) | `routes/admin.js` · `middleware/auth.js` |
+| Transactions | Payment confirmation in one transaction with `SELECT … FOR UPDATE` (prevents double confirmation/partial execution) | `services/payments.js` |
+| Files | Extension allowlist + size limit + path validation inside `storage/` + `nosniff`/CSP headers on download | `services/files.js` · `services/library.js` |
+| SSRF protection | External fetching blocks internal URLs (SSRF) and checks file signatures (%PDF/PK) | `services/library-sources.js` |
+| Secrets | No keys in the interface or Git; all calls are server-side | `.env` (excluded) |
+| Data privacy | `/api/users` is no longer public: requires an **administrator** session and returns 403 to others; exposes only limited columns (no `google_sub` or sensitive data) | `server.js` |
 
-### لا تنفيذ للأكواد من الملفات المرفوعة (ضمان صريح)
+### Uploaded files are never executed (explicit guarantee)
 
-هذا المتطلب مغطّى على **خمس طبقات مستقلة** — لا واحدة منها وحدها تكفي:
+This requirement is covered by **five independent layers** — none would be sufficient on its own:
 
-| # | الطبقة | التفصيل | الملف |
+| # | Layer | Details | File |
 | --- | --- | --- | --- |
-| 1 | **لا static للتخزين** | مجلد `storage/` **لا يُقدَّم** عبر HTTP إطلاقاً؛ `express.static` يشير إلى `public/` فقط | `server.js` |
-| 2 | **قائمة امتدادات مغلقة** | ١٦ امتداداً فقط. **لا** `.js` ولا `.html` ولا `.svg` ولا `.php` ولا `.sh` ولا `.exe` — و`svg` مستبعَد عمداً لأنه أشهر ثغرة XSS مخزّنة | `constants.js` |
-| 3 | **فحص البصمة الثنائية** | نقرأ **بايتات الملف نفسها** ونتأكد أنها تطابق الامتداد (`%PDF` · `PK` · `OLE2` · `RIFF/WEBP` · PNG/JPEG)، مع فحص مجلد داخلي لـ `docx/xlsx/pptx` | `services/upload-guard.js` |
-| 4 | **نوع محتوى مُجبَر** | النص يُقدَّم `text/plain` دائماً؛ الصورة لا تُقبل إلا `jpeg/png/webp`؛ ما عدا ذلك `application/octet-stream` | `routes/workspace.js` |
-| 5 | **ترويسات معزولة** | `nosniff` + `Content-Disposition` + `Content-Security-Policy: default-src 'none'; sandbox` على **كل** استجابة ملف | `routes/workspace.js` · `routes/admin.js` |
+| 1 | **No static serving of storage** | The `storage/` directory is **never served** over HTTP; `express.static` points only to `public/` | `server.js` |
+| 2 | **Closed extension allowlist** | Only 16 extensions. **No** `.js`, `.html`, `.svg`, `.php`, `.sh`, or `.exe` — `svg` is intentionally excluded because it is a common stored-XSS vector | `constants.js` |
+| 3 | **Binary signature check** | Read the file's **actual bytes** and verify they match the extension (`%PDF` · `PK` · `OLE2` · `RIFF/WEBP` · PNG/JPEG), with an internal directory check for `docx/xlsx/pptx` | `services/upload-guard.js` |
+| 4 | **Forced content type** | Text is always served as `text/plain`; images accept only `jpeg/png/webp`; everything else is `application/octet-stream` | `routes/workspace.js` |
+| 5 | **Isolated headers** | `nosniff` + `Content-Disposition` + `Content-Security-Policy: default-src 'none'; sandbox` on **every** file response | `routes/workspace.js` · `routes/admin.js` |
 
-بالإضافة: لا `eval`، ولا `child_process`، ولا فك ضغط يُخرج ملفات على القرص (قراءة `word/document.xml` في الذاكرة فقط).
+Additionally: no `eval`, no `child_process`, and no archive extraction that writes files to disk (`word/document.xml` is read in memory only).
 
-### حارس الإنتاج (يرفض الإقلاع على إعداد ناقص)
+### Production guard (refuses to start with incomplete configuration)
 
-عند `NODE_ENV=production` **يتوقف الخادم عن الإقلاع** إذا:
+With `NODE_ENV=production`, the server **refuses to start** if:
 
-| الشرط | لماذا |
+| Condition | Why |
 | --- | --- |
-| `SESSION_SECRET` فارغ | منع تزوير كوكي الجلسة (كان يُستعمل سر تطوير ثابت) |
-| `ADMIN_TOKEN` فارغ أو أقصر من ٢٤ محرفاً | **الأخطر**: خلف Nginx بدونه تصبح لوحة الإدارة مفتوحة بلا كلمة مرور |
-| `TRUST_PROXY` غير معرّف | بدونه يصبح كل زائر `127.0.0.1` ⇒ تُفتح حدود المعدّل ولوحة الإدارة |
-| `APP_BASE_URL` فارغ | رابط العودة من دخول جوجل لا يعمل |
+| `SESSION_SECRET` is empty | Prevent session-cookie forgery (a fixed development secret was previously used) |
+| `ADMIN_TOKEN` is empty or shorter than 24 characters | **Most critical**: behind Nginx, the admin dashboard is open without a password |
+| `TRUST_PROXY` is undefined | Without it, every visitor appears as `127.0.0.1` ⇒ rate limits and admin protection fail |
+| `APP_BASE_URL` is empty | Google sign-in callback URL does not work |
 
-للنشر خلف جدار ناري بلا لوحة إدارة: `ADMIN_ALLOW_LOCAL=1` يتجاوز شرط `TRUST_PROXY` فقط.
+For deployment behind a firewall with no admin dashboard: `ADMIN_ALLOW_LOCAL=1` bypasses only the `TRUST_PROXY` requirement.
 
-### زيادات أمنية مُنفَّذة
+### Implemented security improvements
 
-| المجال | قبل | بعد |
+| Area | Before | After |
 | --- | --- | --- |
-| مقارنة `ADMIN_TOKEN` | `===` (قابلة لهجوم التوقيت) | `crypto.timingSafeEqual` |
-| CORS | `cors()` مفتوح (`*`) | مقصور على `SITE_URL`، أو محجوب كلياً إن لم يُضبط |
-| `requireService` | يفشل **مفتوحاً** (`allowed = true`) | يفشل **مغلقاً** (عدا المدير) |
-| رفع الملفات | بلا سقف تزامن | ٤ للباحثين · ٢ للكتب (٢٠٠MB) + حدّ معدّل على رفع الكتب |
-| تفاصيل أخطاء `/api/health` | تُكشف دائماً | مخفية في الإنتاج |
-| ثغرة DoS | معرّف غير UUID ⇒ **الخادم كله ينهار** | `isUuid()` في طبقة الخدمات + معالج أخطاء عام + شبكة أمان على العملية |
-| التبعيات | ١٠ ثغرات (٢ عالية · `node-forge`) | ٣ متوسطة (`firebase-admin` 12.7.0 ⇒ 14.5.0 أزال `node-forge`) |
-| صلاحيات الملفات | `644`/`664` على الأسرار | `600` على `.env` ومفاتيح الخدمة · `700` على `storage/` |
+| `ADMIN_TOKEN` comparison | `===` (vulnerable to timing attacks) | `crypto.timingSafeEqual` |
+| CORS | Open `cors()` (`*`) | Restricted to `SITE_URL`, or fully blocked if unset |
+| `requireService` | **Fail-open** (`allowed = true`) | **Fail-closed** (except administrators) |
+| File uploads | No concurrency limit | 4 for researchers · 2 for books (200 MB) + rate limit on book uploads |
+| `/api/health` error details | Always exposed | Hidden in production |
+| DoS vulnerability | Non-UUID ID ⇒ **entire server crashes** | `isUuid()` in service layer + general error handler + process-level safety net |
+| Dependencies | 10 vulnerabilities (2 high · `node-forge`) | 3 moderate (`firebase-admin` 12.7.0 ⇒ 14.5.0 removed `node-forge`) |
+| File permissions | `644`/`664` on secrets | `600` on `.env` and service keys · `700` on `storage/` |
 
-### حماية حساب المدير (لا يُوقَف ولا يُحذف)
+### Administrator account protection (cannot be suspended or deleted)
 
-حساب المدير **محمي على 4 طبقات** — أي محاولة إيقاف أو حذف أو تغيير دوره تفشل:
+The administrator account is **protected by 4 layers** — any attempt to suspend, delete, or change its role fails:
 
-1. **الواجهة**: لا يظهر زر «إيقاف» أو «حذف» لصف المدير (تظهر شارة «محمي»)، ولا يمكن للمدير إيقاف نفسه.
-2. **المسار**: `POST /admin/users/:id/status|delete` يتحقق ثم يرفض العملية برسالة عربية.
-3. **الاستعلام (SQL)**: الشرط `AND COALESCE(role,'user') <> 'admin'` داخل نفس جملة `UPDATE`/`DELETE` — فحتى لو مرّ طلب بدون تحقق يبقى المدير محفوظاً.
-4. **قاعدة البيانات**: `trigger` على جدول `users` يمنع `is_active=false` أو `deleted=true` أو تغيير الدور، ويرفض `DELETE` — حتى على `psql` مباشرة.
+1. **Interface**: no “Suspend” or “Delete” button appears on the administrator's row (a “Protected” badge appears instead), and administrators cannot suspend themselves.
+2. **Route**: `POST /admin/users/:id/status|delete` validates and then rejects the action with an Arabic message.
+3. **SQL query**: the condition `AND COALESCE(role,'user') <> 'admin'` is in the same `UPDATE`/`DELETE` statement — so the administrator remains protected even if a request bypasses validation.
+4. **Database**: a `trigger` on `users` prevents `is_active=false`, `deleted=true`, or role changes, and rejects `DELETE` — even directly through `psql`.
 
-**إلا ذلك**: المدير وحده يغيّر بريده من `/admin/settings ← بريد المدير` (المسار يتطلب `role='admin'` فعلياً، والمشرف يُمنع حتى لو الرابط مباشر).
+**Exception**: only the administrator can change their email through `/admin/settings ← Administrator email` (the route requires `role='admin'` specifically; supervisors are denied even with a direct link).
 
-### ملاحظات أمنية مهمة
+### Important security notes
 
-- كان الملفان `ai-api.md` و`.env.local` يحتويان مفاتيح OpenRouter وGemini وGrok مكتوبة صراحةً. أُزيل الاثنان من جذر المشروع (موجودان فقط داخل `backup/legacy-nextjs-react-20260923.tar.gz`) ونُقلت المفاتيح إلى `.env`. **يُنصح بإعادة توليد هذه المفاتيح** من لوحات المزوّدين، فهي تُعدّ مكشوفة.
-- لا تُرسل أي مفتاح من هذه المفاتيح إلى الواجهة؛ كلها تُستخدم على الخادم فقط (لا وجود لبادئة `NEXT_PUBLIC_` الآن).
-- ملف `.env` مستثنى من Git — تأكد من عدم رفعه.
+- The `ai-api.md` and `.env.local` files previously contained plaintext OpenRouter, Gemini, and Grok keys. Both were removed from the project root (they exist only inside `backup/legacy-nextjs-react-20260923.tar.gz`) and the keys were moved to `.env`. **Regenerate these keys** in the provider dashboards; consider them exposed.
+- Never send any of these keys to the interface; they are used server-side only (there is no `NEXT_PUBLIC_` prefix now).
+- `.env` is excluded from Git — make sure it is not uploaded.
 
 ---
 
-## دليل النشر على موقع الاستضافة (تجربة العميل)
+## Deployment guide for the hosting site (client trial)
 
-> الترتيب الصحيح: HTTPS أولاً، ثم متغيرات البيئة، ثم بناء وتشغيل.
+> Correct order: HTTPS first, then environment variables, then build and run.
 
-### ١) متغيرات البيئة
+### 1) Environment variables
 
 ```bash
 cp .env.example .env
@@ -834,18 +833,18 @@ DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DB?sslmode=require
 ADMIN_EMAILS=boss@example.com
 ```
 
-- `SITE_URL` يقيّد CORS: اضبطه على نطاقك بالضبط أو لن يُسمح بأي قراءة من الأصل.
-- سجّل `{APP_BASE_URL}/auth/google/callback` حرفياً في Google Cloud Console.
+- `SITE_URL` restricts CORS: set it to your exact domain or no cross-origin reads will be allowed.
+- Register `{APP_BASE_URL}/auth/google/callback` exactly in Google Cloud Console.
 
-**تحقّق قبل النشر:** شغّل `npm start` — يجب أن ترى:
+**Verify before deployment:** run `npm start` — you should see:
 
 ```
 فحص أمان الإنتاج: ADMIN_TOKEN ✓ · TRUST_PROXY ✓ · APP_BASE_URL ✓ · SESSION_SECRET ✓
 ```
 
-وإن رأيت `✖ رفض الإقلاع` فالرسالة تشرح بالضبط ما ينقص.
+If you see `✖ رفض الإقلاع`, the message explains exactly what is missing.
 
-### ٢) تهيئة قاعدة البيانات
+### 2) Initialize the database
 
 ```bash
 npm ci --omit=dev
@@ -853,14 +852,14 @@ npm run db:init     # ينشئ الجداول + الـ triggers
 npm run db:seed     # الباقات المجانية + الإعدادات
 ```
 
-### ٣) صلاحيات الملفات (بعد كل استنساخ جديد)
+### 3) File permissions (after each new clone)
 
 ```bash
 chmod 600 .env *firebase-adminsdk*.json client_secret_*.json
 chmod 700 storage storage/users storage/library
 ```
 
-### ٤) الوكيل العكسي — الحد الأدنى الآمن
+### 4) Reverse proxy — secure minimum configuration
 
 ```nginx
 server {
@@ -879,7 +878,7 @@ server {
 }
 ```
 
-### ٥) التشغيل كخدمة دائمة
+### 5) Run as a persistent service
 
 ```bash
 npm install -g pm2
@@ -887,44 +886,44 @@ pm2 start server.js --name zena-ai --instances 1
 pm2 save && pm2 startup
 ```
 
-> `--instances 1`: حدود المعدّل محفوظة في ذاكرة العملية، فبعدة نسخ تصبح الحدود مضاعفة.
+> `--instances 1`: rate limits are stored in process memory, so multiple instances multiply the limits.
 
-### ٦) قائمة تحقّق نهائية قبل إعطاء العميل الرابط
+### 6) Final checklist before sharing the URL with the client
 
-- [ ] `NODE_ENV=production` مطبَّق
-- [ ] `ADMIN_TOKEN` عشوائي وطويل · `TRUST_PROXY=1` · `SESSION_SECRET` عشوائي
-- [ ] `chmod 600` على `.env` ومفاتيح الخدمة
-- [ ] HTTPS فعّال وشهادة SSL سارية
-- [ ] `https://your-domain.com/admin` يعيد 403 لغير المصرَّح (لا يفتح)
-- [ ] رفع `.txt` فيه HTML يُقبل ويُعرض كنص (بلا تنفيذ)
-- [ ] رفع `report.pdf` وهو سكربت مرفوض (فحص البصمة)
-- [ ] `/api/health` لا يكشف تفاصيل خطأ
-- [ ] `npm test` و`npm run test:smoke` يمرّان كاملين
+- [ ] `NODE_ENV=production` is set
+- [ ] `ADMIN_TOKEN` is random and long · `TRUST_PROXY=1` · `SESSION_SECRET` is random
+- [ ] `chmod 600` is set on `.env` and service keys
+- [ ] HTTPS is enabled and the SSL certificate is valid
+- [ ] `https://your-domain.com/admin` returns 403 to unauthorized users (does not open)
+- [ ] Uploading a `.txt` file containing HTML succeeds and displays it as text (not executed)
+- [ ] Uploading `report.pdf` containing a script is rejected (signature check)
+- [ ] `/api/health` does not expose error details
+- [ ] `npm test` and `npm run test:smoke` both pass completely
 
 ---
 
-## 🚀 النشر على Vercel (تجربة العميل)
+## 🚀 Deploy to Vercel (client trial)
 
-> يُنشر المشروع كما هو بلا أي تعديل على الكود — ملف `server.js` يستدعي `server.listen()`
-> ⇒ يكتشفه Vercel تلقائياً.
+> Deploy the project as-is with no code changes — `server.js` calls `server.listen()`
+> ⇒ Vercel detects it automatically.
 
-### ١) قاعدة البيانات — Neon (مجانية)
+### 1) Database — Neon (free)
 
-1. من داخل Vercel: تبويب **Storage → Create Database → Neon** (أو neon.tech مباشرة).
-2. خذ **Connection string** (يبدأ بـ `postgres://`).
-3. ⚠️ Neon يعطيك كلمة مرور جديدة لكل فرع — استعمل فرع **Default** في الإنتاج.
+1. In Vercel, go to **Storage → Create Database → Neon** (or go directly to neon.tech).
+2. Copy the **Connection string** (starts with `postgres://`).
+3. ⚠️ Neon gives each branch a new password — use the **Default** branch in production.
 
-### ٢) تهيئة القاعدة (مرة واحدة، محلياً)
+### 2) Initialize the database (once, locally)
 
 ```bash
 DATABASE_URL='<رابط Neon>' npm run db:init
 DATABASE_URL='<رابط Neon>' npm run db:seed
 ```
 
-> `db:init` ينشئ الجداول والـ triggers. وللتأكّد نفّذ:
+> `db:init` creates the tables and triggers. To verify, run:
 > `DATABASE_URL='...' npm run check:deploy`
 
-### ٣) متغيّرات البيئة في Vercel (Settings → Environment Variables)
+### 3) Environment variables in Vercel (Settings → Environment Variables)
 
 ```
 NODE_ENV          = production
@@ -939,18 +938,18 @@ GOOGLE_CLIENT_SECRET  = <من Google Cloud Console>
 OPENROUTER_API_KEYS   = <أو GEMINI_API_KEY أو GROQ_API_KEY>
 ```
 
-> ✅ **`TRUST_PROXY` لا تحتاجه على Vercel** — يكتشفه الكود تلقائياً من متغيّر `VERCEL`.
-> سجّل في Google Cloud Console بالضبط:
+> ✅ **`TRUST_PROXY` is not needed on Vercel** — the code detects it automatically from the `VERCEL` variable.
+> Register this exact URL in Google Cloud Console:
 > `https://<your-project>.vercel.app/auth/google/callback`
 
-### ٤) أضِف متغيّرات Firebase للواجهة (اختياري)
+### 4) Add Firebase frontend variables (optional)
 
-انسخ قيم `FIREBASE_*` من ملف `.env` إلى Vercel (هي مفاتيح عامة، لا سرّية).
-بدونها تعمل المنصة كلها، ويتعطّل فقط إشعار الهاتف (FCM).
+Copy the `FIREBASE_*` values from `.env` to Vercel (they are public keys, not secrets).
+Without them, the platform works; only phone notifications (FCM) are disabled.
 
-### ٥) انشر
+### 5) Deploy
 
-اربط المستودع من Vercel ← deploy. أو من الطرفية:
+Connect the repository in Vercel and deploy, or use the terminal:
 
 ```bash
 npm i -g vercel
@@ -958,41 +957,40 @@ vercel link
 vercel --prod
 ```
 
-### ⚠️ حدود يجب معرفتها قبل التجربة
+### ⚠️ Limitations to know before testing
 
-| الميزة | الحالة على Vercel | السبب |
+| Feature | Status on Vercel | Reason |
 | --- | --- | --- |
-| الشات + المناقشة | ✅ **يعمل** | كل شيء في PostgreSQL |
-| الدخول (Google OAuth) | ✅ يعمل | يحتاج ضبط الـ callback |
-| لوحة الإدارة | ✅ تعمل | `ADMIN_TOKEN` + `ADMIN_EMAILS` |
-| إشعارات داخل الموقع | ✅ تعمل | جدول `notifications` |
-| إشعار الهاتف (FCM) | ❌ معطّل | ملف حساب الخدمة مستثنى من Git |
-| **رفع الملفات** | ❌ **معطّل** | نظام الملفات مؤقّت + حدّ ٤.٥ م.ب |
-| حدود المعدّل (in-memory) | ⚠️ غير دقيقة | تُصفَّر بين الاستدعاءات |
+| Chat + defense | ✅ **Works** | Everything is in PostgreSQL |
+| Sign-in (Google OAuth) | ✅ Works | Callback must be configured |
+| Admin dashboard | ✅ Works | `ADMIN_TOKEN` + `ADMIN_EMAILS` |
+| In-site notifications | ✅ Works | `notifications` table |
+| Phone notifications (FCM) | ❌ Disabled | Service-account file is excluded from Git |
+| **File uploads** | ❌ **Disabled** | Ephemeral filesystem + 4.5 MB limit |
+| Rate limits (in-memory) | ⚠️ Inaccurate | Reset between invocations |
 
-> عند محاولة الرفع يظهر للباحث رسالة عربية واضحة:
-> «رفع الملفات غير متاح على هذه المنصة حالياً» — بدل خطأ ٥٠٠ أو فقدان الملف.
+> When a researcher attempts an upload, a clear Arabic message appears:
+> “File uploads are currently unavailable on this platform” — instead of a 500 error or lost file.
 >
-> **للنقل لسيرفر العميل لاحقاً:** نفس الكود يعمل كما هو على VPS، والرفع يعود للعمل
-> تلقائياً لأن `isEphemeralStorage()` تصبح `false`. لا حاجة لأي تعديل.
+> **To move to the client's server later:** the same code works unchanged on a VPS, and uploads resume
+> automatically because `isEphemeralStorage()` becomes `false`. No changes are needed.
 
-### التحقّق بعد النشر
+### Verify after deployment
 
-- [ ] `https://<your-project>.vercel.app/api/health` يرجع `{"status":"ok"}`
-- [ ] تسجيل الدخول بجوجل ينجح
-- [ ] `/dashboard` تفتح بعد الدخول
-- [ ] `/chat` ترسل رسالة ويصل ردّ فعلاً (يستهلك نقاطاً)
-- [ ] `/defense` تفتح
-- [ ] `https://<your-project>.vercel.app/admin` تعيد 401 بلا رمز
+- [ ] `https://<your-project>.vercel.app/api/health` returns `{"status":"ok"}`
+- [ ] Google sign-in succeeds
+- [ ] `/dashboard` opens after sign-in
+- [ ] `/chat` sends a message and receives a real response (uses points)
+- [ ] `/defense` opens
+- [ ] `https://<your-project>.vercel.app/admin` returns 401 without a token
 
-## الخطوة التالية
+## Next steps
 
-خطة العمل الحيّة والمهام غير المكتملة والاقتراحات كلها في ملف **`TODO.md`** في جذر المشروع.
-والمطبَّق فعلياً اليوم يشمل:
+The active work plan, unfinished tasks, and suggestions are all in **`TODO.md`** at the project root.
+Currently implemented:
 
-- ✅ **قاعدة البيانات**: `db:init` + `db:seed` (4 باقات + الإعدادات + 6 أدوار + 5 مسارات بحث).
-- ✅ **نظام الدخول**: جوجل OAuth 2.0 + جلسات موقّعة (HMAC)، و`ADMIN_EMAILS` يمنح دور المدير.
-- ✅ **لوحة الإدارة الكاملة**: نظرة عامة · باحثون · أدوار وصلاحيات · باقات · مكتبة علمية · طلبات دفع · استهلاك · مزوّدون · إعدادات.
-- ✅ **لوحة الباحث الكاملة**: الإحصائية · مسار البحث · المراجع · المفكرة · الملفات · المشرف الذكي · المناقشة · الاشتراك والدفع.
-- ⏳ **المتبقي**: راجع `TODO.md` (تأمين الإشعارات على المتصفح، حدود المعدّل على لوحة الإدارة، بحث FTS في المكتبة، تصدير PDF/Word، النسخ الاحتياطي…).
-
+- ✅ **Database**: `db:init` + `db:seed` (4 plans + settings + 6 roles + 5 research paths).
+- ✅ **Sign-in**: Google OAuth 2.0 + signed sessions (HMAC), and `ADMIN_EMAILS` grants the administrator role.
+- ✅ **Full admin dashboard**: overview · researchers · roles and permissions · plans · scholarly library · payment requests · usage · providers · settings.
+- ✅ **Full researcher dashboard**: analytics · research journey · references · notebook · files · AI supervisor · defense · subscription and payment.
+- ⏳ **Remaining**: see `TODO.md` (secure browser notifications, admin-dashboard rate limits, library FTS search, PDF/Word export, backups…).

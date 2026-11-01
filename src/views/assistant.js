@@ -3,16 +3,12 @@ import { icon } from './icons.js';
 import { escapeHtml, renderLayout } from './layout.js';
 
 /**
- * صفحة «المعلم» (/assistant): مساعد تعليمي مستقل عن المشرف الذكي.
+ * Teaching assistant page, separate from the research supervisor.
  *
- * قرارات التصميم (بنفس نمط صفحة الشات):
- * - بلا ترويسة صفحة: أقصى مساحة لمربع الدردشة.
- * - سجل محادثات المعلم داخل السايدبار (أسفل رابط المشرف الذكي).
- * - إرفاق الملفات داخل نموذج الإرسال (للترجمة) — نفس آلية الشات.
- * - إعادة استخدام chat-send.js كما هو (fetch + قطع محدّثة بلا إعادة تحميل).
+ * Reuses the chat layout, sidebar history, attachment flow, and incremental updates.
  */
 
-/** فقاعة رسالة واحدة (المعلم هو الطرف الآخر دائماً). */
+/** Renders a message bubble; assistant messages belong to the teacher. */
 function renderMessage(message) {
   const isUser = message.role === 'user';
   return `<div class="bubble ${isUser ? 'bubble-user' : 'bubble-ai'}">
@@ -21,7 +17,7 @@ function renderMessage(message) {
 </div>`;
 }
 
-/** تصريف عربي مبسّط لعدد الرسائل. */
+/** Formats a message count in Arabic. */
 function messageCountLabel(count) {
   const n = Number(count) || 0;
   if (n === 1) return 'رسالة واحدة';
@@ -30,7 +26,7 @@ function messageCountLabel(count) {
   return `${n} رسالة`;
 }
 
-/** قائمة محادثات المعلم — تُدرَج في أعلى قائمة السايدبار. */
+/** Renders the teacher's conversations in the sidebar. */
 function renderConversations(conversations, activeId) {
   const list = conversations.length
     ? `<ul class="chat-list">
@@ -57,8 +53,7 @@ function renderConversations(conversations, activeId) {
 </div>`;
 }
 
-/** إرفاق ملفات مع الرسالة (للترجمة) — قائمة منسدلة مطويّة فوق صندوق الكتابة،
- *  تظهر فقط عند وجود ملفات (نفس بنية الإرفاق في الشات). */
+/** Renders a collapsible file attachment list when files are available. */
 function renderAttachRow(files = []) {
   if (!files.length) return '';
 
@@ -82,7 +77,7 @@ function renderAttachRow(files = []) {
 </details>`;
 }
 
-/** نتائج البحث — تظهر تحت آخر رد: بيانات المصدر ورابط فتحه/تحميله. */
+/** Renders search results and source links below the latest reply. */
 function renderSourcesFound(conversation) {
   const items = Array.isArray(conversation?.sources_found) ? conversation.sources_found : [];
   if (!items.length) return '';
@@ -222,4 +217,3 @@ export function renderAssistantPage({
     body
   });
 }
-

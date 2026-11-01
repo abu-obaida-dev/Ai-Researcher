@@ -1,22 +1,12 @@
 import { pool } from '../db/client.js';
 import { DEFAULT_ROLES, PLATFORM_SERVICES } from '../constants.js';
 
-/**
- * خدمة الوصول واحدة لكل المنصة (خدمات × باقات × أدوار):
- *
- *   1) الدور: مدير (ADMIN_EMAILS في .env) ← مشرف (جدول supervisors) ← دور الباقة.
- *   2) الصلاحيات: من جدولي roles + role_permissions مع سقوط آمن إلى DEFAULT_ROLES.
- *   3) الخدمات: كل خدمة في PLATFORM_SERVICES لها صلاحية واحدة، فمفتوحة إن امتلك
- *      الدور صلاحيتها. الدردشة (chat:use) متاحة لكل الباقات بمجرد التسجيل.
- *
- * لا شيء هنا ثابت في الكود: المدير يضبط الخدمات من «الأدوار والصلاحيات» والباقات
- * تربط الباحثين بدور من «الباقات»، والتغيير يسري في الطلب التالي مباشرةً.
- */
+/** Resolves service access from administrator, supervisor, and plan roles. */
 
 const ROLE_CACHE_TTL_MS = 30000;
 let cache = { at: 0, roles: new Map(), planRoles: new Map() };
 
-/** ذاكرة قصيرة للصلاحيات (استعلامان سريعان بدل استعلام لكل رابط). */
+/** Short-lived cache for role permissions. */
 function cached(getter) {
   const now = Date.now();
   if (now - cache.at > ROLE_CACHE_TTL_MS) {
@@ -25,12 +15,12 @@ function cached(getter) {
   return getter();
 }
 
-/** إعادة بناء الذاكرة (بعد تعديل الأدوار أو الباقات من اللوحة). */
+/** Clears cached permissions after role or plan changes. */
 export function clearAccessCache() {
   cache = { at: 0, roles: new Map(), planRoles: new Map() };
 }
 
-/** صلاحيات دور من قاعدة البيانات، مع DEFAULT_ROLES كسقوط آمن. */
+/** Loads role permissions with DEFAULT_ROLES as a fallback. */
 async function permissionsOfRole(code) {
   return cached(async () => {
     const role = String(code || '').trim();
@@ -45,7 +35,7 @@ async function permissionsOfRole(code) {
       console.warn(`تعذّرت قراءة صلاحيات الدور ${role}: ${error.code || error.message}`);
     }
 
-    // لا صف في الجدول ⇒ نستخدم الافتراضي (النظام يعمل قبل تشغيل db:seed)
+    // Keep defaults available before database seeding.
     if (!permissions || permissions.size === 0) {
       const fallback = DEFAULT_ROLES.find((item) => item.code === role);
       permissions = new Set(fallback?.permissions || ['dashboard:view', 'chat:use']);
@@ -56,11 +46,7 @@ async function permissionsOfRole(code) {
   });
 }
 
-/**
- * صلاحيات عدة أدوار دفعة واحدة — تُستخدم في صفحة الباقات العامة لتوليد
- * قائمة مزايا كل باقة من صلاحيات دورها الحقيقي (استعلام لكل دور مع كاش 30 ثانية).
- * يعيد Map: roleCode → Set<permission>.
- */
+/** Loads permissions for multiple roles and returns a role-to-permissions map. */
 export async function permissionsForRoles(codes) {
   const unique = [...new Set((Array.isArray(codes) ? codes : [codes]).map((code) => String(code || '').trim()))].filter(
     Boolean
@@ -70,10 +56,7 @@ export async function permissionsForRoles(codes) {
   return new Map(entries);
 }
 
-/**
- * صلاحيات دور كما هي محفوظة (بلا كاش وبلا سقوط افتراضي) — لعرضها في
- * لوحة الإدارة قبل التعديل (الباقات · صلاحيات المشرفين).
- */
+/** Loads stored permissions without defaults for admin editing. */
 export async function storedPermissionsOfRole(code) {
   const role = String(code || '').trim();
   if (!role) return [];
@@ -89,7 +72,7 @@ export async function storedPermissionsOfRole(code) {
   }
 }
 
-/** أسماء أدوار النظام التي قد تُستعمل كوجهة للتعديل. */
+/** Returns role codes available for assignment. */
 export async function roleExists(code) {
   const role = String(code || '').trim();
   if (!role) return false;
@@ -97,11 +80,7 @@ export async function roleExists(code) {
   return rows.length > 0;
 }
 
-/**
- * إضافة صلاحية لدور. تُستدعى من **صفحة الباقات** (صلاحيات الخدمات التي تمنحها
- * الباقة لمشتركيها) ومن **صفحة الإعدادات** (صلاحيات دور المشرف) — فالمنطق واحد.
- * الصلاحية `*` (كل الصلاحيات) حماية لدور المدير فلا تُضاف ولا تُحذف.
- */
+/** Adds a role permission; wildcard permissions are reserved for administrators. */
 export async function addRolePermission(code, permission) {
   const role = String(code || '').trim();
   const value = String(permission || '').trim();
@@ -120,7 +99,7 @@ export async function addRolePermission(code, permission) {
   return { ok: true, role, permission: value };
 }
 
-/** حذف صلاحية من دور — نفس الاستعمال، و«*» محمية. */
+/** Removes a role permission; wildcard permissions are protected. */
 export async function removeRolePermission(code, permission) {
   const role = String(code || '').trim();
   const value = String(permission || '').trim();
@@ -136,7 +115,7 @@ export async function removeRolePermission(code, permission) {
   return { ok: true, role, permission: value };
 }
 
-/** دور كل باقة: plans.role_code (يربط الباقة بدور من جدول الأدوار). */
+/** Resolves the role assigned to a plan. */
 export async function planRoles() {
   return cached(async () => {
     if (cache.planRoles.size) return cache.planRoles;
@@ -150,7 +129,7 @@ export async function planRoles() {
       console.warn(`تعذّرت قراءة أدوار الباقات: ${error.code || error.message}`);
     }
 
-    // سقوط آمن: ترتيب الباقات في الثوابت
+    // Fall back to the default plan order.
     if (!cache.planRoles.size) {
       ['free_trial', 'student', 'researcher', 'thesis'].forEach((code, index) => {
         cache.planRoles.set(code, ['free', 'student', 'researcher', 'thesis'][index]);
@@ -160,7 +139,7 @@ export async function planRoles() {
     return cache.planRoles;
   });
 }
-/** هل هذا البريد مشرف أكاديمي (جدول supervisors)؟ */
+/** Checks whether an email belongs to an academic supervisor. */
 export async function isSupervisorEmail(email) {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) return false;
@@ -173,7 +152,7 @@ export async function isSupervisorEmail(email) {
   }
 }
 
-/** المشرفون المسجّلون في المنصة (لصفحة الإعدادات). */
+/** Lists registered supervisors for the settings page. */
 export async function listSupervisors() {
   try {
     const { rows } = await pool.query(
@@ -190,7 +169,7 @@ export async function listSupervisors() {
   }
 }
 
-/** إضافة مشرف بريده (يصبح دوره supervisor في طلبه القادم). */
+/** Adds a supervisor email. */
 export async function addSupervisor(email, addedBy = 'لوحة الإدارة') {
   const normalized = String(email || '').trim().toLowerCase().slice(0, 255);
   await pool.query(
@@ -198,7 +177,7 @@ export async function addSupervisor(email, addedBy = 'لوحة الإدارة') 
     [normalized, String(addedBy || '').slice(0, 255)]
   );
 
-  // إن كان الحساب موجوداً بالفعل نحدّث دوره فوراً بلا انتظار الدخول
+  // Update the role immediately when the account already exists.
   await pool.query(
     "UPDATE users SET role = 'supervisor', updated_at = NOW() WHERE lower(email) = $1 AND role <> 'admin'",
     [normalized]
@@ -208,11 +187,7 @@ export async function addSupervisor(email, addedBy = 'لوحة الإدارة') 
   return normalized;
 }
 
-/**
- * دور الحساب: ما هو مكتوب في users.role بعد المزامنة، وإلا دور باقته.
- * حساب بلا باقة (بيانات قديمة أو حساب جديد لم تُضبط باقته) ⇒ دور «باحث»
- * حتى لا تُقفل خدمات المنصة عليه فجأة؛ أما من له باقة فدورها هو الفيصل.
- */
+/** Resolves the synchronized account role, falling back to the plan role. */
 export async function resolveRole(account) {
   if (!account) return null;
   if (account.role === 'admin') return 'admin';
@@ -222,7 +197,7 @@ export async function resolveRole(account) {
   return map.get(account.plan_code) || (account.plan_code ? 'free' : 'researcher');
 }
 
-/** صلاحيات الحساب. المدير يملك '*' فكل شيء مفتوح له. */
+/** Returns account permissions; administrators receive the wildcard permission. */
 export async function permissionsFor(account) {
   if (!account) return new Set();
   if (account.role === 'admin') return new Set(['*']);
@@ -230,16 +205,13 @@ export async function permissionsFor(account) {
   return permissionsOfRole(await resolveRole(account));
 }
 
-/** هل الحساب يملك صلاحية (أو خدمة) محددة؟ */
+/** Checks whether an account has a permission or service. */
 export async function can(account, permission) {
   const permissions = await permissionsFor(account);
   return permissions.has('*') || permissions.has(permission);
 }
 
-/**
- * خدمات الحساب المفتوحة: مصفوفة خدمات من PLATFORM_SERVICES مع enabled + سبب الإغلاق.
- * تُستخدم في السايدبار وفي صفحة الحساب وفي بوابة المسارات.
- */
+/** Returns available services and closure reasons for navigation and access gates. */
 export async function servicesFor(account) {
   const permissions = await permissionsFor(account);
   const allowed = (service) =>
@@ -248,18 +220,18 @@ export async function servicesFor(account) {
   return PLATFORM_SERVICES.map((service) => ({
     ...service,
     enabled: allowed(service),
-    // سبب الإغلاق يظهر للباحث: خدمته ليست ضمن صلاحيات دور باقته
+    // Include a user-visible reason when the role does not grant a service.
     reason: allowed(service) ? '' : `غير متاحة في باقتك الحالية — دور باقتك لا يسمح بـ ${service.label}.`
   }));
 }
 
-/** مفاتيح الخدمات المفتوحة (للسايدبار والفحوص). */
+/** Returns the keys of enabled services. */
 export async function enabledServiceKeys(account) {
   const list = await servicesFor(account);
   return list.filter((item) => item.enabled).map((item) => item.key);
 }
 
-/** إزالة مشرف (يعود دوره إلى دور باقته). */
+/** Removes a supervisor and restores the account's plan role. */
 export async function removeSupervisor(email) {
   const normalized = String(email || '').trim().toLowerCase().slice(0, 255);
   const { rowCount } = await pool.query('DELETE FROM supervisors WHERE lower(email) = $1', [normalized]);

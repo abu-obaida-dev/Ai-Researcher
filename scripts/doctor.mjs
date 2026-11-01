@@ -1,8 +1,4 @@
-/**
- * تشخيص سريع: قاعدة البيانات + مزوّدو الذكاء الاصطناعي + دخول لوحة الإدارة.
- *   node --env-file=.env scripts/doctor.mjs        (أو: npm run doctor)
- * يطبع لكل مزوّد: يعمل الآن / خطأ.HTTP + ما قاله المزوّد بالعربية.
- */
+/** Checks database connectivity, AI providers, and admin access. */
 import { pool } from '../src/db/client.js';
 import { PROVIDER_LABELS, probeProvider, providerStatus, runSupervisor } from '../src/services/ai.js';
 

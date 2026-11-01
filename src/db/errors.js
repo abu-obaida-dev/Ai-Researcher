@@ -1,9 +1,6 @@
-/**
- * أدوات مساعدة لتوضيح أخطاء PostgreSQL وتحويلها إلى رسائل قابلة للتنفيذ.
- * تُستخدم في سكربتات التهيئة (init) والبيانات التجريبية (seed).
- */
+/** PostgreSQL connection parsing and actionable error messages. */
 
-/** يحلّل DATABASE_URL ويعيد تفاصيل الاتصال مع اسم قاعدة البيانات الهدف. */
+/** Parses DATABASE_URL and returns the target connection details. */
 export function resolveDatabaseTarget(connectionString = process.env.DATABASE_URL) {
   if (!connectionString) {
     throw new Error(
@@ -29,14 +26,14 @@ export function resolveDatabaseTarget(connectionString = process.env.DATABASE_UR
   };
 }
 
-/** يبني رابط اتصال بقاعدة الصيانة postgres — تُستخدم لإنشاء قاعدة البيانات إن لم تكن موجودة. */
+/** Builds a maintenance-database URL for database creation. */
 export function adminConnectionString(connectionString) {
   const url = new URL(connectionString);
   url.pathname = '/postgres';
   return url.toString();
 }
 
-/** يحوّل خطأ الاتصال أو الاستعلام إلى رسالة عربية واضحة مع خطوات الحل. */
+/** Converts database errors into actionable messages. */
 export function describeDatabaseError(error, target, action) {
   const code = error?.code;
   const where = target ? ` على ${target.host}:${target.port}/${target.database}` : '';
@@ -72,7 +69,7 @@ export function describeDatabaseError(error, target, action) {
   return lines.join('\n');
 }
 
-/** تلميح إرشادي موجز حسب كود خطأ PostgreSQL — يُستخدم في مسارات الـ API وصفحات الإدارة. */
+/** Returns a short hint for common PostgreSQL errors. */
 export function hintForDatabaseError(error) {
   switch (error?.code) {
     case 'ECONNREFUSED':

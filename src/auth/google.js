@@ -1,20 +1,17 @@
-/**
- * مخطط المصادقة: دخول جوجل عبر OAuth 2.0 + جلسات موقّعة بـ HMAC.
- * البيانات تُخزّن في PostgreSQL الخاصة بنا — لا Firestore إطلاقاً.
- */
+/** Google OAuth and HMAC-signed sessions backed by PostgreSQL. */
 
 import crypto from 'node:crypto';
 
 export const SESSION_COOKIE_NAME = 'ai_session';
 export const OAUTH_STATE_COOKIE = 'ai_oauth_state';
-/** مدة الجلسة: يوم واحد (24 ساعة) — تُستخدم في حمولة التوقيع exp وفي Max-Age الكوكي معاً. */
+/** Session lifetime used by both the signed payload and cookie. */
 export const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
 
-/** إعدادات جوجل من البيئة — فارغة تعني أن الدخول غير مُفعّل بعد. */
+/** Reads Google OAuth settings from the environment. */
 export function googleOAuthConfig() {
   const clientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
   const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
@@ -26,7 +23,7 @@ export function isGoogleAuthConfigured() {
   return googleOAuthConfig().configured;
 }
 
-/** الرابط العام للمنصة، أو مضيف الطلب الحالي عند التطوير المحلي. */
+/** Returns the configured public origin or the current request origin. */
 export function baseUrlFromRequest(req) {
   const configured = googleOAuthConfig().baseUrl;
   if (configured) return configured;
@@ -35,7 +32,7 @@ export function baseUrlFromRequest(req) {
   return `${proto}://${host}`;
 }
 
-/** عنوان العودة — يجب تسجيله حرفياً في Google Cloud Console. */
+/** Returns the callback URL registered in Google Cloud Console. */
 export function googleCallbackUrl(req) {
   return `${baseUrlFromRequest(req)}/auth/google/callback`;
 }

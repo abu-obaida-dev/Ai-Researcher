@@ -1,33 +1,21 @@
-/**
- * ثوابت المنصة المشتركة بين الخادم وكل الصفحات المولَّدة على الخادم.
- * منقولة كما هي من النسخة القديمة (React) في المجلد backup لتبقى نصوص المنصة
- * وأسعارها وقوائمها متطابقة، مع تعديل اسم الهوية إلى Zena AI فقط.
- */
+/** Shared constants for server-rendered pages and services. */
 
 export const APP_NAME = 'Zena AI';
 export const APP_TAGLINE = 'المشرف البحثي الذكي';
-export const SUPPORT_EMAIL = 'support@moshrefai.com';
-/** رقم واتساب الدعم الفني — يُضبط في ملف البيئة (SUPPORT_WHATSAPP) لا هنا.
- *  فارغ = لا يظهر زر واتساب إطلاقاً (أفضل من رابط مكسور). */
-export const SUPPORT_WHATSAPP = '';
+export const SUPPORT_EMAIL = 'libyonix7@gmail.com';
+/** Optional support number; an empty value hides the support link. */
+export const SUPPORT_WHATSAPP = '+218 93-0108734';
 
-/** النقاط الممنوحة مجاناً لكل باحث جديد (سقوط آمن إن تعذّرت قراءة الباقة المجانية) */
+/** Welcome credits granted to new users. */
 export const FREE_TRIAL_TOKENS = 10000;
 
-/** كود الباقة المجانية في جدول plans */
+/** Code of the free plan in the plans table. */
 export const FREE_PLAN_CODE = 'free_trial';
 
-/**
- * صيغة UUID (مثال الإصدار 4) — للتحقق من معرّفات المسارات قبل أي استعلام.
- *
- * لماذا: أعمدة المعرّفات في PostgreSQL من نوع uuid. تمرير قيمة غير UUID(مثل abc أو undefined)
- * يجعل `pg` يرمي استثناءً غير ملتقَط. وفي Express 4 الاستثناءات داخل معالج async لا يلتقطها
- * الإطار تلقائياً ⇒ تتحول إلى unhandledRejection ⇒ **تنهار عملية الخادم كاملة**.
- * أي مستخدم مصادَق يستطيع إسقاط الموقع برابط واحد ⇒ поэтому نتحقق هنا ونُرجع 404 بدل الرمي.
- */
+/** Validate route identifiers before passing them to PostgreSQL UUID columns. */
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** هل القيمة UUID صالح؟ (يُستخدم كحارس قبل أي استعلام بمعرّف من المسار) */
+/** Returns whether a value is a valid UUID. */
 export function isUuid(value) {
   return UUID_RE.test(String(value ?? '').trim());
 }
@@ -45,31 +33,17 @@ export const TOKEN_COSTS = [
   { type: 'review', label: 'مراجعة فصل أو مقطع', tokens: 150, description: 'مراجعة منهجية ولغوية مع ملاحظات تفصيلية' }
 ];
 
-/**
- * تسعير الاستهلاك الفعلي للمشرف الذكي.
- *
- * الرسالة لم تعد بسعر ثابت: السياق يتضخّم مع ملخّص الذاكرة والملفات وآخر
- * ٢٠ رسالة، وسعر الإدخال يختلف عن سعر الإخراج في كل مزوّد. لذلك:
- *   - نحجز قبل الإرسال: (نقاط الإدخال التقديرية × سعر الإدخال)
- *     + (سقف الرد × سعر الإخراج)  ← أقصى ما يمكن أن تُكلّفه الرسالة.
- *   - بعد الرد نحسب الفعلي من usage الذي يرجعه المزوّد ونردّ الفرق.
- *   - إذا فشل كل المزوّدين تُردّ الحجز كاملة.
- *
- * الأرقام بالوحدة: رصيد واحد مقابل كل ١٠٠٠ نقطة. المعامل (AI_PRICE_MULTIPLIER)
- * يضرب الأسعار معاً ليغطي تكلفة المزوّد + الهامش، ويمكن ضبطه من .env
- * دون لمس الكود. المعدّلات الافتراضية محسوبة لتبقى رسالة نموذجية
- * (≈ ٤ آلاف إدخال + ≈ ٦٠٠ إخراج) في حدود ٣٠–٤٠ رصيداً كما كانت بسعر ٣٠.
- */
+/** Usage rates support preauthorization followed by settlement against actual provider usage. */
 export const TOKEN_RATES = {
-  inputPer1k: 5, // رصيد لكل 1000 نقطة إدخال (النظام + الملخص + الملفات + التاريخ)
-  outputPer1k: 20, // رصيد لكل 1000 نقطة إخراج (الإجابة المولَّدة)
-  reserveBuffer: 1.08 // هامش أمان بسيط على الحجز المسبق يُردّ بالكامل بعد الرد
+  inputPer1k: 5,
+  outputPer1k: 20,
+  reserveBuffer: 1.08
 };
 
-/** سقف طول الردّ لكل وضع — يضمن «رسائل قصيرة» هندسياً لا بالرجاء في البرومبت. */
+/** Hard response-token limits by chat mode. */
 export const CHAT_REPLY_CAPS = { normal: 900, defense: 1400 };
 
-/** معامل السعر: يقرأ من البيئة مع سقوط آمن على ١ (الأسعار نفسها). */
+/** Reads the price multiplier, falling back to 1. */
 export function priceMultiplier() {
   const raw = Number(process.env.AI_PRICE_MULTIPLIER);
   return Number.isFinite(raw) && raw > 0 && raw <= 10 ? raw : 1;
@@ -80,12 +54,7 @@ export const GENDER_OPTIONS = [
   { value: 'female', label: 'بنت' }
 ];
 
-/**
- * دول رقم الواتساب في صفحة الملف: مفتاح الدولة + أطوال الرقم الوطنية المتوقعة.
- * pattern اختياري للتحقق الأدق من الأرقام الليبية (تبدأ بـ 91 أو 92 أو 94).
- * sample مثال كامل يُعرض في رسالة الخطأ والـ placeholder.
- * يُحفظ الرقم في القاعدة كاملاً بالمفتاح الدولي: +218912345678.
- */
+/** Country calling codes, expected national-number lengths, and example numbers. */
 export const WHATSAPP_COUNTRIES = [
   { code: 'LY', name: 'ليبيا', dial: '218', lengths: [9], pattern: '^9[124][0-9]{7}$', sample: '+218912345678' },
   { code: 'EG', name: 'مصر', dial: '20', lengths: [10, 11], sample: '+201012345678' },
@@ -141,14 +110,14 @@ export const RESEARCH_FIELDS = [
   'أخرى'
 ];
 
-/** التخصصات المعروضة كأزرار في نموذج التسجيل — نسخة مختصرة من مجالات البحث */
+/** Short specialization list used by onboarding. */
 export const SPECIALIZATIONS = [
   'أخرى', 'القانون', 'الطب', 'الهندسة', 'الاقتصاد', 'الإدارة', 'العلوم الإنسانية',
   'تقنية المعلومات', 'التربية', 'علم النفس', 'علوم الحاسب', 'اللغات والترجمة', 'العمارة',
   'العلوم الاجتماعية', 'العلوم التطبيقية'
 ];
 
-/** ما يريد الباحث إنجازه الآن — يحدد مرحلة الإشراف التي يبدأ منها */
+/** Onboarding goals mapped to initial supervisor stages. */
 export const GOAL_OPTIONS = [
   { value: 'topic', label: 'اختيار فكرة أو موضوع البحث' },
   { value: 'proposal', label: 'إعداد خطة أو مقترح البحث' },
@@ -160,7 +129,7 @@ export const GOAL_OPTIONS = [
   { value: 'defense', label: 'التحضير للمناقشة/الدفاع' }
 ];
 
-/** حالة تقدّم المشروع البحثي */
+/** Research project progress stages. */
 export const PROGRESS_LEVELS = [
   { value: 'topic', label: 'لم أبدأ بعد' },
   { value: 'proposal', label: 'لدي موضوع محدد' },
@@ -196,7 +165,7 @@ export const UNIVERSITIES = [
   'جامعة مصر الدولية', 'جامعة النيل', 'أكاديمية البحث العلمي', 'أخرى'
 ];
 
-/** روابط التنقل في الصفحة العامة */
+/** Public page navigation links. */
 export const PUBLIC_NAV = [
   { href: '/#features', label: 'المميزات' },
   { href: '/#services', label: 'الخدمات' },
@@ -206,9 +175,8 @@ export const PUBLIC_NAV = [
 ];
 
 /**
- * المساحة التخزينية الافتراضية لكل باقة بالميغابايت.
- * القيمة تُخزَّن في plans.storage_mb ويضبطها المدير من صفحة «الباقات» فقط،
- * وتُستخدم في: عرض بطاقة الباقة · فحص الحصة عند رفع الملفات · صفحة ملفاتك.
+ * Default plan storage in megabytes.
+ * Admins manage this value in plans.storage_mb.
  * كل الباقات تشترك في نفس الحصة العامة (500 MB) حتى يغيّرها المدير.
  */
 export const PLAN_STORAGE_DEFAULT_MB = 500;

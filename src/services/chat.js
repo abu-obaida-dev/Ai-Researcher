@@ -1,38 +1,26 @@
 import { pool } from '../db/client.js';
 import { CHAT_REPLY_CAPS, TOKEN_COSTS, isUuid } from '../constants.js';
 import { runSupervisor } from './ai.js';
-import { extractDefenseFinalTag } from './defense.js';
-import { askedForReferenceTitle, extractStatedTopic, literatureToolFor, wantsLiterature } from './literature.js';
-import { isValidStepKeyForUser, recordTopic, registeredTopic } from './journey.js';
+import { extractAnswerCorrectness, extractDefenseFinalTag, stripAnswerCorrectnessTag } from './defense.js';
+import { extractStatedTopic } from './literature.js';
+import { isValidStepKeyForUser, recordTopic } from './journey.js';
 import { buildSupervisorContext } from './supervisor-context.js';
 import { buildSystemPrompt } from './supervisor-prompt.js';
 import { addStrike, summarizeConversation } from './supervisor-memory.js';
 import { balanceOf, chargeUsage, deductCredits, estimateReservation, logUsage, normalizeUsage, refundCredits } from './tokens.js';
 import { detectStepCompletion } from './step-review.js';
 
-/**
- * شات المشرف الذكي (1F): المحادثات ورسائلها في conversations/messages.
- *
- * التسعير صار متغيّراً بحسب الاستهلاك الفعلي (services/tokens.js):
- *   حجز قبل الإرسال ← نداء ← تسوية وردّ الفرق، وردّ كامل عند الفشل.
- *
- * ما يحسبه الكود لا البرومبت (services/supervisor-context.js):
- * أول رسالة في تاريخه، حالة خطواته، ملخّص ذاكرته، مهمته القادمة، عدد أيام
- * انقطاعه، عدّاد التنبيهات، وملفاته المرفقة.
- */
+/** Supervisor conversations, billing, and response orchestration. */
 
 const CHAT_COST = TOKEN_COSTS.find((item) => item.type === 'chat')?.tokens || 30;
 const HISTORY_LIMIT = 8;
 const PROMPT_LIMIT = 8000;
 const TITLE_LIMIT = 120;
 
-/** وسم التنبيه الداخلي: المشرفة تكتبه، والكود يحذفه قبل العرض والعدّ. */
+/** Internal strike marker removed before display and counting. */
 const STRIKE_TAG = /\[\[\s*strike\s*\]\]|\[\s*strike\s*\]/gi;
 
-/**
- * ينظّف ردّ المشرفة: يحذف وسم التنبيه ويخبرك هل وُجد.
- * الوسم يوضع في آخر الرد فقط، ونتأكد أنه لم يُصِب ردودنا المخزّنة سابقاً.
- */
+/** Removes the internal strike marker and reports whether it was present. */
 function stripStrikeTag(text) {
   const raw = String(text || '');
   const hadStrike = STRIKE_TAG.test(raw);
@@ -41,12 +29,12 @@ function stripStrikeTag(text) {
   return { text: raw.replace(STRIKE_TAG, '').replace(/\s+$/, ''), hadStrike };
 }
 
-/** لا يُسمح للباحث بأن يحقن وسماً داخلياً فيردّ المشرفة تكرّره وتُحتسب له ضربة. */
+/** Prevents users from injecting internal strike markers into their messages. */
 function sanitizeUserText(text) {
   return String(text || '').replace(STRIKE_TAG, '').replace(/\s+$/, '');
 }
 
-/** تاريخ محادثات الإرشاد فقط — جلسات المناقشة المستقلة لها صفحة /defense ولا تظهر هنا. */
+/** Lists guidance conversations; defense sessions use a separate route. */
 export async function listConversations(userId, { limit = 12 } = {}) {
   const { rows } = await pool.query(
     `SELECT c.id, c.title, c.step_key, c.mode, c.provider, c.created_at, c.updated_at,
@@ -61,7 +49,7 @@ export async function listConversations(userId, { limit = 12 } = {}) {
   return rows;
 }
 
-/** محادثة واحدة بملكيتها + رسائلها بالترتيب الزمني + حالة المناقشة. */
+/** Loads an owned conversation, its messages, and defense state. */
 export async function getConversation(userId, conversationId) {
   if (!isUuid(conversationId)) return null;
   const { rows } = await pool.query('SELECT * FROM conversations WHERE id = $2 AND user_id = $1', [
@@ -78,10 +66,9 @@ export async function getConversation(userId, conversationId) {
   return { ...rows[0], messages, defense_state: rows[0].defense_state || {} };
 }
 
-/** إنشاء محادثة جديدة باسم مختصر من أول سؤال — والوضع إرشادي افتراضياً. */
+/** Creates a guidance conversation with a title derived from the first prompt. */
 export async function createConversation(userId, { title = '', stepKey = null, mode = 'normal' } = {}) {
-  // /defense استخدم دائماً service defense (defense.js) — لا تسمح لـ chat.js بإنشاء
-  // محادثة ب mode='defense' أو كتابة defense_state (تفصل المسار بأكمله).
+  // Defense sessions must be created and updated only by the defense service.
   const nextMode = 'normal';
   const { rows } = await pool.query(
     'INSERT INTO conversations (user_id, title, step_key, mode) VALUES ($1, $2, $3, $4) RETURNING *',
@@ -91,7 +78,7 @@ export async function createConversation(userId, { title = '', stepKey = null, m
   return { ...rows[0], messages: [] };
 }
 
-/** إضافة رسالة إلى محادثة (تحدّث updated_at لظهورها في الأعلى). */
+/** Appends a message and updates the conversation timestamp. */
 export async function appendMessage(conversationId, { role, content, tokensUsed = 0, model = null }) {
   const { rows } = await pool.query(
     `INSERT INTO messages (conversation_id, role, content, tokens_used, model)
@@ -105,7 +92,7 @@ export async function appendMessage(conversationId, { role, content, tokensUsed 
   return rows[0];
 }
 
-/** حذف محادثة كاملة برسائلها. */
+/** Deletes a conversation and its messages. */
 export async function deleteConversation(userId, conversationId) {
   if (!isUuid(conversationId)) return false;
   const { rowCount } = await pool.query('DELETE FROM conversations WHERE id = $2 AND user_id = $1', [
@@ -116,14 +103,13 @@ export async function deleteConversation(userId, conversationId) {
   return rowCount > 0;
 }
 
-/** عنوان مختصر للمحادثة من أول سؤال (أول ٦٠ حرفاً). */
+/** Builds a short title from the first prompt. */
 function titleFromPrompt(prompt) {
   const line = String(prompt).split('\n').find((item) => item.trim()) || 'محادثة جديدة';
   return line.trim().slice(0, 60);
 }
 
-/** آخر محادثة سابقة لها رسائل، لاستخدامها في تلخيص الذاكرة عند بدء جلسة جديدة —
- * محادثات المناقشة (defense) مستثناة: ذاكرة المشرف من محادثاته الإرشادية وحدها. */
+/** Finds a previous guidance conversation for memory summarization. */
 async function lastRichConversation(userId, excludeId = null) {
   const { rows } = await pool.query(
     `SELECT c.id FROM conversations c
@@ -137,11 +123,7 @@ async function lastRichConversation(userId, excludeId = null) {
   return rows[0]?.id || null;
 }
 
-/**
- * حالة المناقشة (تُحفظ في conversations.defense_state): العدّاد ووقت البدء
- * وملف البحث المثبّت والأجزاء المغطاة وحالة الانتهاء — تُحفظ كل الحقول
- * موجودة كي لا يُسقط أي ردّ من المناقِش تثبيت الملف أو علامة الانتهاء.
- */
+/** Normalizes stored defense state while preserving all session fields. */
 function readDefenseState(conversation) {
   const state = conversation?.defense_state;
   if (!state || typeof state !== 'object') return { asked: 0, startedAt: null };
@@ -164,20 +146,7 @@ async function writeDefenseState(conversationId, state) {
   ]);
 }
 
-/**
- * إرسال سؤال للمشرف الذكي.
- *
- * الترتيب مقصود وكل خطوة المالية ذرّية:
- *   1) تحقق من المدخلات والمحفظة (لا خصم بعد).
- *   2) بناء السياق من قاعدة البيانات ثم موجّه النظام.
- *   3) حجز الرصيد بسقف تقديري — إن لم يكن كافياً نرفض قبل الإرسال.
- *   4) النداء؛ عند الفشل: ردّ الحجز كاملاً بلا تسجيل استهلاك.
- *   5) التسوية: الفارق بين الحجز والاستهلاك الفعلي يُردّ فوراً.
- *   6) حذف وسم التنبيه قبل الحفظ، وزيادة العدّاد إن وُجد.
- *   7) عند بدء جلسة جديدة: تلخيص الجلسة السابقة لتحديث الذاكرة.
- *
- * الأكواد: NO_TOKENS / NO_PROVIDER / PROVIDERS_FAILED / EMPTY_PROMPT / NOT_FOUND / BAD_STEP.
- */
+/** Sends a supervisor prompt using reserve, provider call, and usage settlement. */
 export async function askSupervisor({
   userId,
   prompt,
@@ -186,7 +155,8 @@ export async function askSupervisor({
   profile = {},
   fileIds = [],
   mode = null,
-  internal = false
+  internal = false,
+  defenseFinalRequested = false
 }) {
   const question = sanitizeUserText(String(prompt || '').trim().slice(0, PROMPT_LIMIT));
   if (!question) {
@@ -208,7 +178,7 @@ export async function askSupervisor({
     throw error;
   }
 
-  // محادثة جديدة (الوضع الإرشادي فقط).
+  // New conversations always start in guidance mode.
   if (!conversation) {
     const created = await createConversation(userId, { title: titleFromPrompt(question), stepKey, mode: 'normal' });
     conversation = created;
@@ -225,8 +195,7 @@ export async function askSupervisor({
 
   const messages = [...history, { role: 'user', content: question }];
 
-  // الملفات المرفقة: نذكرها في الرسالة نفسها (لا في الموجّه فقط) حتى لا يفترض
-  // النموذج أن السؤال بلا سياق ويصنّفه خارج النطاق.
+  // Mention attachments in the user message so the model treats the request as in-scope.
   const attachedNames = Array.isArray(context.fileNames) ? context.fileNames : [];
   if (attachedNames.length && context.files) {
     messages[messages.length - 1] = {
@@ -237,118 +206,10 @@ export async function askSupervisor({
 
   const baseCap = context.replyCap || CHAT_REPLY_CAPS.normal;
 
-  /*
-   * أداة المراجع: إن طلب الباحث مصادر/مراجع، نبحث له في قواعد البيانات
-   * العلمية الحقيقية (Crossref · OpenAlex · IEEE · ACM · arXiv …) ونحقن
-   * النتائج في رسالة المشرف، فلا يختلق مرجعاً ولا رابطاً من ذاكرته.
-   * الروابط كلها حقيقية (DOI/الناشر/نسخة مفتوحة) وما دون ذلك يقول «ابحثت ولم أجد».
-   * التكلفة: بلا خصم نقاط (نداء خارجي رخيص) مع تسجيله في سجل الاستهلاك.
-   */
-  // جلسة المناقشة (defense): لا أداة مراجع إطلاقاً — لا بحث خارجي، ولا استبدال
-  // رسالة الباحث بتعليمات الأداة، ولا سؤال عن «عنوان تريد مراجعه» — المناقشة
-  // كلها حول نص البحث وحده. (كان سؤال أكاديمي يحوي «بعنوان… ومراجعات…؟» يُفعّل
-  // بوابة «سبق سؤاله عن العنوان» زوراً فتُستبدل إجابته بطلب مراجع لم يطلبه.)
-  const isDefenseConversation = conversation.mode === 'defense';
-  let references = null;
-  // هل ما زال في خطوة تحديد المشكلة؟ (topic أولى خطوات كل مسارات الرحلة).
+  // The supervisor does not search for references; the prompt directs users to the platform library.
   const inTopicStep = String(context.currentStepKey || stepKey || '') === 'topic';
-  // الموضوع المُسجَّل (خطوة اختيار الموضوع أو عنوان الملف) — مصدر واحد معتمد.
-  let registered = { topic: '', origin: 'none' };
-  try {
-    registered = await registeredTopic(userId, profile);
-  } catch (error) {
-    console.warn(`تعذّرت قراءة موضوع البحث المسجّل: ${error?.code || error?.message}`);
-  }
 
-  try {
-    // سياق المحادثات: المهمة المتفق عليها + ملخّص الذاكرة + آخر كلام للباحث،
-    // حتى لو كان ملفه ناقصاً نعرف من أي تخصّص يبحث.
-    const conversationTopic = [
-      context.openTask,
-      context.memorySummary,
-      ...history
-        .filter((message) => message.role === 'user')
-        .slice(-2)
-        .map((message) => String(message.content || '').slice(0, 160))
-    ]
-      .filter(Boolean)
-      .join(' · ');
-
-    // هل سبق أن سألناه عن العنوان الذي يريد مراجعه؟ (لنفادي سؤال مكرّر)
-    // عبر askedForReferenceTitle المشدّدة: لا يكفي ذكر (عنوان + مراجع + ؟) في أي
-    // ردّ أكاديمي — وإلا انطبق سؤال المناقشة («…بعنوان… ومراجعات العدالة…؟»)
-    // فتُعامَل إجابته كطلب مراجع لم يطلبه وتُستبدل رسالته بتعليمات الأداة.
-    const askedBefore = askedForReferenceTitle(conversation.messages || []);
-
-    // بوابة مرحلة topic: لا أداة مراجع قبل اكتمال تعريف المشكلة وحدودها —
-    // تسجيل موضوع عام وحده لا يكفي (المراجع تعود بعد اكتمال الخطوة).
-    references = inTopicStep || isDefenseConversation
-      ? null
-      : await literatureToolFor(question, {
-          limit: 6,
-          userId,
-          field: String(profile?.research_field || context.field || '').slice(0, 80),
-          title: String(profile?.research_title || context.title || '').slice(0, 160),
-          context: conversationTopic,
-          askedBefore
-        });
-  } catch (error) {
-    console.warn(`فشل بحث المراجع التلقائي: ${error?.code || error?.message}`);
-  }
-
-  // لا نقبل طلباً بلا عنوان محدّد ⇒ نطلب من الباحث عنوان بحثه (سؤال واحد).
-  if (references?.needsTopic) {
-    const hint =
-      references.reason === 'need_title'
-        ? 'طلب الباحث مراجع دون أن يذكر عنواناً محدّداً.'
-        : references.reason === 'no_match'
-          ? `بحثنا عن «${references.topic || ''}» ولم نجد له مراجع مطابقة في قواعد البيانات.`
-          : references.reason === 'broad'
-            ? `عبارة «${references.topic || ''}» عامة أكثر من اللازم ولا تحدّد بحثاً بعينه.`
-            : 'لم نتبيّن عنوان بحثه بعد.';
-
-    messages[messages.length - 1] = {
-      role: 'user',
-      content:
-        '== لا ترسل مراجع في هذه الرسالة ==\n' +
-        `${hint}\n` +
-        'المطلوب ممنك: اسأله **سؤالاً واحداً فقط** عن العنوان الذي يريد مراجع عنه، مثل: «في أي عنوان بالتحديد تريد المراجع؟».\n' +
-        (context.field && context.field !== 'غير محدد'
-          ? `اذكري أن تخصصه في ملفه «${context.field}» وتسأليه إن كان العنوان داخل هذا التخصص أو خارجه.\n`
-          : '') +
-        'لا تعرضي أي مرجع من معرفتكِ الآن، ولا تَعِدْه به. انتظري جوابه ثم ابحثي له في رسالته التالية.\n' +
-        'قاعدة عامة: لا تفترض شيئاً من عندك ولا تخمّن ما يريده.\n' +
-        `\n---\nرسالة الباحث كما كتبها (لا تتجاهليها ولا تصنّعها كأنها طلب مراجع): ${question}`
-    };
-  } else if (references?.block) {
-    messages[messages.length - 1] = {
-      role: 'user',
-      content: `${references.block}\n\n---\nسؤال الباحث: ${question}`
-    };
-  }
-
-  /*
-   * طلب مراجع أثناء خطوة topic: البوابة أعلاه منعت الأداة، ونوجّه المشرفة
-   * لرفض لطيف ثم سؤال إرشادي واحد يستكمل به تحديد المشكلة وحدودها —
-   * لا مراجع ولا روابط ولا وعود بها في هذه المرحلة.
-   */
-  if (inTopicStep && !isDefenseConversation && references === null && wantsLiterature(question)) {
-    messages[messages.length - 1] = {
-      role: 'user',
-      content:
-        '== لا ترسل مراجع أو روابط في هذه الرسالة ==\n' +
-        'الباحث ما زال في خطوة تحديد المشكلة والفرضيات: تعريف مشكلته وحدودها غير مكتمل، وتسجيل موضوع عام وحده لا يكفي لجلب مراجع مرتبطة ببحثه.\n' +
-        'المطلوب ممنك: جملة رفض واحدة بلطف، ثم سؤال إرشادي واحد فقط يستكمل به تحديد المشكلة أو نطاق الدراسة، مثل: «قبل البحث عن المراجع نحتاج أولاً إلى تحديد المشكلة ونطاق الدراسة حتى تكون المراجع مرتبطة ببحثك، ما الجانب المحدد الذي تريد دراسته؟».\n' +
-        'لا تذكري أي مرجع أو رابط أو كتاب من معرفتكِ، ولا تَعِدْه بمراجع في رسالة لاحقة.\n' +
-        'سؤال واحد فقط في الرد كله.'
-    };
-  }
-
-  /*
-   * إكمال خطوة «اختيار الموضوع»: إن كتب الباحث موضوعه صراحةً في رسالة
-   * (أو أجاب على سؤال المشرفة عنه) نُسجّله في خطته — بعبارته هو، بلا تأليف.
-   * وتبقى الخطوة «جاري» حتى هو يقرّر أنها تمّت.
-   */
+  // Record an explicitly stated topic verbatim; completion remains the user's decision.
   let topicRecordedBySystem = '';
   if (inTopicStep) {
     const stated = extractStatedTopic(question);
@@ -364,14 +225,14 @@ export async function askSupervisor({
     }
   }
 
-  // نخبر المشرف بما سجّلناه نيابةً عن الباحث، فتكتب أمامه لا من تلقاء نفسها.
+  // Tell the model when the system recorded the user's topic.
   const system = buildSystemPrompt(
-    { ...context, topicRecordedBySystem },
-    { references: references?.items?.length || 0, recordedTopic: topicRecordedBySystem }
+    { ...context, topicRecordedBySystem, defenseFinalRequested },
+    { recordedTopic: topicRecordedBySystem }
   );
-  const replyCap = references?.block || attachedNames.length ? Math.max(baseCap, 1400) : baseCap;
+  const replyCap = attachedNames.length ? Math.max(baseCap, 1400) : baseCap;
 
-  // ٣) الحجز المسبق — أعلى تكلفة ممكنة لهذه الرسالة، يُردّ الفرق بعد الرد
+  // Reserve the maximum expected cost before calling the provider.
   const reservation = estimateReservation({ system, messages, replyCap });
   if (!(await deductCredits(userId, reservation.credits))) {
     const balance = await balanceOf(userId);
@@ -391,7 +252,7 @@ export async function askSupervisor({
     throw error;
   }
 
-  // ٥) التسوية على الاستهلاك الحقيقي الذي أرجعه المزوّد
+  // Settle against the provider's actual token usage.
   const usage = normalizeUsage(reply.usage);
   const charge = usage.inputTokens || usage.outputTokens
     ? chargeUsage(usage)
@@ -400,60 +261,29 @@ export async function askSupervisor({
   const charged = Math.min(charge.credits, reservation.credits);
   if (reservation.credits > charged) await refundCredits(userId, reservation.credits - charged);
 
-  // ٦) وسم التنبيه: يُحذف قبل الحفظ والعرض، ويُحتسب في العدّاد
+  // Remove the internal strike marker before storing or displaying the reply.
   const cleaned = stripStrikeTag(reply.text);
   let strikes = context.strikes;
   if (cleaned.hadStrike) strikes = await addStrike(userId);
 
-  // وسم ختام المناقشة: المناقِش يوسم تقييمه النهائي [[defense-final]] فيُحذف
-  // الوسم ويُغلق مسار الجلسة فوراً — لا بعده سؤال ولا حاجة لزر «إنهاء».
+  // Return defense grading and completion metadata for the route to persist.
   let replyText = cleaned.text;
   let defenseEnded = false;
+  let answerCorrectness = null;
   if (conversation.mode === 'defense') {
     const extracted = extractDefenseFinalTag(replyText);
     replyText = extracted.text;
     defenseEnded = extracted.ended;
+    answerCorrectness = extractAnswerCorrectness(replyText);
+    replyText = stripAnswerCorrectnessTag(replyText);
   }
 
-  // internal: برومبت تعليمات من النظام (كبدء المناقشة أو طلب رفع البحث) — يُحفظ ردّ
-  // المناقِش فقط، ولا تُحفظ رسالة التعليمات كأنها كتبها الباحث حتى لا تظهر له.
+  // Internal instructions are not stored as user messages.
   if (!internal) {
     await appendMessage(conversation.id, { role: 'user', content: question, tokensUsed: charged });
   }
   await appendMessage(conversation.id, { role: 'assistant', content: replyText, model: reply.model });
   await pool.query('UPDATE conversations SET provider = $2 WHERE id = $1', [conversation.id, reply.provider]);
-
-  // نتائج أداة المراجع: قواعد البيانات الخارجية + ما وجدناه في مكتبة المنصة (وروابطه).
-  const foundReferences = [
-    ...(references?.items || []).map((item) => ({ kind: 'web', ...item })),
-    ...(references?.libraryItems || []).map((item) => ({
-      kind: 'library',
-      id: item.id,
-      title: item.title,
-      authorText: item.authorsText || item.authors || '',
-      authors: item.authors || [],
-      year: item.year,
-      venue: item.venue || item.source,
-      source: item.source,
-      doi: item.doi || '',
-      pdfUrl: item.pdfUrl || '',
-      hasFile: Boolean(item.hasFile),
-      externalUrl: item.externalUrl || '',
-      // بيانات مقروءة من رابط المصدر نفسه (وسوم citation_*)
-      fromLink: Boolean(item.enriched),
-      linkTitle: item.linkTitle || ''
-    }))
-  ].slice(0, 12);
-
-  // نحفظها لتظهر للباحث كقائمة بيانات وروابط قابلة للفتح
-  if (foundReferences.length) {
-    const payload = foundReferences;
-
-    await pool.query('UPDATE conversations SET references_found = $2 WHERE id = $1', [
-      conversation.id,
-      JSON.stringify(payload)
-    ]);
-  }
 
   await logUsage(userId, {
     type: 'chat',
@@ -466,19 +296,7 @@ export async function askSupervisor({
     summary: titleFromPrompt(question)
   });
 
-  // سجل أدوات المراجع: يوثّق ما بحثناه فعلاً بلا خصم (شفافية للباحث ولوحة الإدارة).
-  if (references?.items?.length || references?.libraryItems?.length) {
-    const webSources = [...new Set((references.items || []).flatMap((item) => item.sources || []))];
-    await logUsage(userId, {
-      type: 'sources',
-      tokens: 0,
-      summary: `بحث مراجع: ${(references.items || []).length} نتيجة خارجية${webSources.length ? ` (${webSources.join('، ')})` : ''}${
-        references.libraryItems?.length ? ` + ${references.libraryItems.length} من مكتبة المنصة` : ''
-      }`
-    });
-  }
-
-  // ٧) بدء جلسة جديدة ⇒ تلخيص الجلسة السابقة (على حساب المنصة، لا الباحث)
+  // Summarize the previous conversation when a new one starts.
   if (conversationId) {
     const previous = await getConversation(userId, conversationId);
     if (previous) {
@@ -489,18 +307,7 @@ export async function askSupervisor({
     }
   }
 
-  // عدّاد أسئلة المناقشة وإغلاقها: المناقِش هو من يقرر الانتهاء بتقييمه
-  // (الوسم الداخلي [[defense-final]]) — عنده لا يُزاد عدّاد الأسئلة وتُغلق الجلسة.
-  //
-  // ملاحظة أمنية: يُثبَّت حالة المناقشة فقط بواسطة service defense (defense.js).
-  // لا يكتب chat.js إلى conversations.defense_state لمحادثة mode='defense'،
-  // لمنع تسرب مسار /defense إلى متجر محادثات الشات وتبادل الحالة.
-  if (conversation.mode === 'defense') {
-    // محادثة دفاعية: لا تؤثر chat.js على defense_state؛ المسار وحده يفعل ذلك.
-  }
-
-  // مراجعة اكتمال الخطوة: كشف حتمي يضع بطاقة معلّقة فقط — لا يمسّ المسار
-  // ولا يمسّ هذا الرد؛ الإتمام قرار الباحث بزر «حفظ» (routes/chat.js).
+  // Step review only creates a pending card; users decide whether to save it.
   try {
     await detectStepCompletion({
       userId,
@@ -509,8 +316,6 @@ export async function askSupervisor({
   } catch (error) {
     console.warn(`تعذّر كشف اكتمال الخطوة: ${error?.code || error?.message}`);
   }
-
-  // ٨) بعد اكتمال الرد: لا نمس ذاكرة المشرف هنا — الملخص يبنى فقط عند بدء جلسة جديدة.
 
   return {
     conversationId: conversation.id,
@@ -521,14 +326,15 @@ export async function askSupervisor({
     tokensCharged: charged,
     reserved: reservation.credits,
     strikes,
-    // المراجع التي عثرت عليها الأداة (خارجية + مكتبة المنصة): تُعرض تحت الرد برابط كل مرجع
-    references: foundReferences,
+    defenseEnded,
+    answerCorrectness,
+    references: [],
     mode: conversation.mode,
     answer: replyText
   };
 }
 
-/** تكلفة رسالة الشات التقديرية المعروضة في الواجهة قبل الإرسال. */
+/** Returns the estimated chat cost shown before submission. */
 export function chatCost() {
   return CHAT_COST;
 }

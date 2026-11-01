@@ -17,17 +17,16 @@ import { googleIcon, icon } from './icons.js';
 import { BRAND, escapeHtml, renderLayout } from './layout.js';
 import { needsOnboarding } from '../middleware/auth.js';
 
-/** اسم الخدمة بالعربية من مفتاحها (لعرض خدمات الباقة في اللوحة والحساب). */
+/** Returns the localized service label for the admin and account pages. */
 function serviceLabel(key) {
   return PLATFORM_SERVICES.find((service) => service.key === key)?.short || key;
 }
 
 /**
- * صفحات المصادقة والحساب: الدخول بحساب جوجل، إكمال الملف البحثي (onboarding)،
- * وصفحة الحساب — كلها HTML مولَّد على الخادم بدون React، وكل البيانات في PostgreSQL.
+ * Server-rendered login, onboarding, and account pages backed by PostgreSQL.
  */
 
-/** مزايا التسجيل المعروضة في لوحة الدخول — الرصيد المجاني من الباقة المجانية */
+/** Builds the signup benefits shown on the login page. */
 function buildBenefits(freeTokens) {
   return [
     { icon: 'coins', text: `${formatNumber(freeTokens)} نقطة مجاناً بمجرد التسجيل` },
@@ -36,7 +35,7 @@ function buildBenefits(freeTokens) {
   ];
 }
 
-/** أيقونة بديلة للحساب: الصورة إن وُجدت أو الحرف الأول من الاسم. */
+/** Renders the account photo or a name initial as a fallback. */
 function renderAvatar(account) {
   if (account.photo_url) {
     return `<img class="avatar" src="${escapeHtml(account.photo_url)}" alt="" width="58" height="58" referrerpolicy="no-referrer" />`;
@@ -46,9 +45,7 @@ function renderAvatar(account) {
 }
 
 /**
- * وصف كل نوع من أنواع الاستهلاك: تسمية عربية + أيقونة.
- * الأنواع الخمسة تأتي من TOKEN_COSTS (تسعير الخدمات)، ونوعٌ إضافي واحد
- * يسجّله services/chat.js عند فشل المزوّدين (لا يُخصم منه شيء).
+ * Labels and icons for token usage types, including failed chat requests.
  */
 const USAGE_META = {
   chat: { label: 'رسالة للمشرف الذكي', icon: 'message' },
@@ -59,7 +56,7 @@ const USAGE_META = {
   chat_failed: { label: 'رسالة فشلت (لم يُخصم رصيد)', icon: 'refresh' }
 };
 
-/** تسمية عربية لنوع عملية الاستهلاك (مع اسم مزوّد الذكاء الاصطناعي للأنواع التقنية). */
+/** Returns a usage label, including provider names for technical types. */
 function usageLabel(type) {
   const known = TOKEN_COSTS.find((item) => item.type === type);
   if (known) return known.label;
@@ -67,8 +64,7 @@ function usageLabel(type) {
 }
 
 /**
- * تنظيف الملخص المخزَّن: هو يخلط نص المستخدم بتفاصيل تقنية للمزوّد
- * («سؤالي · model=gemini-3.8-flash · provider=gemini») — نُبقي على النص المفيد فقط.
+ * Removes provider metadata from stored usage summaries.
  */
 function cleanUsageSummary(summary) {
   return String(summary || '')
@@ -79,8 +75,7 @@ function cleanUsageSummary(summary) {
 }
 
 /**
- * سجل الاستهلاك في صورة قائمة بطاقات مضغوطة بدل جدول عريض:
- * كل عملية = سطر واحد (النوع + الملخص) مع النقاط والتاريخ على الطرف الآخر.
+ * Renders usage records as compact rows with token and date details.
  */
 function renderUsageList(rows) {
   if (!rows.length) {
@@ -114,7 +109,7 @@ export function renderLoginPage({ freeTokens, error = '', next = '', googleReady
     .map((benefit) => `<li><span class="feature-icon">${icon(benefit.icon, 'icon-sm')}</span>${escapeHtml(benefit.text)}</li>`)
     .join('');
 
-  // بعد الدخول نرجع الزائر للمسار الذي طلبه (إن كان داخلياً)
+  // Return the user to the requested internal path after login.
   const nextQuery = next ? `?next=${encodeURIComponent(next)}` : '';
 
   const action = googleReady
@@ -158,7 +153,7 @@ export function renderLoginPage({ freeTokens, error = '', next = '', googleReady
   return renderLayout({ title: 'تسجيل الدخول', area: 'auth', pageHead: false, account, body });
 }
 
-/** أزرار اختيار (راديو) بنفس أسلوب خطوة التسجيل في النسخة القديمة. */
+/** Renders radio choices using the onboarding form style. */
 function choiceGrid(name, options, selected) {
   return `<div class="choices">${options
     .map(
@@ -177,14 +172,14 @@ export function renderOnboardingPage({ account, values, errors = [], profile = n
   const backTarget = String(next || '').startsWith('/') && !String(next).startsWith('//') ? String(next) : '';
   // قبل إكمال الملف: صفحة مستقلة (area:'auth') بلا شريط علوي ولا سايدبار —
   // لوحة الباحث لا تُفتح إلا بعد إكمال التسجيل والملف. بعد الإكمال يُفتح
-  // تعديل الملف من داخل اللوحة (area:'app') كالسابق.
+  // Keep profile edits inside the app layout.
   const standalone = needsOnboarding(account);
 
   const errorBox = errors.length
     ? `<div class="alert"><b>تحقّق من البيانات:</b><ul>${errors.map((error) => `<li>${escapeHtml(error)}</li>`).join('')}</ul></div>`
     : '';
 
-  // الدولة الحالية في حقل الواتساب (خيار القائمة المحدَّد + المفتاح والأطوال المعروضة)
+  // Resolve the selected WhatsApp country and its input constraints.
   const waCountry = WHATSAPP_COUNTRIES.find((country) => country.code === values.wa_country) || WHATSAPP_COUNTRIES[0];
   const waLocalSample = waCountry.sample.replace(`+${waCountry.dial}`, '');
   const waMaxLength = Math.max(...waCountry.lengths);
@@ -261,7 +256,7 @@ export function renderOnboardingPage({ account, values, errors = [], profile = n
   </form>
 </div>`;
 
-  // الصفحة المستقلة تحمل عنوانها وطريق العودة بنفسها (لا توب بار ولا سايدبار يحملهما)
+  // Standalone onboarding provides its own heading and return links.
   const heading = `<div class="page-head">
     <h1>${profile ? 'ملفي البحثي' : 'أكمل ملفك البحثي'}</h1>
     <p>خطوة واحدة لتخصيص إشراف المشرف الذكي لمجالك ومرحلتك</p>
@@ -283,17 +278,17 @@ export function renderOnboardingPage({ account, values, errors = [], profile = n
   });
 }
 
-/** صف بيانات واحد في بطاقات الحساب. */
+/** Renders one label-value pair in an account card. */
 function kv(label, value) {
   return `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || '—')}</dd></div>`;
 }
 
-/** يقرأ التسمية العربية لقيمة محفوظة (مرحلة/لغة/توثيق). */
+/** Resolves the display label for a stored option value. */
 function labelOf(options, value) {
   return options.find((option) => option.value === value)?.label || value || '';
 }
 
-/** بطاقة ملخص الملف البحثي — تُستخدم في الحساب والإحصائية (لا شيء إن لم يُكمل الملف). */
+/** Renders the research profile summary when one is available. */
 function profileSummary(profile) {
   if (!profile) {
     return '<div class="empty">لم تُكمل ملفك البحثي بعد — أكمله ليخصّص المشرف الذكي إشرافه لك.</div>';
@@ -312,9 +307,8 @@ function profileSummary(profile) {
     </dl>`;
 }
 
-/** صفحة حساب الباحث: البطاقة التعريفية + الرصيد + الملف البحثي + آخر العمليات.
- * الترتيب يطابق شبكة الإحصائية: بطاقة عريضة أعلى، ثم بطاقتان جنباً إلى جنب.
- * روابط القائمة المنسدلة (ملفي/الباقات/الخروج) لا تُكرَّر هنا — الصفحة للبيانات لا للتنقل.
+/** Renders the account profile, balance, research details, and recent usage.
+ * Navigation links are omitted because this page focuses on account data..
  */
 export function renderAccountPage({ account, profile, plan, usage, unread = 0 }) {
   const balance = Number(account.tokens_balance || 0);
@@ -420,10 +414,10 @@ const body = `<div class="account-grid">
     body
   });
 }
-/** ألوان مخططات الإحصائية — مشتقة من هوية المنصة (تفتيح/تعتيم فقط). */
+/** Dashboard chart colors derived from the brand palette. */
 const CHART_COLORS = ['#0d8e93', '#19b5a5', '#f4a261', '#7ecfc4', '#0a6f73', '#526777'];
 
-/** بطاقة مؤشر واحدة في شريط الإحصائيات العلوي. */
+/** Renders one dashboard KPI card. */
 function renderStat({ icon: iconName, label, value, hint = '' }) {
   return `<div class="stat-card">
   <span class="stat-icon">${icon(iconName, 'icon-sm')}</span>
@@ -436,8 +430,7 @@ function renderStat({ icon: iconName, label, value, hint = '' }) {
 }
 
 /**
- * مخطط أعمدة للنقاط المستهلكة في آخر ٧ أيام — CSS خالص (بلا مكتبات ولا سكربتات،
- * فيعمل مع CSP: 'self'). الترتيب RTL طبيعي: الأقدم يمين والأحدث يسار.
+ * Renders a CSS-only seven-day usage chart, ordered right-to-left.
  */
 function renderActivityBars(stats) {
   const days = stats?.days || [];
@@ -447,7 +440,7 @@ function renderActivityBars(stats) {
   const bars = days
     .map((day, index) => {
       const height = day.tokens > 0 ? Math.max(6, Math.round((day.tokens / max) * 100)) : 0;
-      // آخر عمود هو اليوم الحالي (سلسلة الأيام تنتهي بـ current_date)
+      // The final column represents today.
       const isToday = index === days.length - 1;
       const title = `${day.dateLabel} — ${formatNumber(day.tokens)} نقطة في ${formatNumber(day.events)} عملية`;
 
@@ -497,7 +490,7 @@ function renderUsageDonut(stats) {
 </div>`;
 }
 
-/** أعداد مكتبة الباحث البحثية (مراجع/ملاحظات/ملفات/أسئلة) في بطاقة واحدة. */
+/** Renders reference, note, file, and question counts in one card. */
 function renderLibraryStats(counts = {}) {
   const items = [
     { icon: 'book', label: 'مرجع في مكتبتك', value: counts.references ?? 0 },
@@ -517,10 +510,8 @@ function renderLibraryStats(counts = {}) {
     .join('')}</ul>`;
 }
 /**
- * صفحة الإحصائية — الرئيسية للوحة الباحث: مؤشرات سريعة + مخططات (نشاط آخر ٧ أيام
- * وتوزيع الاستهلاك) + المسار والرصيد ومكتبة البحث وآخر العمليات.
- * ملاحظة: لا نُكرّر هنا روابط موجودة في الشريط الجانبي (المشرف الذكي/مسار البحث/…)
- * ولا بطاقات مكرّرة من صفحة الحساب — الصفحة للإحصاء وحده.
+ * Renders the researcher dashboard with activity, balance, and library summaries.
+ * Navigation and account details remain on their respective pages.
  */
 export function renderDashboardPage({
   account,
@@ -540,7 +531,7 @@ export function renderDashboardPage({
   const safe = stats || {};
   const counts = safe.counts || {};
 
-  // سياق الملف البحثي كشرائح مختصرة داخل الشريط الترحيبي (بدل بطاقة كاملة مكرّرة)
+  // Show profile details as compact welcome chips.
   const profileChips = profile
     ? [
         labelOf(RESEARCH_STAGES, profile.research_stage),

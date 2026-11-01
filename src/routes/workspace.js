@@ -37,23 +37,13 @@ import { readLibraryItem } from '../services/library.js';
 import { LIBRARY_SOURCES, normalizeYearRange } from '../services/library-sources.js';
 import { searchLiterature, buildSearchQuery } from '../services/literature.js';
 
-/**
- * مسارات مساحة عمل الباحث (1E): المراجع والمفكرة والملفات.
- * كل النماذج HTML عادية (POST ثم 303 redirect) — لا JSON ولا سكربت سطري.
- * حماية الرفع: allowlist للامتدادات والأنواع + حد حجم (files.js)، والملف يُقرأ
- * ويُحذف بملكية الجلسة فقط (WHERE user_id = $1 في كل استعلام).
- */
+/** Research workspace routes for references, notes, and files. */
 const router = express.Router();
 
-/**
- * حدّ قراءة واسع على صفحات GET الثقيلة (M5): كل صفحة تنفّذ 4-5 استعلامات
- * (محادثات + ملف + غير مقروء + ملفات قابلة للإرفاق)، فسكربت يُحدّث الصفحة
- * آلياً يستنزف قاعدة البيانات. الحد 120 طلباً/5 دقائق لكل حساب لا يمسّ
- * الاستخدام البشري الطبيعي إطلاقاً — يُطبَّق كوسيط على كل مسار GET أدناه.
- */
+/** Limits repeated requests to database-heavy workspace pages. */
 const pageReadLimit = rateLimitUser('page_read', { limit: 120, windowMs: 5 * 60 * 1000 });
 
-/** رسائل النتيجة بعد التحويل. */
+/** Flash messages shown after redirects. */
 const FLASH = {
   ref_added: { type: 'ok', message: 'أُضيف المرجع إلى قائمتك.' },
   ref_exists: { type: 'error', message: 'هذا المرجع موجود في قائمتك بالفعل.' },
@@ -70,8 +60,7 @@ const FLASH = {
   file_deleted: { type: 'ok', message: 'حُذف الملف.' },
   file_missing: { type: 'error', message: 'الملف غير موجود.' },
   file_bad: { type: 'error', message: 'تعذّر رفع الملف — تحقق من النوع والحجم.' },
-  // تنبيهات رفع مفصّلة: كل رفض له سببه الواضح بدل رسالة غامضة واحدة.
-  // نصوصها تُخصَّص في flashFromQuery بأرقام المستخدم الفعلية عند توفرها.
+  // Upload errors are customized with account-specific limits when available.
   file_too_large: { type: 'error', message: 'حجم الملف أكبر من الحد المسموح لباقتك.' },
   file_type_bad: { type: 'error', message: 'نوع الملف غير مدعوم — الأنواع المسموحة فقط.' },
   file_mime: { type: 'error', message: 'نوع محتوى الملف لا يطابق امتداده — قد يكون الامتداد قد عُدِّل.' },
@@ -83,9 +72,7 @@ const FLASH = {
   }
 };
 
-/** تنبيه النتيجة من باراميترات الرابط (?ok= أو ?err=).
- *  ctx اختياري (maxMb · allowedTypes · summary): تنبيهات الرفع تُبنى بأرقام
- *  المستخدم الفعلية فيفهم سبب الرفض مباشرة بلا تخمين. */
+/** Resolves redirect messages and adds account-specific upload details. */
 function flashFromQuery(query, ctx = {}) {
   const entry = FLASH[String(query.ok || query.err || '')];
   if (!entry) return null;
@@ -101,41 +88,40 @@ function flashFromQuery(query, ctx = {}) {
   return { type: entry.type, message: dynamic[key] || entry.message };
 }
 
-/** خريطة { step_key: '1. عنوان' } من مسار درجة الباحث لعرض أسماء الخطوات. */
+/** Maps stable step keys to display labels. */
 async function stepTitlesForUser(userId) {
   const path = await resolvePathForDegree(await degreeOfUser(userId));
   return Object.fromEntries(path.steps.map((step) => [step.key, `${step.no}. ${step.title}`]));
 }
 
-/** الصفحة القديمة «مراجعي» — دُمجت في /files (ملفاتي ومراجعي) فتُحوَّل رابطاً. */
+/** Redirects the legacy references page to the combined files page. */
 router.get('/references', (req, res) => {
   const qs = String(req.originalUrl || '').split('?')[1];
   res.redirect(303, `/files${qs ? `?${qs}` : ''}`);
 });
 
-/**
- * صفحة المكتبة — رابط مستقل: بحث في القواعد العلمية أولاً ثم مكتبة المنصة.
- * زر «أضف إلى المراجع» يعود بPOST إلى /references فيظهر بمراجعي (صفحة الملفات).
- */
+/** Renders platform-library results and optional external literature search results. */
 router.get('/library', pageReadLimit, requireService('library'), async (req, res) => {
   try {
     const userId = req.account.id;
     const query = String(req.query.q || '').trim().slice(0, 120);
     const stepKey = String(req.query.step || '').trim().slice(0, 100);
     const webQuery = String(req.query.wq || '').trim().slice(0, 160);
-    const webSource = String(req.query.wsrc || '').trim().slice(0, 30);
-    // فلتر سنة الإصدار في البحث الخارجي: من (wfrom) — إلى (wto)، بتوحيد واحد.
+    const requestedSource = String(req.query.wsrc || '').trim().slice(0, 30);
+    const webSource = LIBRARY_SOURCES.some((source) => source.id === requestedSource) ? requestedSource : '';
+    // Normalize the external-search year range.
     const years = normalizeYearRange(req.query.wfrom, req.query.wto);
 
     const [results, unread, web] = await Promise.all([
       query ? searchLibraryItems({ userId, q: query }) : Promise.resolve([]),
       unreadCount(userId),
-      // أداة الباحث: بحث في قواعد البيانات العلمية الحقيقية (Crossref · IEEE · ACM · arXiv …)
+      // External searches are requested through the library page only.
       webQuery
         ? searchLiterature({
             query: buildSearchQuery({ topic: webQuery }),
-            sources: webSource ? [webSource] : undefined,
-            limit: 8,
+          sources: webSource ? [webSource] : LIBRARY_SOURCES.map((source) => source.id),
+          allSources: !webSource,
+            limit: 25,
             topic: webQuery,
             yearFrom: years.from,
             yearTo: years.to
@@ -157,7 +143,7 @@ router.get('/library', pageReadLimit, requireService('library'), async (req, res
         webYearTo: years.to,
         webSources: LIBRARY_SOURCES,
         flash: flashFromQuery(req.query),
-        // بوابة جزئية: البحث مفتوح، لكن الترشيح حسب التخصص يحتاج الملف
+        // Profile-based recommendations require a completed research profile.
         profileNotice: needsOnboarding(req.account)
           ? 'أضف تخصصك ومرحلتك الأكاديمية وهدفك الحالي ليرشّح لك المشرف الذكي المراجع الأقرب لموضوعك. <a href="/onboarding?next=/library">أكمل ملفك الآن</a>.'
           : ''
@@ -175,13 +161,7 @@ router.get('/library', pageReadLimit, requireService('library'), async (req, res
   }
 });
 
-/**
- * ملف كتاب في مكتبة المنصة: معاينة داخل المتصفح أو تحميل.
- *   - /library/:id/file            ⇒ تحميل (attachment)
- *   - /library/:id/file?inline=1   ⇒ معاينة (image/pdf/txt داخل الصفحة)
- * العنصر المعطّل لا يُفتح لأحد (activeOnly = true)، ونصادر ثابتة مع
- * content-disposition وnosniff وCSP صارمة كما في ملفات الباحث.
- */
+/** Serves an active library file inline or as an attachment. */
 router.get('/library/:id/file', requireService('library'), async (req, res) => {
   try {
     const found = await readLibraryItem(String(req.params.id), { activeOnly: true });
@@ -215,7 +195,7 @@ router.get('/library/:id/file', requireService('library'), async (req, res) => {
       res.setHeader('content-type', row.mime || 'application/octet-stream');
       res.setHeader('content-disposition', `inline; filename*=UTF-8''${name}`);
     } else {
-      // النص يُقدَّم كنص عادي دائماً (لا HTML) ⇒ منع تنفيذ أي محتوى مرفوع.
+      // Serve text as plain text to prevent uploaded HTML from executing.
       res.setHeader('content-type', isText ? 'text/plain; charset=utf-8' : row.mime || 'application/octet-stream');
       res.setHeader('content-disposition', `attachment; filename*=UTF-8''${name}`);
     }
@@ -227,7 +207,7 @@ router.get('/library/:id/file', requireService('library'), async (req, res) => {
   }
 });
 
-/** خانق يهرّب قيمة داخل خاصية HTML (يُستخدم في رسالة 410 أعلاه). */
+/** Escapes a value for an HTML attribute. */
 function escapeAttr(value) {
   return String(value || '')
     .replace(/&/g, '&amp;')
@@ -236,8 +216,7 @@ function escapeAttr(value) {
     .replace(/>/g, '&gt;');
 }
 
-/** إضافة مرجع من بحث الويب إلى «مراجعي» — بنفس نموذج الإضافة اليدوي لكن مع
- * بيانات النتيجة (المؤلفون · السنة · المجلة · DOI) جاهزة.
+/** Adds an external search result to the user's references.
  */
 router.post(
   '/references/web',
@@ -268,7 +247,7 @@ router.post(
   }
 );
 
-/** إضافة مرجع: من المكتبة (library_item_id) — يظهر في قسم «مراجعي» بصفحة الملفات. */
+/** Adds a platform-library item to the user's references. */
 router.post('/references', requireService('library'), async (req, res) => {
   const body = req.body || {};
   const step = String(body.step || '').trim().slice(0, 100);
@@ -287,7 +266,7 @@ router.post('/references', requireService('library'), async (req, res) => {
   }
 });
 
-/** تغيير حالة قراءة مرجع. */
+/** Updates a reference's reading status. */
 router.post('/references/:id/status', requireService('library'), async (req, res) => {
   try {
     await updateReferenceStatus(req.account.id, String(req.params.id), String(req.body?.status || 'to_read'));
@@ -297,13 +276,13 @@ router.post('/references/:id/status', requireService('library'), async (req, res
   }
 });
 
-/** حذف مرجع من قائمة الباحث. */
+/** Removes a reference from the user's list. */
 router.post('/references/:id/delete', requireService('library'), async (req, res) => {
   const deleted = await deleteReference(req.account.id, String(req.params.id));
   res.redirect(303, `/files?${deleted ? 'ok' : 'err'}=${deleted ? 'ref_deleted' : 'ref_missing'}`);
 });
 
-/** صفحة المفكرة. */
+/** Renders the notes page. */
 router.get('/notes', pageReadLimit, requireService('notes'), async (req, res) => {
   try {
     const userId = req.account.id;
@@ -345,7 +324,7 @@ router.get('/notes', pageReadLimit, requireService('notes'), async (req, res) =>
   }
 });
 
-/** إنشاء ملاحظة (مع ربطها بمرجع اختياري عند القدوم من صفحة المراجع). */
+/** Creates a note with an optional reference link. */
 router.post('/notes', requireService('notes'), async (req, res) => {
   const body = req.body || {};
   const step = String(body.step || '').trim().slice(0, 100);
@@ -367,7 +346,7 @@ router.post('/notes', requireService('notes'), async (req, res) => {
   }
 });
 
-/** تعديل ملاحظة. */
+/** Updates a note. */
 router.post('/notes/:id', requireService('notes'), async (req, res) => {
   const body = req.body || {};
   const step = String(body.step || '').trim().slice(0, 100);
@@ -386,7 +365,7 @@ router.post('/notes/:id', requireService('notes'), async (req, res) => {
   }
 });
 
-/** تثبيت/إلغاء تثبيت ملاحظة. */
+/** Toggles a note's pinned state. */
 router.post('/notes/:id/pin', requireService('notes'), async (req, res) => {
   const step = String(req.body?.step || '').trim().slice(0, 100);
 
@@ -398,13 +377,13 @@ router.post('/notes/:id/pin', requireService('notes'), async (req, res) => {
   }
 });
 
-/** حذف ملاحظة. */
+/** Deletes a note. */
 router.post('/notes/:id/delete', requireService('notes'), async (req, res) => {
   const deleted = await deleteNote(req.account.id, String(req.params.id));
   res.redirect(303, `/notes?${deleted ? 'ok' : 'err'}=${deleted ? 'note_deleted' : 'note_missing'}`);
 });
 
-/** صفحة الملفات والمراجع (صفحة واحدة): الرفع + المراجع المُضافة من المكتبة. */
+/** Renders the combined files and references page. */
 router.get('/files', pageReadLimit, requireService('files'), async (req, res) => {
   try {
     const userId = req.account.id;
@@ -452,7 +431,7 @@ router.get('/files', pageReadLimit, requireService('files'), async (req, res) =>
   }
 });
 
-/** رفع ملف: نستقبل multipart يدوياً عبر undici formData (بدون مكتبة خارجية). */
+/** Parses multipart uploads with the built-in FormData API. */
 router.post(
   '/files',
   requireService('files'),
@@ -462,8 +441,7 @@ router.post(
   const step = String(req.query.step || '').trim().slice(0, 100);
 
   try {
-    // رفض مبكر قبل قراءة الجسم كاملاً في الذاكرة (حماية من DoS):
-    // حد الطلب = حدّ الملف الواحد في باقة الباحث + 2MB لحدود النموذج وترويسات multipart.
+    // Reject oversized requests before buffering the multipart body.
     const declared = Number(req.headers['content-length'] || 0);
     if (declared > 0) {
       const maxBytes = await userFileMaxBytes(req.account.id);
@@ -498,7 +476,7 @@ router.post(
     res.redirect(303, `/files?ok=file_uploaded${step ? `&step=${encodeURIComponent(step)}` : ''}`);
   } catch (error) {
     console.warn(`فشل رفع الملف: ${error?.code || error?.message}`);
-    // كل سبب رفض يتحوّل إلى تنبيه محدّد يشرح ما حدث للمستخدم فعلاً.
+    // Return a specific flash message for each upload rejection.
     const CODE_TO_KEY = {
       TOO_LARGE: 'file_too_large',
       BAD_TYPE: 'file_type_bad',
@@ -514,12 +492,7 @@ router.post(
   }
 );
 
-/**
- * تحميل/عرض ملف (مملوك للباحث فقط).
- *  - الافتراضي: تحميل (Content-Disposition: attachment).
- *  - ?inline=1 : عرض داخل المتصفح — لنوع «النص» نُجبر text/plain مع nosniff
- *    حتى لا يُفسَّر محتوى مرفوع كـ HTML (منع XSS مخزّن).
- */
+/** Serves an owned file as a download or safe inline preview. */
 router.get('/files/:id/raw', requireService('files'), async (req, res) => {
   const found = await readOwnedFile(req.account.id, String(req.params.id));
 
@@ -542,24 +515,24 @@ router.get('/files/:id/raw', requireService('files'), async (req, res) => {
   res.setHeader('content-length', found.buffer.length);
   res.setHeader('content-disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${name}`);
 
-  // حماية إضافية: نمنع أي محتوى مرفوع من تنفيذ سكربت داخل أصل الموقع
+  // Prevent uploaded content from executing scripts on the application origin.
   res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
 
   res.send(found.buffer);
 });
 
-/** نوع محتوى آمن للعرض داخل المتصفح حسب نوع الملف. */
+/** Returns a safe inline content type for the file. */
 function safeInlineMime(kind, mime) {
   if (kind === 'image') {
     return ['image/jpeg', 'image/png', 'image/webp'].includes(mime) ? mime : 'application/octet-stream';
   }
   if (kind === 'pdf') return 'application/pdf';
-  // النص دائماً text/plain — لا text/html أبداً حتى لو ملف مرفوع يحتوي وسم script
+  // Always serve text as text/plain, even if it contains script tags.
   if (kind === 'text') return 'text/plain; charset=utf-8';
   return 'application/octet-stream';
 }
 
-/** صفحة معاينة ملف: صورة/PDF/نص داخل الموقع. */
+/** Renders an image, PDF, or text file preview. */
 router.get('/files/:id/view', requireService('files'), async (req, res) => {
   const fileId = String(req.params.id);
   const found = await readOwnedFile(req.account.id, fileId);
@@ -580,7 +553,7 @@ router.get('/files/:id/view', requireService('files'), async (req, res) => {
   const kind = previewKind(found.row.file_name, found.row.mime);
   const textContent = kind === 'text' ? textPreview(found.buffer) : null;
 
-  // الجداول تُحلَّل على الخادم ثم تُعرض كـ HTML مُهرَّب (لا نمرّر بايتات الملف للمتصفح)
+  // Parse spreadsheet data on the server and render escaped HTML.
   let sheetData = null;
   let sheetError = '';
   if (kind === 'sheet' && found.buffer) {
@@ -606,7 +579,7 @@ router.get('/files/:id/view', requireService('files'), async (req, res) => {
   );
 });
 
-/** حذف ملف (مملوك للباحث فقط). */
+/** Deletes an owned file. */
 router.post('/files/:id/delete', requireService('files'), async (req, res) => {
   const deleted = await deleteFile(req.account.id, String(req.params.id));
   res.redirect(303, `/files?${deleted ? 'ok' : 'err'}=${deleted ? 'file_deleted' : 'file_missing'}`);

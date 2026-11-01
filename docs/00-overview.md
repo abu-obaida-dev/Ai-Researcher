@@ -1,67 +1,67 @@
-# 00 — ما هو هذا المنتج؟
+# 00 — What Is This Product?
 
-> هذا الملف يجيب عن سؤال واحد فقط: **«ما هو هذا المنتج؟»** — بلا أي تفاصيل تقنية عن كيف يعمل أو كيف بُني (تلك في الملفات اللاحقة).
+> This file answers one question only: **“What is this product?”** — without technical details about how it works or how it was built (those are covered in later files).
 
-## المنتج في جملة واحدة
+## The Product in One Sentence
 
-> **Zena AI منصة إشراف بحثي ذكية (Academic Research Supervision Platform) ترافق الباحث الجامعي من أول فكرة حتى اكتمال بحثه — بمشرفة أكاديمية تقود رحلته، لا بأداة دردشة تجيب عن أسئلته.**
+> **Zena AI is an intelligent Academic Research Supervision Platform that supports university researchers from their first idea through completion of their research — with an academic supervisor who guides their journey, not a chatbot that answers their questions.**
 
-> **مسرد سريع للفظ «المشرف»** يرد في وثائق المشروع بثلاثة معانٍ: **المشرفة الذكية** (Zena — آلية البرمجيات داخل المنصة) · **المشرف الجامعي** (الإنسان الذي يتابع الباحث في الجامعة) · **المشرف الإداري** (دور بشري في لوحة الإدارة يدير المستخدمين والمحتوى). يُفرَّق بينها في كل موضع بالسياق.
+> **A quick glossary for “supervisor”:** The term has three meanings in the project documentation: **AI supervisor** (Zena — the software automation within the platform) · **university supervisor** (the person who advises the researcher at their university) · **administrative supervisor** (a human role in the admin panel that manages users and content). Context distinguishes them throughout.
 
-## من هو المستخدم؟
+## Who Is the User?
 
-الباحث الجامعي العربي: طالب بكالوريوس يكتب مشروع تخرجه، أو باحث ماجستير ودكتوراه ودبلوم، أو باحث مستقل بلا إشراف رسمي. يجمعهم شيء واحد: **لديهم بحث يجب إنجازه بمعايير أكاديمية، وليس لديهم مشرف متفرغ يتابعهم كل يوم.**
+The Arab university researcher: an undergraduate writing a graduation project, a master’s, doctoral, or diploma researcher, or an independent researcher without formal supervision. They share one thing: **they have research to complete to academic standards, but no dedicated supervisor to follow up with them every day.**
 
-حوله أدوار مساندة: مشرف جامعي بشري (يتابع عند الحاجة)، ومدير للمنصة (يدير الباقات والمكتبة والمدفوعات) — لكن المنتج مصمم حول الباحث أولاً وأخيراً.
+Supporting roles include a human university supervisor (who checks in when needed) and a platform administrator (who manages plans, the library, and payments) — but the product is designed around the researcher, first and foremost.
 
-## ما المشكلة التي يعالجها؟
+## What Problem Does It Address?
 
-مشكلة الباحث ليست نقص المعلومات — المعلومات متوفرة في كل مكان. مشكلته الحقيقية أربعة أشياء:
+The researcher’s problem is not a lack of information — information is available everywhere. The real problem comes down to four things:
 
-1. **الضياع في الرحلة:** لا يعرف من أين يبدأ، وما الخطوة التالية، ومتى تنتهي كل مرحلة، وكيف يعرف أنه يسير في الاتجاه الصحيح.
-2. **غياب المتابعة:** يكتب وحده لشهور بلا من يسأله «أين وصلت؟» أو ينبهه أنه انحرف عن منهجه أو أن أدلته ضعيفة.
-3. **فوضى الأدوات:** مراجعه في مكان، وملاحظاته في مكان، وملفاته في مكان، وأسئلته في مكان — ولا شيء يجمعها في صورة واحدة عن تقدمه.
-4. **إغراء الحل السهل:** أدوات الذكاء العامة تعرض عليه كتابة البحث كاملاً في دقائق — فيسلّم عملاً ليس عمله، ويكتشفه المشرف الجامعي، فيخسر بحثه وسمعته.
+1. **Getting lost along the way:** They do not know where to start, what the next step is, when each stage ends, or how to tell whether they are on the right track.
+2. **Lack of follow-up:** They write alone for months, with no one to ask, “How far have you gotten?” or warn them that they have strayed from their methodology or that their evidence is weak.
+3. **Tool fragmentation:** References are in one place, notes in another, files somewhere else, and questions elsewhere — nothing brings them together into a single picture of progress.
+4. **The temptation of an easy shortcut:** General-purpose AI tools offer to write the entire research paper in minutes. The researcher submits work that is not their own, the university supervisor discovers it, and they lose both their research and their reputation.
 
-## لماذا يحتاج الباحث هذه المنصة؟
+## Why Does the Researcher Need This Platform?
 
-لأنه يحتاج ما يحتاجه أي باحث حقيقي في الجامعة: **مشرفاً**.
+Because they need what every real university researcher needs: **a supervisor**.
 
-مشرف يعرف تخصصه وعنوان بحثه وجامعته ومنهجه. مشرف يقسّم له الطريق إلى مراحل واضحة. مشرف يسأله قبل أن يجيبه. مشرف يراجع ما كتبه ويقول له أين الخلل: في المنهج أم في الأدلة أم في الصياغة. مشرف يتذكر ما اتفقا عليه المرة الماضية ويسأله عنه اليوم. مشرف يجهّزه للمناقشة بأسئلة حقيقية قبل أن يقف أمام اللجنة.
+A supervisor who knows their field, research title, university, and methodology. A supervisor who divides the path into clear stages. A supervisor who asks before answering. A supervisor who reviews what they have written and identifies the problem — in the methodology, the evidence, or the phrasing. A supervisor who remembers what they agreed on last time and follows up today. A supervisor who prepares them for the defense with real questions before they face the committee.
 
-هذا ما تقدمه المنصة: **إشراف مستمر**، لا إجابات متقطعة.
+That is what the platform provides: **ongoing supervision**, not sporadic answers.
 
-## لماذا ليست ChatBot؟
+## Why Not a Chatbot?
 
-لأن الـ ChatBot يفعل ثلاثة أشياء لا تفعلها هذه المنصة:
+Because a chatbot does three things this platform does not:
 
-- الـ ChatBot **ينتظر سؤالك ثم يجيب وينسى** — المنصة **تعرف رحلتك وتقودك للخطوة التالية** حتى لو لم تسأل.
-- الـ ChatBot **يعامل كل محادثة كبداية جديدة** — المنصة **تدير مشروعاً بحثياً واحداً مستمراً** للباحث (التعريف الكامل في `01 §5`).
-- الـ ChatBot **يكتب لك ما تطلب** — المشرفة هنا **ترفض أن تكتب بدلاً عنك**، لأن هدفها أن تُنجز أنت بحثك بيدك، لا أن تتسلم نصاً جاهزاً.
+- A chatbot **waits for your question, answers, and forgets** — the platform **knows your journey and guides you to the next step**, even if you do not ask.
+- A chatbot **treats every conversation as a new beginning** — the platform **manages one continuous research project** for the researcher (full definition in `01 §5`).
+- A chatbot **writes whatever you ask for** — the supervisor here **refuses to write on your behalf**, because its goal is for you to complete your research yourself, not receive a ready-made text.
 
-باختصار: المحادثة في هذه المنصة **وسيلة** من وسائل الإشراف — مثلما أن الاجتماع بالمشرف وسيلة، وليس هو الإشراف نفسه. (التفصيل في `08-workspace`.)
+In short, conversation on this platform is **a means** of supervision — just as meeting with a supervisor is a means, not supervision itself. (Details in `08-workspace`.)
 
-## لماذا تختلف عن أدوات الذكاء الاصطناعي العامة؟
+## How Is It Different from General-Purpose AI Tools?
 
-| أدوات الذكاء العامة | Zena AI |
+| General AI tools | Zena AI |
 |---|---|
-| تجيب عن أي شيء: برمجة، ترفيه، سياسة | نطاقها بحثك فقط — وما عداه تعيده لبحثك |
-| تخمّن عندما لا تعرف | لا تخمّن: تسأل سؤالاً واحداً أو ترجع لملفك الأكاديمي |
-| تختلق مراجع وروابط مقنعة كاذبة | مراجعها من قواعد بيانات حقيقية فقط — وما ليس موثقاً تسمّيه اقتراحاً مع طريقة التحقق |
-| تنسى أمس | تتذكر قراراتك ومهامك ونقاط ضعفك عبر الجلسات |
-| تكتب لك الفصل كاملاً | تراجع فصلك وتصنّف الخلل وتطلب منك الإصلاح |
-| لا تعرف أين أنت | تعرف مرحلتك الحالية وخطوتك التالية وحالة كل خطوة |
+| Answer anything: programming, entertainment, politics | Focus only on your research — anything else is redirected back to your research |
+| Guess when they do not know | Do not guess: ask one question or refer to your academic profile |
+| Invent convincing but false references and links | Use only real databases for references — anything unverified is labeled a suggestion with a verification method |
+| Forget yesterday | Remember your decisions, tasks, and areas for improvement across sessions |
+| Write an entire chapter for you | Review your chapter, classify issues, and ask you to fix them |
+| Do not know where you are | Know your current stage, next step, and the status of each step |
 
-## القيمة الأساسية
+## Core Value
 
-**باحث يدخل بفكرة مشوشة، ويخرج ببحث مكتمل دافع عنه أمام لجنة — وقد كتبه بيده، وراجعه مشرفه الذكي مرحلة مرحلة، ووثّق مراجعه الحقيقية، وحفظ كل ذلك في مشروع واحد منظم.**
+**A researcher arrives with a vague idea and leaves with completed research defended before a committee — research they wrote themselves, reviewed stage by stage with their AI supervisor, supported by genuine references, and kept together in one organized project.**
 
-هذه هي القيمة. وكل ما عداها من آليات الدفع والواجهات مجرد وسائل لخدمتها.
+That is the value. Everything else, from payment mechanisms to interfaces, exists only to support it.
 
-## أين تذهب بعد هذا الملف؟
+## Where to Go After This File
 
-- لتفهم **لماذا** بُني المنتج هكذا: اقرأ `01-philosophy` (فلسفة الإشراف والرحلة والمشروع والقرار).
-- لتفهم **من هي المشرفة** وكيف تتصرف: اقرأ `06-supervisor`.
-- لتفهم **الرحلة** التي يديرها المنتج: اقرأ `07-research-journey`.
-- لتفهم **مساحة العمل** التي يجتمع فيها كل شيء: اقرأ `08-workspace`.
-- التفاصيل التقنية (المعمارية، القاعدة، المحرك، الأمان، التشغيل) في الملفات `02`–`05` و`09`–`14` — ولا شيء منها في هذا الملف عن قصد.
+- To understand **why** the product was built this way: read `01-philosophy` (the philosophy of supervision, the journey, the project, and decision-making).
+- To understand **who the supervisor is** and how it behaves: read `06-supervisor`.
+- To understand the **journey** managed by the product: read `07-research-journey`.
+- To understand the **workspace** where everything comes together: read `08-workspace`.
+- Technical details (architecture, database, engine, security, operations) are in files `02`–`05` and `09`–`14` — intentionally, none of them are covered in this file.

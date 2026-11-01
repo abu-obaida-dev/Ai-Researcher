@@ -1,32 +1,25 @@
 import { pool } from '../db/client.js';
+import { SUPPORT_WHATSAPP } from '../constants.js';
 
-/**
- * إعدادات المنصة القابلة للتعديل من لوحة المدير — تُخزَّن في جدول settings
- * (مفتاح/قيمة نصية) حتى يسري التغيير فوراً بلا إعادة تشغيل الخادم.
- * لكل إعداد قيمة افتراضية هنا + متغيّر بيئة اختياري كسقوط آمن.
- *
- * ملاحظة: حدود تخزين الملفات لم تعد من هنا — صارت لكل باقة على حدة في
- * جدول plans (storage_mb + max_file_mb) يضبطها المدير من صفحة «الباقات».
- */
+/** Administrator-managed settings persisted as key/value rows. */
 
-/**
- * رقم واتساب الدعم الفني — يُعدّله المدير من **صفحة الإعدادات** (بلا لمس الكود
- * وبلا إعادة تشغيل): يُخزَّن في settings تحت المفتاح `support_whatsapp` مع كاش
- * في الذاكرة. لو تُرك فارغاً نرجع لمتغيّر البيئة `SUPPORT_WHATSAPP` (خط نجاة).
- */
+/** Loads and caches the configured WhatsApp support number. */
 let supportWhatsappCache = null;
 const SUPPORT_KEY = 'support_whatsapp';
+const REPLACED_SUPPORT_NUMBER = '01015240760';
 
-/** أرقام الواتساب للصوت (مناقشة صوتية): رقم للشباب ورقم للبنات.
- * يُحدّدهما المدير من لوحة الإدارة ويُخزَّنان في settings تحت
- * `whatsapp_voice_male` و `whatsapp_voice_female`. كاش في الذاكرة لكل منهما.
- */
+function isReplacedSupportNumber(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits === REPLACED_SUPPORT_NUMBER || digits === `218${REPLACED_SUPPORT_NUMBER}`;
+}
+
+/** Loads and caches the separate voice-defense WhatsApp numbers. */
 let voiceWhatsappMaleCache = null;
 let voiceWhatsappFemaleCache = null;
 const VOICE_MALE_KEY = 'whatsapp_voice_male';
 const VOICE_FEMALE_KEY = 'whatsapp_voice_female';
 
-/** يحمل رقم WhatsApp للصوت للشباب من قاعدة البيانات إلى الكاش. */
+/** Loads and caches the male voice-defense number. */
 export async function loadVoiceWhatsappMale() {
   try {
     voiceWhatsappMaleCache = (await readSetting(VOICE_MALE_KEY)) || '';
@@ -36,7 +29,7 @@ export async function loadVoiceWhatsappMale() {
   return voiceWhatsappMaleCache;
 }
 
-/** يحمل رقم WhatsApp للصوت للبنات من قاعدة البيانات إلى الكاش. */
+/** Loads and caches the female voice-defense number. */
 export async function loadVoiceWhatsappFemale() {
   try {
     voiceWhatsappFemaleCache = (await readSetting(VOICE_FEMALE_KEY)) || '';
@@ -46,24 +39,24 @@ export async function loadVoiceWhatsappFemale() {
   return voiceWhatsappFemaleCache;
 }
 
-/** رقم الصوت الفعّال للشباب: المخزّن أولاً، ثم البيئة، ثم فارغ. */
+/** Returns the configured male voice-defense number. */
 export function currentVoiceWhatsappMale() {
   return String(voiceWhatsappMaleCache || '').trim() || String(process.env.WHATSAPP_VOICE_MALE || '').trim();
 }
 
-/** رقم الصوت الفعّال للبنات: المخزّن أولاً، ثم البيئة، ثم فارغ. */
+/** Returns the configured female voice-defense number. */
 export function currentVoiceWhatsappFemale() {
   return String(voiceWhatsappFemaleCache || '').trim() || String(process.env.WHATSAPP_VOICE_FEMALE || '').trim();
 }
 
-/** رقم الصوت حسب الجنس: 'male' ⇒ رقم الشباب، 'female' ⇒ رقم البنات. */
+/** Selects the voice-defense number by gender. */
 export function currentVoiceWhatsappByGender(gender = '') {
   const g = String(gender || '').trim().toLowerCase();
   if (g === 'female' || g === 'أنثى' || g === 'بنت') return currentVoiceWhatsappFemale();
   return currentVoiceWhatsappMale(); // الافتراضي: رقم الشباب
 }
 
-/** يحفظ رقم واتساب الصوت بعد التحقق من صحته (نفس تنسيق دعم الواتساب). */
+/** Validates and stores a voice-defense WhatsApp number. */
 export async function saveVoiceWhatsapp(key, value) {
   const raw = String(value || '').trim();
   if (!raw) {
@@ -88,25 +81,27 @@ export async function saveVoiceWhatsapp(key, value) {
   return { ok: true, value: clean };
 }
 
-/** يحمّل الرقم من قاعدة البيانات إلى الكاش (مرة عند تشغيل الخادم). */
+/** Loads the support number into memory during startup. */
 export async function loadSupportWhatsapp() {
   try {
     supportWhatsappCache = (await readSetting(SUPPORT_KEY)) || '';
+    if (isReplacedSupportNumber(supportWhatsappCache)) {
+      supportWhatsappCache = SUPPORT_WHATSAPP;
+      await writeSetting(SUPPORT_KEY, SUPPORT_WHATSAPP);
+    }
   } catch {
     supportWhatsappCache = '';
   }
   return supportWhatsappCache;
 }
 
-/** الرقم الفعّال الآن: المخزَّن أولاً، ثم البيئة، ثم فارغ (لا رابط). */
+/** Returns the current support number, falling back to the configured default. */
 export function currentSupportWhatsapp() {
-  return String(supportWhatsappCache || '').trim() || String(process.env.SUPPORT_WHATSAPP || '').trim();
+  const configured = String(supportWhatsappCache || process.env.SUPPORT_WHATSAPP || '').trim();
+  return (isReplacedSupportNumber(configured) ? SUPPORT_WHATSAPP : configured) || SUPPORT_WHATSAPP;
 }
 
-/**
- * يحفظ الرقم بعد تنظيفه: أرقام فقط مع `+` في الأول، بطول 8–15 رقماً.
- * الفارغ = تعطيل الزر (يُحفظ كسلسلة فارغة عمداً).
- */
+/** Normalizes and stores the support number; an empty value disables the link. */
 export async function saveSupportWhatsapp(value) {
   const raw = String(value || '').trim();
   if (!raw) {
@@ -129,13 +124,13 @@ export async function saveSupportWhatsapp(value) {
   return { ok: true, value: clean };
 }
 
-/** يقرأ إعدادًا نصيًا من جدول settings (null إن لم يوجد). */
+/** Reads a text setting or returns null when missing. */
 async function readSetting(key) {
   const { rows } = await pool.query('SELECT value FROM settings WHERE key = $1', [key]);
   return rows.length ? rows[0].value : null;
 }
 
-/** يحفظ إعدادًا (upsert). */
+/** Upserts a text setting. */
 async function writeSetting(key, value) {
   await pool.query(
     `INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, NOW())
@@ -144,7 +139,7 @@ async function writeSetting(key, value) {
   );
 }
 
-/** يقرأ إعداداً مخزَّناً كـ JSON ويعيد قيمة افتراضية عند أي خلل (لا يفشل المستدعي أبداً). */
+/** Reads a JSON setting with a fallback on missing or invalid values. */
 export async function readJsonSetting(key, fallback = null) {
   try {
     const stored = await readSetting(key);
@@ -156,7 +151,7 @@ export async function readJsonSetting(key, fallback = null) {
   }
 }
 
-/** يحفظ قيمة إعداداً على هيئة JSON (upsert). */
+/** Upserts a JSON setting. */
 export async function writeJsonSetting(key, value) {
   await writeSetting(key, JSON.stringify(value));
 }

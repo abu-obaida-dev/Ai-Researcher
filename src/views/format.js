@@ -1,16 +1,13 @@
 import { DEFAULT_CURRENCY, SITE_CURRENCIES } from '../constants.js';
 
-/**
- * دوال عرض (presentation helpers) مستخدمة في الصفحات المولَّدة على الخادم.
- * نفس أسلوب التنسيق المستخدم في الواجهة السابقة للحفاظ على شكل المخرجات.
- */
+/** Presentation helpers for server-rendered pages. */
 
-/** تنسيق الأرقام بأرقام لاتينية مع فواصل الآلاف. */
+/** Formats numbers with Latin digits and thousands separators. */
 export function formatNumber(value) {
   return Number(value ?? 0).toLocaleString('en-US');
 }
 
-/** تاريخ عربي مقروء (بدون وقت) — بأرقام لاتينية (F1: لا خلط مع formatNumber). */
+/** Formats an Arabic date with Latin digits. */
 export function formatDate(value) {
   if (!value) return '—';
   const date = value instanceof Date ? value : new Date(value);
@@ -23,7 +20,7 @@ export function formatDate(value) {
   }).format(date);
 }
 
-/** تاريخ ووقت مختصر — بأرقام لاتينية (F1). */
+/** Formats a compact date and time with Latin digits. */
 export function formatDateTime(value) {
   if (!value) return '—';
   const date = value instanceof Date ? value : new Date(value);
@@ -38,11 +35,7 @@ export function formatDateTime(value) {
   }).format(date);
 }
 
-/**
- * مبلغ بعملة الموقع أو بعملة محددة (LYD/USD).
- * الافتراضي عملة الموقع من الثوابت (سقوط آمن على الدينار)، والصفحات تمرّر
- * ما قرأته من الإعدادات (siteCurrency) فتتّفق كل الأسعار على عملة واحدة.
- */
+/** Formats a monetary amount in the selected or default site currency. */
 export function formatMoney(value, currency = DEFAULT_CURRENCY) {
   const amount = Number(value ?? 0);
   const code = String(currency || DEFAULT_CURRENCY).toUpperCase();

@@ -2,29 +2,22 @@ import { pool } from '../db/client.js';
 import { STEP_STATUSES, TOKEN_COSTS } from '../constants.js';
 import { DEFAULT_RESEARCH_PATHS } from '../data/research-paths.js';
 
-/**
- * خدمة «مسار البحث» (1D).
- *
- * المصدر المفضّل للخطوات: جدولا research_paths/research_path_steps في PostgreSQL
- * (يُملآن عند تشغيل npm run db:seed أو من لوحة المدير مستقبلاً). وإن كانا فارغين
- * نستخدم التعريفات في src/data/research-paths.js مباشرة، فتعمل الصفحة فوراّ بدون
- * أي خطوة إعداد. في الحالتين يبقى ربط التقدّم بـ step_key الدلالي للخطوة.
- */
+/** Research-journey service with database-backed paths and runtime defaults. */
 
 const COST_BY_TYPE = new Map(TOKEN_COSTS.map((item) => [item.type, item]));
 const STATUS_VALUES = new Set(STEP_STATUSES.map((item) => item.value));
 
-/** سعر الخطوة بالنقاط من TOKEN_COSTS (سقوط آمن على سعر رسالة المشرف). */
+/** Returns the token cost for a step. */
 export function costForType(type) {
   return COST_BY_TYPE.get(type)?.tokens ?? TOKEN_COSTS[0].tokens;
 }
 
-/** وصف نوع الاستهلاك الظاهر مع الخطوة (من TOKEN_COSTS). */
+/** Returns the usage label for a step. */
 export function costLabelForType(type) {
   return COST_BY_TYPE.get(type)?.label || 'رسالة إلى المشرف الذكي';
 }
 
-/** عنوان خطوة بالمفتاح من التعريفات البرمجية (null إن لم تُعرف). */
+/** Resolves a step title from runtime definitions. */
 export function stepTitleFromCode(stepKey) {
   for (const path of DEFAULT_RESEARCH_PATHS) {
     const found = path.steps.find((item) => item.key === stepKey);
@@ -33,7 +26,7 @@ export function stepTitleFromCode(stepKey) {
   return null;
 }
 
-/** عنوان الخطوة بالمفتاح مع مراعاة الخطوات المخزّنة في قاعدة البيانات. */
+/** Resolves a step title from stored or runtime definitions. */
 export async function stepTitle(stepKey) {
   if (!stepKey) return null;
 
@@ -50,7 +43,7 @@ export async function stepTitle(stepKey) {
   return stepTitleFromCode(stepKey);
 }
 
-/** مسار من التعريفات البرمجية لدرجة معيّنة (سقوط آمن على مسار البكالوريوس). */
+/** Returns a runtime path for a degree, falling back to the bachelor's path. */
 function codePath(degreeLevel) {
   const found =
     DEFAULT_RESEARCH_PATHS.find((path) => path.degree_level === degreeLevel) || DEFAULT_RESEARCH_PATHS[0];
@@ -72,7 +65,7 @@ function codePath(degreeLevel) {
   };
 }
 
-/** خطوات درجة معيّنة: من قاعدة البيانات إن وُجدت، وإلا من التعريفات البرمجية. */
+/** Loads degree-specific steps from the database or runtime definitions. */
 export async function resolvePathForDegree(degreeLevel) {
   try {
     const { rows } = await pool.query(
@@ -112,13 +105,13 @@ export async function resolvePathForDegree(degreeLevel) {
   return codePath(degreeLevel);
 }
 
-/** خيارات الخطوة لدرجة معيّنة (تُستخدم في قوائم الربط داخل الملاحظات والمراجع والملفات). */
+/** Returns step options for reference, note, and file forms. */
 export async function stepOptionsForDegree(degreeLevel) {
   const path = await resolvePathForDegree(degreeLevel);
   return path.steps.map((step) => ({ value: step.key, label: `${step.no}. ${step.title}` }));
 }
 
-/** درجة الباحث من جدول profiles (بكالوريوس افتراضياً). */
+/** Returns the user's degree level. */
 export async function degreeOfUser(userId) {
   try {
     const { rows } = await pool.query('SELECT degree_level FROM profiles WHERE user_id = $1', [userId]);
@@ -129,17 +122,14 @@ export async function degreeOfUser(userId) {
   }
 }
 
-/** يتأكد أن مفتاح الخطوة ينتمي لمسار الباحث (قبل ربط مرجع أو ملاحظة أو ملف بخطوة). */
+/** Checks that a step key belongs to the user's path. */
 export async function isValidStepKeyForUser(userId, stepKey) {
   if (!stepKey) return true;
   const path = await resolvePathForDegree(await degreeOfUser(userId));
   return path.steps.some((step) => step.key === stepKey);
 }
 
-/**
- * مسار الباحث مع حالته الحالية: دمج تعريف الخطوات مع صفوف user_step_progress.
- * يعيد أيضاّ ملخصاّ (done/total/percent/current) تستخدمه صفحة الإحصائية والسايدبار.
- */
+/** Combines path definitions with user progress and a summary for the UI. */
 export async function getJourney(userId, degreeLevel) {
   const path = await resolvePathForDegree(degreeLevel);
 
@@ -190,15 +180,8 @@ export async function getJourney(userId, degreeLevel) {
   };
 }
 
-/** ملخص تقدّم مختصر لصفحة الإحصائية — لا يفشل أبداً (يعيد null عند الخطأ). */
-/**
- * **موضوع البحث المُسجَّل**: مصدر واحد موثوق تعتمد عليه كل أدوات المراجع.
- * ترتيب القراءة:
- *   1) ما كتبه الباحث في خطوة «اختيار الموضوع» (output_note) — هذا هو المعتمد.
- *   2) عنوان البحث في ملفه البحثي (profiles.research_title).
- *   3) لا شيء ⇒ الموضوع غير مسجَّل بعد.
- * لا نستخدم «التخصص» العام هنا عمداً: تخصص عام ⇒ مراجع عشوائية.
- */
+/** Returns a compact progress summary for the dashboard. */
+/** Resolves the registered topic from journey progress, then the profile title. */
 export async function registeredTopic(userId, profile = {}) {
   let fromJourney = '';
   try {
@@ -220,11 +203,7 @@ export async function registeredTopic(userId, profile = {}) {
   };
 }
 
-/**
- * يسجّل موضوع البحث الذي اختاره الباحث (بالكلمات التي كتبها هو) في خطوة
- * «اختيار الموضوع»، ويعيده للواجهة. لا نضع الخطوة «تم» — الباحث وحده يقرّر ذلك —
- * بل «جاري» مع ملاحظة تحتوي الموضوع المختار.
- */
+/** Stores the user's topic verbatim without marking the step complete. */
 export async function recordTopic(userId, topic, { degreeLevel = '', stepKey = 'topic' } = {}) {
   const text = String(topic || '')
     .replace(/\s+/g, ' ')
@@ -246,7 +225,7 @@ export async function recordTopic(userId, topic, { degreeLevel = '', stepKey = '
 
   await setStepStatus(userId, stepKey, { status: 'in_progress', outputNote: text });
 
-  // ولا نكتب فوق عنوان بحثه إن كان قد حفظه بنفسه (نترك قراره).
+  // Do not overwrite a title already saved by the user.
   await pool.query(
     "UPDATE profiles SET research_title = $2 WHERE user_id = $1 AND COALESCE(research_title, '') = ''",
     [userId, text]
@@ -276,11 +255,7 @@ export async function getJourneySummary(userId, degreeLevel) {
   }
 }
 
-/**
- * تغيير حالة خطوة (لم يبدأ / جاري / تم) مع ملاحظة المخرجات.
- * يرفض مفاتيح الخطوات التي لا توجد في مسار الدرجة نفسها، وتُحفظ completed_at
- * أول مرة فقط عند الحالة 'done' وتُمسح إن رجع الباحث عن الإنجاز.
- */
+/** Updates a valid path-step status and its output note. */
 export async function setStepStatus(userId, stepKey, { status = 'not_started', outputNote = '' } = {}) {
   if (!STATUS_VALUES.has(status)) {
     const error = new Error('حالة غير صالحة للخطوة.');

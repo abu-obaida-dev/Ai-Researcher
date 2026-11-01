@@ -1,14 +1,4 @@
-/**
- * إرسال رسالة الشات بلا إعادة تحميل الصفحة — تحسين تدريجي (progressive enhancement).
- *
- * - بلا جافاسكربت: النموذج يُرسل كـ POST عادي والخادم يعيد 303 — كما كان تماماً.
- * - مع الجافاسكربت: fetch مع Accept: application/json، والخادم يعيد قطع HTML
- *   مُعرَّضة بنفس دوال عرض الصفحة (مصدر واحد للشكل)، ونستبدلها في أماكنها:
- *   الرسائل + لوحة المراجع + قائمة المحادثات. لا تحديث للصفحة
- *   كاملة ولا قفزة تمرير.
- * - عند أي فشل (شبكة/خادم/استجابة غير متوقعة): تنبيه + إعادة نص الباحث —
- *   ولا نُعيد الإرسال تلقائياً كي لا تُخصم نقاط مرتين.
- */
+/** Enhances chat submission with fragment updates while preserving normal form fallback. */
 (function initChatSend() {
   'use strict';
 
@@ -33,13 +23,12 @@
 
     busy = true;
     var button = form.querySelector('.chat-send');
-    var restoreLabel = button ? button.textContent : '';
     if (button) {
       button.disabled = true;
       button.setAttribute('aria-busy', 'true');
     }
 
-    // فقاعة معلّقة لرسالة الباحث + مؤشر «يكتب…» — تُبدَلان بردّ الخادم الحقيقي
+    // Show optimistic user and typing messages until the server response arrives.
     var typing = document.createElement('div');
     typing.className = 'bubble bubble-ai is-thinking';
     typing.textContent = 'المشرف الذكي يكتب…';
@@ -50,9 +39,7 @@
     }
     input.value = '';
 
-    // جسم الطلب كما يفهمه المسار التقليدي (express.json يعالجه عالمياً)
-    // حماية أمنية: لا يُسلم طلب بدون محادثة مختارة — يُرجع خطأ واضح قبل أي
-    // قراءة أو تسعير، فالمحادثة يجب أن تختار من السايدبار أو دفتر الشات.
+    // Require a selected conversation before the server reads or charges the request.
     var payload = {
       message: text,
       conversation_id: (function () {
@@ -108,14 +95,13 @@
         if (button) {
           button.disabled = false;
           button.removeAttribute('aria-busy');
-          button.textContent = restoreLabel;
         }
         wireRefs();
         input.focus();
       });
   });
 
-  /** فقاعة رسالة المستخدم بنفس أبعاد فقاعات الخادم، والنص يُكتب نصاً لا HTML. */
+  /** Builds a safe optimistic user message. */
   function pendingBubble(text) {
     var el = document.createElement('div');
     el.className = 'bubble bubble-user is-pending';
@@ -130,49 +116,46 @@
     return el;
   }
 
-  /** قيمة حقل مخفي داخل النموذج (أو سلسلة فارغة). */
+  /** Reads a hidden form field. */
   function field(name) {
     var el = form.querySelector('input[name="' + name + '"]');
     return el ? el.value : '';
   }
 
-  /** تمرير صندوق الرسائل إلى أسفله (بعد إضافة فقاعة). */
+  /** Scrolls the message list to the bottom. */
   function scrollToBottom() {
     if (messagesBox) messagesBox.scrollTop = messagesBox.scrollHeight;
   }
-  /**
-   * استبدال قطع الصفحة بالقطع الجديدة القادمة من الخادم — نفس مواضع التخطيط:
-   * لوحة المراجع بين الرسائل والنموذج، وقائمة المحادثات في السايدبار.
-   */
+  /** Replaces server-rendered fragments in their existing layout positions. */
   function applyFragments(data) {
     var fragments = data.fragments || {};
 
-    // الرسائل الكاملة (بما فيها بطاقة مراجعة الخطوة إن ظهرت)
+    // Replace messages, including any pending step-review card.
     if (messagesBox && fragments.messagesHtml != null) {
       messagesBox.innerHTML = fragments.messagesHtml;
     }
 
-    // لوحة المراجع: تُحذف القديمة وتُدرج الجديدة قبل النموذج إن وُجدت
+    // Replace the references panel before the form.
     var oldRefs = document.getElementById('chat-refs');
     if (oldRefs) oldRefs.remove();
     if (fragments.refsHtml) form.insertAdjacentHTML('beforebegin', fragments.refsHtml);
 
 
-    // معرّف المحادثة: يتحدّث بعد أول رسالة (محادثة جديدة)
+    // Save the new conversation ID after the first message.
     if (data.conversationId) {
       var idField = form.querySelector('input[name="conversation_id"]');
       if (idField) idField.value = data.conversationId;
     }
 
-    // قوائم المحادثات في السايدبار (العنوان/العدّاد/الترتيب)
+    // Refresh the conversation sidebar.
     var nav = document.querySelector('.chat-nav');
     if (nav && fragments.conversationsHtml) nav.outerHTML = fragments.conversationsHtml;
 
-    // إلغاء تحديد الملفات المرفقة (كما تفعل إعادة التحميل التقليدية)
+    // Match the normal form behavior by clearing selected attachments.
     var checked = form.querySelectorAll('input[name="file_ids"]:checked');
     for (var i = 0; i < checked.length; i++) checked[i].checked = false;
 
-    // الرابط في شريط العنوان: يبقى قابلاً للنسخة/التحديث بلا إعادة تحميل
+    // Keep the URL usable for refreshes and sharing without reloading.
     if (data.conversationUrl && window.history && history.replaceState) {
       history.replaceState(null, '', data.conversationUrl);
     }
@@ -180,9 +163,7 @@
     scrollToBottom();
   }
 
-  /**
-   * تراجع عند الفشل: إزالة الفقاعتين المؤقتتين، إعادة نص الباحث، وتنبيه.
-   */
+  /** Rolls back optimistic messages and restores the user's text on failure. */
   function failSend(message, text) {
     if (messagesBox) {
       var pendingEls = messagesBox.querySelectorAll('.is-pending, .is-thinking');
@@ -192,7 +173,7 @@
     showLiveFlash(message);
   }
 
-  /** تنبيه مؤقت أعلى الكارت (بلا حقن HTML: النص يُكتب نصاً). */
+  /** Shows a temporary, text-only error message. */
   function showLiveFlash(message) {
     if (!card) return;
     var el = document.createElement('div');
@@ -209,20 +190,14 @@
     if (el) el.remove();
   }
 
-  /**
-   * قراءة رسالة خطأ من استجابة ليست JSON (مثل حدّ المعدّل نصّاً) — نص قصير فقط،
-   * وما فيه HTML نتجاهله (لا نعرض مارك أب من الخادم داخل تنبيه).
-   */
+  /** Extracts a short plain-text error from non-JSON responses. */
   function shortText(raw, status) {
     var text = String(raw || '').trim();
     if (!text || /<[^>]+>/.test(text)) return status ? '(رمز ' + status + ')' : '';
     return text.slice(0, 200);
   }
 
-  /**
-   * إعادة ربط فتح/غلق لوحة المراجع بالتمرير — لأن العنصر قد يُستبدل حديثاً.
-   * (السلوك نفسه الذي يربطه chat-auto-scroll.js عند تحميل الصفحة.)
-   */
+  /** Rebinds the toggle handler when the references panel is replaced. */
   function wireRefs() {
     var refs = document.getElementById('chat-refs');
     if (!refs || refs.getAttribute('data-refs-wired') === '1') return;

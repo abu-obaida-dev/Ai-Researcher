@@ -8,19 +8,14 @@ import {
 import { unreadCount } from '../services/notifications.js';
 import { escapeHtml, renderLayout, renderNotice } from '../views/layout.js';
 
-/** أيقونة SVG من ملف الرموز (sprite) — محلية في هذا الملف لأن المستخدم يأتي من `<svg><use href="#icon-...">`. */
+/** Returns a local SVG sprite icon. */
 function icon(name, sizeClass = '') {
   return `<svg class="icon ${sizeClass}" aria-hidden="true"><use href="#icon-${name}"></use></svg>`;
 }
 
 const router = express.Router();
 
-/**
- * صفحة المناقشة الصوتية عبر واتساب (/voice).
- * تعرض زرين واتساب منفصلين: أحدهما للشباب والآخر للبنات.
- * يضغط الباحث على الزر الذي يناسبه ليفتح محادثة واتساب مباشرةً
- * (نفس سلوك زر الدعم الفني العائم).
- */
+/** Renders the WhatsApp voice-defense page. */
 router.get('/voice', requireAccount, async (req, res) => {
   try {
     const userId = req.account.id;

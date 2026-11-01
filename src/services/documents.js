@@ -2,24 +2,15 @@ import { inflateSync, inflateRawSync } from 'node:zlib';
 import JSZip from 'jszip';
 import { readSpreadsheet } from './spreadsheet.js';
 
-/**
- * استخراج نصّ من ملفات الباحث — حتى يقرأها المشرف الذكي فعلاً.
- *
- * ما كان سابقاً: txt/md/csv/xlsx فقط، فكانت ملفات **PDF و DOCX** (وهي أغلب ما
- * يرفعه الباحث: فصول وملفات Word) تُحسم بـ«تعذّر استخراج نصّ» ⇒ لا يعرف المشرف شيئاً.
- *
- * المعالجات: txt/md/csv (نصّ) · xlsx/xls (ExcelJS) · docx (ZIP ⇒ word/document.xml)
- * · pdf (مستخرِج خفيف بـ zlib + خرائط ToUnicode). والباقي (صور/zip/doc القديم) ⇒
- * رسالة واضحة للباحث بدل تمرير حروف عشوائية للنموذج.
- */
+/** Extracts text from supported user uploads for model context. */
 
-/** أقصى نصّ من ملف واحد (حرف) — يحمي السياق من التضخّم. */
+/** Maximum injected text length per file. */
 const MAX_CHARS_PER_FILE = 120000;
 
-/** أقصى حجم ملف نحاول تحليله (20 MB). */
+/** Maximum file size accepted by text extraction. */
 const MAX_PARSE_BYTES = 20 * 1024 * 1024;
 
-/** فكّ كيانات XML الشائعة في Word. */
+/** Decodes common XML entities. */
 function decodeXmlEntities(text) {
   return String(text || '')
     .replace(/&lt;/g, '<')
@@ -30,7 +21,7 @@ function decodeXmlEntities(text) {
     .replace(/&amp;/g, '&');
 }
 
-/** XML ⇒ نصّ مع الحفاظ على الفقرات والجداول كأسطر. */
+/** Converts Word XML to text while preserving paragraph boundaries. */
 function xmlToText(xml) {
   return decodeXmlEntities(
     String(xml || '')
@@ -45,7 +36,7 @@ function xmlToText(xml) {
     .trim();
 }
 
-/** استخراج نصّ Word من .docx (ملف ZIP ⇒ word/document.xml). */
+/** Extracts document.xml from a DOCX archive. */
 export async function extractDocxText(buffer) {
   if (!buffer?.length || buffer.length > MAX_PARSE_BYTES) return '';
 
@@ -60,20 +51,20 @@ export async function extractDocxText(buffer) {
   }
 }
 
-/** يفكّ ضغط تدفّق PDF (FlateDecode) ويعيده Buffer أو null. */
+/** Inflates a PDF FlateDecode stream. */
 function inflatePdfStream(chunk) {
   for (const fn of [inflateSync, inflateRawSync]) {
     try {
       const out = fn(chunk);
       if (out?.length) return out;
     } catch {
-      /* ليس Flate أو تالف */
+      /* Unsupported or corrupt stream. */
     }
   }
   return null;
 }
 
-/** «00480065» ⇒ [0x48, 0x65] (كل زوج ٤ خانات ست عشرية). */
+/** Decodes four-hex-digit UTF-16 code units. */
 function hexPairsToCodes(hex) {
   const value = String(hex || '');
   const codes = [];
@@ -81,14 +72,14 @@ function hexPairsToCodes(hex) {
   return codes.filter((code) => Number.isFinite(code));
 }
 
-/** يستخرج كل تدفّقات PDF ويفكّ ضغطها (أو يتركها خام إن لم تكن مضغوطة). */
+/** Extracts PDF streams and inflates compressed streams. */
 function pdfStreams(buffer) {
   const latin = buffer.toString('latin1');
   const streams = [];
   let index = latin.indexOf('stream');
 
   while (index !== -1) {
-    // «endstream» تحتوي الكلمة نفسها ⇒ نتخطاها، وإلا ضاعت تدفّقات حقيقية.
+    // Skip the endstream token itself.
     const isReal = latin.slice(Math.max(0, index - 3), index).toLowerCase() !== 'end';
     let cursor = index + 'stream'.length;
     while (cursor < latin.length && latin[cursor] !== '\n' && latin[cursor] !== '\r') cursor += 1;
@@ -100,8 +91,7 @@ function pdfStreams(buffer) {
       continue;
     }
 
-    // الطريقة الصحيحة: نأخذ الطول من قاموس الكائن (/Length N) إن وُجد —
-    // البحث عن «endstream» داخل بيانات ثنائية قد يقطع التدفّق خطأً.
+    // Prefer the declared stream length; binary data may contain the endstream token.
     const dict = latin.slice(Math.max(0, index - 400), index);
     const lengthMatch = /\/Length\s+(\d+)(?!\s+\d+\s+R)/.exec(dict);
     let stop = lengthMatch ? cursor + Number(lengthMatch[1]) : -1;
@@ -110,7 +100,7 @@ function pdfStreams(buffer) {
       const stopAt = latin.indexOf('endstream', cursor);
       if (stopAt === -1) break;
       stop = stopAt;
-      // سطر النهاية قبل endstream ليس جزءاً من البيانات.
+      // Exclude the line break before endstream from the payload.
       while (stop > cursor && (latin[stop - 1] === '\n' || latin[stop - 1] === '\r')) stop -= 1;
     }
 
@@ -122,10 +112,9 @@ function pdfStreams(buffer) {
   return streams;
 }
 
-/** خرائط ToUnicode من الملف (bfchar + bfrange) — تُستعمل لفكّ النصوص الهِشّة. */
+/** Reads ToUnicode mappings used by PDF text extraction. */
 function pdfCmaps(buffer, streams = []) {
-  // خرائط ToUnicode تكون عادة **داخل تدفّق مضغوط**، فالبحث في الملف الخام وحده
-  // يفشل ⇒ لا تُفكّ العربية ولا تُقرأ. لذلك نبحث في: الملف الخام + كل التدفّقات المفكوكة.
+  // ToUnicode maps are often compressed, so inspect both raw and inflated streams.
   const haystacks = [buffer.toString('latin1'), ...streams.map((stream) => stream.toString('latin1'))];
   const maps = [];
 
@@ -156,7 +145,7 @@ function pdfCmaps(buffer, streams = []) {
   return maps;
 }
 
-/** يفكّ نصّاً هِشّاً بخرائط ToUnicode ثم يجرّب UTF-16BE ثم Latin-1. */
+/** Decodes PDF text using font maps, then UTF-16BE and Latin-1 fallbacks. */
 function decodeHexString(hex, cmaps) {
   const codes = hexPairsToCodes(hex);
   if (!codes.length) return '';
@@ -175,13 +164,13 @@ function decodeHexString(hex, cmaps) {
     const asUtf16 = Buffer.from(codes.flatMap((c) => [c >> 8, c & 0xff])).toString('utf16le');
     if (/[\p{L}\p{N}]{2,}/u.test(asUtf16.replace(/[\x00-\x1F]/g, ''))) return asUtf16;
   } catch {
-    /* تجاهُل */
+    /* Ignore malformed mapping entries. */
   }
 
   return Buffer.from(codes.map((c) => c & 0xff)).toString('latin1');
 }
 
-/** يفكّ النصوص الحرفية مع محارف الهروب. */
+/** Decodes escaped PDF literal strings. */
 function decodeLiteralString(value) {
   return String(value || '').replace(/\\([nrtbf()\\]|[0-7]{1,3})/g, (_, esc) => {
     const map = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f' };
@@ -191,13 +180,8 @@ function decodeLiteralString(value) {
   });
 }
 
-/**
- * استخراج نصّ من PDF (أفضل ما يمكن بلا مكتبات): نقرأ مشغّلات إظهار النصّ
- * (Tj / TJ / ' / ")، ونطبّق خرائط ToUnicode، ونحوّل حركات السطر إلى أسطر.
- * حدّ معروف: PDF الممسوح ضوئياً (صورة) لا يُنتج نصاً أبداً، وبعض الخطوط
- * بلا خريطة ToUnicode تُخرج رموزاً غير مفهومة — وعندها نُبلغ الباحث بوضوح.
- */
-/** هل النصّ المستخرج «مفهوم» أم حروف عشوائية من ترميز خط خاطئ؟ */
+/** Extracts text operators from PDFs; scanned pages and unmapped fonts may yield no text. */
+/** Rejects extracted text that appears to be garbled. */
 function looksReadable(text) {
   const value = String(text || '').trim();
   if (value.length < 12) return false;
@@ -205,7 +189,7 @@ function looksReadable(text) {
   return letters / value.length >= 0.7;
 }
 
-/** يجمع مقتطفات النصّ من تدفّقات المحتوى (المشغِّل الفعلي في جوهرها). */
+/** Collects text fragments from PDF content streams. */
 function extractPdfTokens(buffer, streams, cmaps) {
   const pieces = [];
 
@@ -261,21 +245,16 @@ function extractPdfTextFallback(buffer) {
   const first = extractPdfTokens(buffer, streams, cmaps);
   if (looksReadable(first)) return first.slice(0, MAX_CHARS_PER_FILE);
 
-  // محاولة ثانية بلا خرائط (ملفات بخطوط بسيطة تكتب المحارف مباشرة).
+  // Retry without font maps for simple fonts that encode characters directly.
   const second = extractPdfTokens(buffer, streams, []);
   if (looksReadable(second)) return second.slice(0, MAX_CHARS_PER_FILE);
 
-  // نتيجة غير مفهومة (خط خاص بلا ToUnicode) ⇒ نُرجع فراغاً بدل تمرير حروف عشوائية.
+  // Return empty text rather than passing garbled characters to the model.
   return '';
 }
 
 
-/**
- * المحرك الأساسي: pdf.js (Mozilla) — يقرأ بنية PDF الحقيقية: جداول المراجع
- * المضغوطة (xref streams)، تدفّقات الكائنات (ObjStm)، خطوط CID مع ToUnicode،
- * والخطوط القياسية. هذا ما يجعل ملفات Word/Chrome/LaTeX تُقرأ فعلاً.
- * المستخرِج الخفيف أدناه يبقى كاحتياط لو تعذّر تحميل المحرك.
- */
+/** Uses pdf.js for full PDF parsing, with the lightweight parser as fallback. */
 let pdfjsPromise = null;
 
 function loadPdfJs() {
@@ -288,10 +267,10 @@ function loadPdfJs() {
   return pdfjsPromise;
 }
 
-/** أقصى عدد صفحات نقرأها من ملف واحد (حماية من الملفات الضخمة). */
+/** Maximum PDF pages to extract. */
 const MAX_PDF_PAGES = 40;
 
-/** استخراج نصّ PDF عبر pdf.js مع تتبّع مواضع النصّ (أسطر meaningful). */
+/** Extracts positioned text items from a PDF using pdf.js. */
 async function extractPdfWithPdfJs(buffer) {
   const pdfjs = await loadPdfJs();
   if (!pdfjs) return '';
@@ -299,7 +278,7 @@ async function extractPdfWithPdfJs(buffer) {
   const { fileURLToPath } = await import('node:url');
   const path = await import('node:path');
 
-  // ملفات الخطوط القياسية (تُستعمل في ترميز النصوص اللاتينية غير المضمّنة)
+  // Locate standard fonts used for non-embedded Latin glyphs.
   let standardFontDataUrl;
   try {
     const pkg = fileURLToPath(import.meta.resolve('pdfjs-dist/package.json'));
@@ -328,7 +307,7 @@ async function extractPdfWithPdfJs(buffer) {
     for (const item of content.items) {
       if (typeof item.str !== 'string') continue;
       line += item.str;
-      // كسر السطر عند تغيّر الموضع الرأسي في الصفحة
+      // Start a new line when the vertical position changes.
       if (item.hasEOL) {
         chunks.push(line.trim());
         line = '';
@@ -339,7 +318,7 @@ async function extractPdfWithPdfJs(buffer) {
 
   await doc.destroy?.();
 
-  // بعض الملفات تُخرج محارف متباعدة بمحارف NUL (تحويل CID بـ16بت) ⇒ ننظّفها.
+  // Remove NUL separators emitted by some 16-bit CID encodings.
   return chunks
     .join('\n')
     .replace(/\u0000/g, '')
@@ -347,12 +326,12 @@ async function extractPdfWithPdfJs(buffer) {
     .slice(0, MAX_CHARS_PER_FILE);
 }
 
-/** file:// من مسار نظام ملفات (لخطوط pdf.js القياسية). */
+/** Converts a filesystem path to a file URL for pdf.js standard fonts. */
 function pathToFileUrl(dirPath) {
   return new URL(`file://${dirPath}`).toString();
 }
 
-/** واجهة واحدة: { text, kind } — وkind للرسالة التي يراها الباحث عند التعذّر. */
+/** Returns extracted text and a user-facing failure category. */
 export async function extractFileText(buffer, fileName = '') {
   const name = String(fileName || '').toLowerCase();
 
@@ -374,7 +353,7 @@ export async function extractFileText(buffer, fileName = '') {
     } catch (error) {
       console.warn(`تعذّر استخراج نصّ PDF بالمحرك الأساسي: ${error?.code || error?.message}`);
     }
-    // احتياط: المستخرِج الخفيف (لو كان الملف بسيطاً أو المحرك غير متاح)
+    // Fall back to the lightweight parser when pdf.js is unavailable.
     if (!text.trim()) text = extractPdfTextFallback(buffer);
     return { text, kind: 'pdf' };
   }

@@ -1,15 +1,4 @@
-/**
- * Firebase للإشعارات فقط — لا Auth ولا Firestore.
- * - الواجهة: مكتبة Firebase JS (compat عبر CDN) + مفتاح VAPID لتوكنات Web Push.
- * - الخادم: Firebase Admin SDK (FCM) لإرسال الـ push.
- * - كل بيانات المستخدمين والتوكنات في PostgreSQL (notifications و device_tokens).
- *
- * مفتاحان اثنان لا ثالث لهما:
- *   1) **مفاتيح الواجهة** (غير سرّية) في ملف البيئة `FIREBASE_*` مع بقية الإعدادات.
- *   2) **المفتاح الخاص للإرسال** في ملف حساب خدمة `*firebase-adminsdk*.json` —
- *      مساره المطلق في `FIREBASE_SERVICE_ACCOUNT_FILE` (خارج مجلد المشروع،
- *      مثلاً ~/.config/zena/) ولا يُنسخ أبداً إلى .env ولا إلى أي واجهة.
- */
+/** Firebase Cloud Messaging integration; user data and device tokens remain in PostgreSQL. */
 import { readFileSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,28 +6,24 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
-const OPTIONAL_WEB_KEYS = [
-  'FIREBASE_API_KEY',
-  'FIREBASE_AUTH_DOMAIN',
-  'FIREBASE_PROJECT_ID',
-  'FIREBASE_STORAGE_BUCKET',
-  'FIREBASE_MESSAGING_SENDER_ID',
-  'FIREBASE_APP_ID'
-];
+const DEFAULT_WEB_CONFIG = {
+  apiKey: 'AIzaSyDwrVoVdykaGbU9ScPvZJDgdy5kQ0sgbHg',
+  authDomain: 'zena-ai-e5164.firebaseapp.com',
+  projectId: 'zena-ai-e5164',
+  storageBucket: 'zena-ai-e5164.firebasestorage.app',
+  messagingSenderId: '725694405420',
+  appId: '1:725694405420:web:e0510342dac2fa235f2a89',
+  measurementId: 'G-8LP5JXKHG2',
+  vapidKey: 'BNhSRvfEaEa4q1Tl8raRJub-xjZjlOtLsgqRfhwxwZvQKoQRwCeiVWl4sWuvqR8DA2rr0v4YIO-Ec6Ncb0QdVOs'
+};
 
-/**
- * يجد ملف حساب الخدمة (أمان C2):
- * 1) المسار المطلق من `FIREBASE_SERVICE_ACCOUNT_FILE` — الطريقة الموصى بها
- *    (الملف خارج مجلد المشروع، مثلاً ~/.config/zena/).
- * 2) خط نجاة فقط: البحث في جذر المشروع — يطبع تحذيراً صريحاً كل مرة يُستخدم فيها
- *    لأن بقاء السرّ داخل مجلد المشروع مخاطرة (نسخ احتياطي/مزامنة قد ترفعه).
- */
+/** Uses the configured service-account path; an unconfigured root-level key is a warned fallback. */
 function findServiceAccountFile() {
   const configured = String(process.env.FIREBASE_SERVICE_ACCOUNT_FILE || '').trim();
   if (configured) {
-    // توسعة ~ لأن التوثيق يقترح FIREBASE_SERVICE_ACCOUNT_FILE=~/.config/zena/...
+    // Expand the home-directory shorthand.
     const expanded = configured.startsWith('~/') ? path.join(os.homedir(), configured.slice(2)) : configured;
-    return path.resolve(expanded);
+    return path.isAbsolute(expanded) ? path.resolve(expanded) : path.resolve(ROOT_DIR, expanded);
   }
 
   try {
@@ -61,10 +46,7 @@ function findServiceAccountFile() {
 
 let serviceAccountCache;
 
-/**
- * حساب الخدمة من ملفه: لا يرمي خطأ أبداً — غياب الملف يعني «الإرسال غير مفعّل» فقط.
- * يُقرأ مرة واحدة ويُخزَّن (المفتاح الخاص لا يُطبع ولا يُعاد تدويره).
- */
+/** Loads and caches the service account without exposing private-key material. */
 function serviceAccount() {
   if (serviceAccountCache !== undefined) return serviceAccountCache;
   serviceAccountCache = null;
@@ -87,27 +69,27 @@ function serviceAccount() {
   return serviceAccountCache;
 }
 
-/** إعدادات الواجهة العامة (مفاتيح غير سرّية — تُرسل للمتصفح عبر /api/firebase-config). */
+/** Returns public Firebase settings safe to expose to the browser. */
 export function firebaseWebConfig() {
   const account = serviceAccount();
 
-  // المفاتيح كلها من ملف البيئة (ملف واحد لكل شيء).
-  // و projectId يكمله حساب الخدمة من ملفه حتى لا يتكرر في مكانين.
+  // Fall back to the service-account project ID to avoid duplicate configuration.
   const config = {
-    apiKey: (process.env.FIREBASE_API_KEY || '').trim(),
-    authDomain: (process.env.FIREBASE_AUTH_DOMAIN || '').trim(),
-    projectId: (process.env.FIREBASE_PROJECT_ID || '').trim() || account?.projectId || '',
-    storageBucket: (process.env.FIREBASE_STORAGE_BUCKET || '').trim(),
-    messagingSenderId: (process.env.FIREBASE_MESSAGING_SENDER_ID || '').trim(),
-    appId: (process.env.FIREBASE_APP_ID || '').trim()
+    apiKey: (process.env.FIREBASE_API_KEY || DEFAULT_WEB_CONFIG.apiKey).trim(),
+    authDomain: (process.env.FIREBASE_AUTH_DOMAIN || DEFAULT_WEB_CONFIG.authDomain).trim(),
+    projectId: (process.env.FIREBASE_PROJECT_ID || DEFAULT_WEB_CONFIG.projectId).trim() || account?.projectId || '',
+    storageBucket: (process.env.FIREBASE_STORAGE_BUCKET || DEFAULT_WEB_CONFIG.storageBucket).trim(),
+    messagingSenderId: (process.env.FIREBASE_MESSAGING_SENDER_ID || DEFAULT_WEB_CONFIG.messagingSenderId).trim(),
+    appId: (process.env.FIREBASE_APP_ID || DEFAULT_WEB_CONFIG.appId).trim(),
+    measurementId: (process.env.FIREBASE_MEASUREMENT_ID || DEFAULT_WEB_CONFIG.measurementId).trim()
   };
-  const vapidKey = (process.env.FIREBASE_VAPID_KEY || '').trim();
+  const vapidKey = (process.env.FIREBASE_VAPID_KEY || DEFAULT_WEB_CONFIG.vapidKey).trim();
 
   return {
     ...config,
     vapidKey,
     configured: Boolean(config.apiKey && config.projectId && config.appId),
-    // حقائق للمدير فقط: ما ينقصه بالضبط (بلا أي سرّ)
+    // Readiness flags contain no secret values.
     serverReady: Boolean(account || (process.env.FCM_PROJECT_ID && process.env.FCM_CLIENT_EMAIL)),
     vapidReady: Boolean(vapidKey)
   };
@@ -117,7 +99,7 @@ export function isFirebaseWebConfigured() {
   return firebaseWebConfig().configured;
 }
 
-/** إعدادات الخادم (Service Account — سرية ولا تخرج من الخادم أبداً). */
+/** Returns server-only FCM credentials. */
 function fcmServerConfig() {
   const account = serviceAccount();
   const projectId = (process.env.FCM_PROJECT_ID || '').trim() || account?.projectId || '';
@@ -132,14 +114,7 @@ export function isFcmServerConfigured() {
 
 let adminMessagingPromise = null;
 
-/**
- * تهيئة Firebase Admin كسولاً (dynamic import حتى لا ينهار الخادم بدون الاعتماد).
- *
- * firebase-admin v14: الـ namespace القديم (`admin.apps` / `admin.credential` /
- * `admin.messaging`) لم يعد موجوداً — استخدامه كان يرمي TypeError فتحتجزه try/catch
- * ويرجع null ⇒ الإرسال يفشل بصمتاً (الإشعار يُحفظ داخل الموقع فقط). التصديرات الآن:
- * `initializeApp/getApps/cert` من الجذر، و`getMessaging` من مسار `firebase-admin/messaging`.
- */
+/** Lazily imports Firebase Admin so the app can run without the optional dependency. */
 async function adminMessaging() {
   if (!isFcmServerConfigured()) return null;
   if (!adminMessagingPromise) {
@@ -160,10 +135,7 @@ async function adminMessaging() {
   return adminMessagingPromise;
 }
 
-/**
- * إرسال push عبر FCM لتوكنات جهاز معينة.
- * يعيد { sent, failed, invalidTokens } — التوكنات الميتة تُحذف من قاعدة البيانات.
- */
+/** Sends push notifications and returns invalid device tokens for cleanup. */
 export async function sendPushToTokens(tokens, { title, body = '', url = '/account' } = {}) {
   const unique = [...new Set((tokens || []).filter(Boolean))].slice(0, 500);
   if (!unique.length) return { sent: 0, failed: 0, invalidTokens: [], skipped: 'no-tokens' };

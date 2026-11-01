@@ -3,13 +3,9 @@ import { icon } from './icons.js';
 import { escapeHtml, renderLayout } from './layout.js';
 import { WHATSAPP_COUNTRIES } from '../constants.js';
 
-/**
- * صفحة «الاشتراك والدفع» للباحث: الدفع يدوي خارج المنصة.
- * يختار باقة وطريقة دفع (تحويل بنكي أو كاش فقط)، ويؤكد رقمه على واتساب،
- * والنظام يولّد كود تفعيل من 6 أرقام يرسله عبر واتساب لخدمة العملاء.
- */
+/** Renders plan selection and manual payment requests. */
 
-/** شارة حالة الطلب. */
+/** Renders a request-status badge. */
 function statusBadge(status) {
   const map = {
     pending: '<span class="badge badge-plan">قيد المراجعة</span>',
@@ -19,7 +15,7 @@ function statusBadge(status) {
   return map[status] || map.pending;
 }
 
-/** بطاقة طريقة الدفع مع تفاصيل التحويل. */
+/** Renders a payment-method card. */
 function renderMethod(method, currency, index) {
   return `<label class="source-option">
     <input type="radio" name="method_code" value="${escapeHtml(method.code)}"${index === 0 ? ' checked' : ''} required />
@@ -33,29 +29,29 @@ function renderMethod(method, currency, index) {
   </label>`;
 }
 
-/** جدول طلبات الباحث. */
+/** Renders the user's payment requests. */
 function renderRequests(requests) {
   if (!requests.length) return '<div class="empty">لا طلبات دفع بعد — قدّم طلباً من النموذج بالأعلى.</div>';
 
   const rows = requests
     .map(
       (item) => `<tr>
-    <td>
+    <td data-label="الطلب">
       <p class="strong">${escapeHtml(item.planTitle)}</p>
       <p class="muted">${escapeHtml(item.methodLabel)} · ${escapeHtml(formatMoney(item.amount, item.currency))}</p>
       ${item.adminNote ? `<p class="muted">رد الإدارة: ${escapeHtml(item.adminNote)}</p>` : ''}
     </td>
-    <td>${escapeHtml(item.referenceCode || item.referenceNo || '—')}</td>
-    <td>${statusBadge(item.status)}</td>
-    <td>${escapeHtml(formatDateTime(item.createdAt))}</td>
+    <td data-label="رقم التفعيل">${escapeHtml(item.referenceCode || item.referenceNo || '—')}</td>
+    <td data-label="الحالة">${statusBadge(item.status)}</td>
+    <td data-label="التاريخ">${escapeHtml(formatDateTime(item.createdAt))}</td>
   </tr>`
     )
     .join('');
 
-  return `<table class="ref-table">
+  return `<div class="table-scroll"><table class="ref-table">
     <thead><tr><th>الطلب</th><th>رقم التفعيل</th><th>الحالة</th><th>التاريخ</th></tr></thead>
     <tbody>${rows}</tbody>
-  </table>`;
+  </table></div>`;
 }
 
 export function renderPaymentsPage({

@@ -1,6 +1,7 @@
 import { APP_NAME, APP_TAGLINE, escapeHtml, renderLayout } from './layout.js';
 
 /** صفحة حالة الخدمة للمطوّرين: روابط الـ API ولوحة الإدارة ونصائح التشغيل. */
+/** Renders the developer status page. */
 export function renderStatusPage({ account = null } = {}) {
   const body = `
   <div class="hero">
@@ -41,6 +42,7 @@ export function renderStatusPage({ account = null } = {}) {
 /** صفحة 404 عربية مع روابط الصفحات المتاحة بدل رسالة JSON غامضة.
  * المسار لا يُعرض خاماً (M4): تُعرض رسالة ثابتة فقط حتى لا ينعكس أي مدخل
  * من عنوان URL في الصفحة. */
+/** Renders a fixed 404 page without reflecting the requested path. */
 export function renderNotFoundPage(_pathname, account = null) {
   const body = `
   <div class="notice">

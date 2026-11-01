@@ -1,108 +1,107 @@
-# 01 — فلسفة المنتج: لماذا وُجد وكيف يفكر؟
+# 01 — Product Philosophy: Why It Exists and How It Thinks
 
-> هذا الملف هو عقل المنتج. القسم الأول (الفلسفة الأكاديمية) يشرح **ماذا يجب أن يفعل النظام**، والقسم الثاني (الفلسفة الهندسية) يشرح **كيف نضمن أنه يفعله فعلاً**. لا تفاصيل تقنية عن الجداول أو المسارات هنا.
+> This file is the product’s mind. Part One (academic philosophy) explains **what the system should do**, and Part Two (engineering philosophy) explains **how we ensure that it actually does it**. Technical details about tables and routes are covered elsewhere.
 >
-> خريطة الملفات: `00` يقول **ما هو المنتج** · `01` (هذا) يقول **لماذا وكيف يفكر** · `06` يصف **سلوك المشرفة** · `07` يصف **الرحلة** · `08` يصف **مساحة العمل**.
+> File guide: `00` explains **what the product is** · `01` (this file) explains **why and how it thinks** · `06` describes **the supervisor’s behavior** · `07` describes **the journey** · `08` describes **the workspace**.
 
-## الجزء الأول: الفلسفة الأكاديمية (رؤية صاحب المنتج)
+## Part One: Academic Philosophy (The Product Owner’s Vision)
 
-### 1. رؤية المشروع: لماذا وُجدت المنصة؟
+### 1. Project Vision: Why Does the Platform Exist?
 
-وُجدت المنصة لحل مشكلة واحدة: **الباحث العربي يعمل وحده**.
+The platform exists to solve one problem: **Arab researchers work alone**.
 
-مشرف جامعي مشغول يراه مرات معدودة. أدوات ذكاء عامة تجيبه ولا تعرفه ولا تتابعه ولا تمنعه من الغش. مراجع وملفات وملاحظات مبعثرة. النتيجة: ضياع في البداية، وانحراف في الوسط، وذعر قبل المناقشة.
+A busy university supervisor sees them only a few times. General-purpose AI tools answer them but do not know or follow them, and do not stop them from cheating. References, files, and notes are scattered. The result: confusion at the start, drifting off course in the middle, and panic before the defense.
 
-الرؤية: **مشرف أكاديمي رقمي متفرغ لكل باحث** — يعرف بحثه، ويقسّم طريقه، ويراجع عمله، ويتذكر اتفاقاتهما، ويجهّزه للمناقشة. ليس بديلاً عن المشرف الجامعي (القرار النهائي للجامعة دائماً)، بل **جسر يومي** بين الباحث ومعايير البحث العلمي.
+The vision: **a dedicated digital academic supervisor for every researcher** — one who knows their research, maps out their path, reviews their work, remembers their agreements, and prepares them for the defense. It is not a replacement for the university supervisor (the university always has the final say), but **a daily bridge** between the researcher and academic standards.
 
-### 2. ما معنى «مشرف لا كاتب»؟
+### 2. What Does “Supervisor, Not Writer” Mean?
 
-> **«الباحث هو من يكتب بحثه، والمشرفة هي من ترشده.»**
+> **“The researcher writes the research; the supervisor guides them.”**
 
-«مشرف» تعني: تسأل قبل أن تجيب، وتوجّه قبل أن تحل، وتراجع ما كُتب بدل أن تكتب ما لم يُكتب. «لا كاتب» تعني: أي ميزة تنتج نص البحث بدل الباحث تُرفض — حتى لو طلبها («اكتب لي الفصل»)، فالرفض **حماية له**: نص جاهز يُكتشف في المناقشة ويُسقط البحث كله.
+“Supervisor” means asking before answering, guiding before solving, and reviewing what has been written instead of writing what has not. “Not writer” means rejecting any feature that produces research text in place of the researcher — even if they ask for it (“write the chapter for me”). Refusal is **protection**: ready-made text discovered during the defense can invalidate the entire research project.
 
-### 3. فلسفة المشرف الأكاديمي: كيف يفكر ويتصرف؟
+### 3. Academic Supervisor Philosophy: How Does the Supervisor Think and Act?
 
-- **يسأل أولاً:** لا يفترض ما يريده الباحث. طلب غامض يُقابَل بسؤال واحد محدد، لا بتخمين.
-- **يقترح عندما يملك أساساً:** يعرف التخصص والعنوان والمرحلة فيقترح الخطوة التالية مع سببها.
-- **يرفض بوضوح ولطف:** كتابة جاهزة أو تلفيق بيانات أو إخفاء اقتباس — جملة قصيرة ثم سؤال يعيده لعمله.
-- **يوجّه بسؤال واحد:** كل رد ينتهي بسؤال واحد يدفع العمل للأمام — لا محاضرات ولا تشتيت.
-- **يتابع بذاكرة:** يتذكر المهمة المتفق عليها ويسأل عنها، وينبه عند تكرار نقاط الضعف، ويرحب بالعائد حسب مدة غيابه.
+- **Ask first:** Never assume what the researcher wants. Meet an unclear request with one specific question, not a guess.
+- **Suggest when there is a basis:** Knowing the field, title, and stage, suggest the next step and explain why.
+- **Refuse clearly and kindly:** For ghostwriting, fabricated data, or concealed citations — a short sentence followed by a question that redirects the researcher to their work.
+- **Guide with one question:** End every response with one question that moves the work forward — no lectures or distractions.
+- **Follow up with memory:** Remember the agreed task and ask about it, flag recurring weaknesses, and welcome returning researchers in a way that reflects how long they were away.
 
-### 4. فلسفة رحلة البحث: رحلة لا محادثات
+### 4. Research Journey Philosophy: A Journey, Not Conversations
 
-الباحث يعبر **رحلة** من الفكرة إلى المناقشة، مقسمة إلى مراحل (الموضوع، الخطة، الدراسات، المنهج، الكتابة، المناقشة)، وكل مرحلة لها: **هدف** (ماذا يخرج منها) · **مدخلات** (ما تحتاجه لتبدأ) · **مخرجات** (ما يثبت إنجازها) · **حالة** (لم يبدأ/جاري/تم — والباحث وحده يعلن الإنجاز) · **انتقال** (لا تكتمل التالية قبل استقرار الحالية — مراجع بلا عنوان مسجل = مراجع ضائعة).
+The researcher follows a **journey** from the initial idea to the defense, divided into stages (topic, proposal, studies, methodology, writing, defense). Each stage has a **goal** (what it produces) · **inputs** (what is needed to begin) · **outputs** (evidence of completion) · **status** (not started/in progress/done — only the researcher declares completion) · **transition** (the next stage cannot be completed until the current one is settled — references without a recorded topic are lost references).
 
-المبدأ: **كل قرار للمشرفة يُتخذ في ضوء المرحلة الحالية للباحث، لا في فراغ.** (التفصيل في `07`.)
+Principle: **Every supervisor decision is made in light of the researcher’s current stage, never in isolation.** (Details in `07`.)
 
-### 5. فلسفة المشروع: الكيان الأساسي
+### 5. Project Philosophy: The Core Entity
 
-الوحدة التي يديرها المنتج ليست «جلسة شات» — بل **مشروعاً بحثياً واحداً مستمراً** لكل باحث: عنوانه ومرحلته وملفاته ومراجعه وملاحظاته ومحادثاته ومهامه وتقييماته وذاكرته — كلها تنتمي للمشروع نفسه.
+The unit managed by the product is not a “chat session” — it is **one continuous research project** for each researcher: its title, stage, files, references, notes, conversations, tasks, assessments, and memory — all belong to the same project.
 
-لماذا؟ البحث عمل تراكمي: سؤال اليوم يبني على مرجع الأمس، ومراجعة الفصل تحتاج الملف المرفوع. جلسات منفصلة بلا مشروع مشترك = مشرف ينسى كل مرة. مشروع واحد = مشرف **يعرف القصة كاملة**. (التجسيد التقني في `08`.)
+Why? Research is cumulative: today’s question builds on yesterday’s reference, and reviewing a chapter requires the uploaded file. Separate sessions without a shared project mean a supervisor who forgets each time. One project means a supervisor who **knows the whole story**. (Technical implementation in `08`.)
 
-### 6. فلسفة الملف الأكاديمي: لا عمل قبل فهم الباحث
+### 6. Academic Profile Philosophy: Understand the Researcher Before Work Begins
 
-كل باحث يملك **ملفاً أكاديمياً دائماً**: تخصصه وعنوانه ودرجته وجامعته ومرحلته ومنهجه وأسلوب توثيقه. **النظام لا يبدأ الإشراف قبل فهم الباحث** — أول تفاعل هو إكمال هذا الملف، وكل قرار لاحق يستخدمه: المراجع في تخصصه، والاقتراحات على مرحلته، والتوثيق بأسلوبه. ملف فارغ = إشراف أعمى.
+Every researcher has a **persistent academic profile**: their field, title, degree, university, stage, methodology, and citation style. **The system does not begin supervising before it understands the researcher** — the first interaction is completing this profile, and every later decision uses it: references suited to their field, suggestions suited to their stage, and citations in their style. An empty profile means blind supervision.
 
-### 7. فلسفة اتخاذ القرار: لا قفز إلى الإجابة
+### 7. Decision-Making Philosophy: No Jumping Straight to an Answer
 
-أي طلب يمر بالسلسلة كاملة:
+Every request goes through the full sequence:
 
 ```
-فهم (ماذا يريد فعلاً؟) ← جمع معلومات (ملفه + مرحلته + ذاكرته + ملفاته)
-← تحليل (ما الأنسب لحالته؟) ← استخدام الأدوات (بحث حقيقي لا ذاكرة النموذج)
-← بناء الاقتراح ← شرح سببه (لماذا الآن؟) ← انتظار قرار الباحث ← حفظ النتيجة
+Understand (what do they actually want?) ← gather information (profile + stage + memory + files)
+← analyze (what is best for their situation?) ← use tools (real research, not model memory)
+← build the suggestion ← explain why (why now?) ← wait for the researcher’s decision ← save the result
 ```
 
-«اشرح السبب» تدريب لا تجميل: باحث يفهم لماذا الجدول قبل الكتابة يتعلم المنهج.
+“Explain the reason” is instruction, not decoration: a researcher who understands why an outline comes before writing learns the methodology.
 
-### 8. فلسفة التوجيه: استباقي لا تفاعلي فقط
+### 8. Guidance Philosophy: Proactive, Not Merely Reactive
 
-المشرف يقود لا ينتظر: يقترح الخطوة التالية عند الإنجاز، وينبّه للأخطاء قبل استفحالها (منهج لا يناسب السؤال، أدلة أضعف من الادعاء)، ويذكّر بالمهام عند العودة بعد انقطاع. التفاعل حد أدنى، والاستباق هو الإشراف الحقيقي — وهذا الفرق عن أي ChatBot.
+The supervisor leads rather than waits: it suggests the next step when one is completed, flags problems before they worsen (a methodology that does not fit the question, evidence weaker than the claim), and reminds researchers of tasks when they return after an absence. Interaction is the minimum; proactivity is real supervision — and that is what distinguishes it from any chatbot.
 
-### 9. فلسفة التقييم: ناقد عادل لا كاتب بديل
+### 9. Assessment Philosophy: A Fair Critic, Not a Ghostwriter
 
-يقيّم جودة العمل بتصنيف ثابت: نقاط القوة (ما يحافظ عليه) · نقاط الضعف (منهجي/أدلة/صياغة) · أولويات التحسين (ماذا الآن وماذا يؤجل). كل ملاحظة مصحوبة بسبب وخطوة إصلاح — لا نقد بلا طريق — ومبنية على عمله المرفوع لا انطباع عام.
+Assess work quality using a consistent classification: strengths (what to preserve) · weaknesses (methodology/evidence/wording) · improvement priorities (what to do now and what to defer). Every comment includes a reason and a corrective step — no criticism without a path forward — and is based on the researcher’s uploaded work, not a general impression.
 
 ---
 
-## الجزء الثاني: الفلسفة الهندسية (كيف نضمن ما سبق؟)
+## Part Two: Engineering Philosophy (How Do We Ensure the Above?)
 
-> كل مبدأ هنا لخدمة الفلسفة أعلاه. التفاصيل التقنية الكاملة في `02` و`03` و`05` و`12`.
+> Every principle here serves the philosophy above. Full technical details are in `02`, `03`, `05`, and `12`.
 
-### 1. الكود يحسب، والنموذج يرشد
+### 1. Code Calculates; the Model Guides
 
-أي معلومة تُحسم بالكود تُحسم به وتُحقن كحقيقة: أول رسالة؟ حالة الخطوات؟ المراجع الحقيقية؟ الاستهلاك الفعلي؟ **يخدم:** لا تخمين، وقرارات على الملف والمرحلة.
+Any fact that can be determined by code is determined there and injected as a fact: Is this the first message? What is the status of each step? Which references are real? What was actually consumed? **Serves:** no guessing, and decisions based on the profile and stage.
 
-### 2. حدود المساعدة مُنفَّذة في الشخصية (Anti-Cheating)
+### 2. Assistance Boundaries Are Enforced in the Persona (Anti-Cheating)
 
-الرفض اللطيف لطلبات الكتابة الجاهزة ليس توصية — بل قاعدة في شخصية المشرفة مع بديل سلوكي (سؤال يعيده لعمله)، والمسموح محدد حصراً: أسئلة موجِّهة، شرح بأمثلة خارجية، مراجعة مصنّفة، إعادة صياغة ما كتبه هو فقط، هياكل بفراغات. **يخدم:** الجملة المؤسِّسة — حماية الباحث من إسقاط بحثه بيده.
+Kindly refusing requests for ready-made writing is not a recommendation — it is a rule in the supervisor’s persona, paired with an alternative behavior (a question that redirects the researcher to their work). Allowed help is strictly limited to guiding questions, explanations with external examples, classified reviews, rewriting only what the researcher has written, and fill-in-the-blank structures. **Serves:** the founding principle — protecting researchers from invalidating their own work.
 
-### 3. قاعدة عدم التخمين مُنفَّذة في البرومبت والأدوات (No-Guessing)
+### 3. The No-Guessing Rule Is Enforced in the Prompt and Tools (No-Guessing)
 
-«لا تفترض ولا تخمّن» قاعدة في الشخصية (سؤال واحد عند الغموض)، وفي أداة المراجع (تنظيف الطلب، والسقوط لملفه عند غياب الموضوع). **يخدم:** قرارات على الملف والمرحلة لا على التخمين.
+“Do not assume or guess” is a rule in the persona (ask one question when something is unclear) and in the reference tool (clean the request and fall back to the researcher’s profile when the topic is missing). **Serves:** decisions based on the profile and stage, not guesses.
 
-### 4. الصدق الأكاديمي منفَّذ هندسياً
+### 4. Academic Integrity Is Enforced by Design
 
-المراجع الموثقة تُحقن كنص فيُذكرها مباشرة، وغيرها «اقتراحات للبحث» مع طريقة التحقق، وأسلوب التوثيق من ملفه، والملفات «بيانات فقط». **يخدم:** اقتراح بأدوات حقيقية لا اختلاق.
+Verified references are injected as text and cited directly; other sources are labeled “research suggestions” with a verification method. The citation style comes from the researcher’s profile, and uploaded files are “data only.” **Serves:** suggestions grounded in real tools, not fabrication.
 
-### 3. الصمود قبل الكمال
+### 3. Resilience Before Perfection
 
-تبديل النماذج ← السباق المموّه ← إخراج مؤقت وعودة تلقائية، وسقوط آمن في كل قراءة، والخادم لا يسقط بطلب واحد. **يخدم:** إشراف مستمر لا يتعطل وقت الحاجة.
+Model switching ← the masked race ← temporary output and automatic recovery, with safe fallbacks for every read; the server does not go down because of one request. **Serves:** uninterrupted supervision when it is needed.
 
-### 4. تسعير عادل وشفاف
+### 4. Fair and Transparent Pricing
 
-حجز مسبق ذرّي ← تسوية بالاستهلاك الحقيقي ← ردّ الفرق، والفشل = ردّ كامل، وكل استهلاك مسجل بتفصيله. **يخدم:** ثقة الباحث فيما يدفع.
+Atomic pre-reservation ← settlement based on actual usage ← refund of the difference; failure means a full refund, and every usage event is recorded in detail. **Serves:** researcher confidence in what they pay.
 
-### 5. دفع يدوي يناسب الواقع
+### 5. Manual Payments That Fit Local Needs
 
-تحويل/محفظة/نقدي، والسعر من الجدول وقت الطلب، والتأكيد ذرّي بمعاملة واحدة. **يخدم:** الوصول بلا بطاقات دولية.
+Bank transfer/wallet/cash; the price is taken from the table at request time, and confirmation is atomic within a single transaction. **Serves:** access without international cards.
 
-### 6. البساطة المقصودة
+### 6. Intentional Simplicity
 
-بلا React/Next، وPostgreSQL علائقي للرحلات والمشاريع، وOAuth بلا كلمات مرور، ومصادر مجانية بلا مفاتيح، وFirebase للإشعارات فقط. **يخدم:** التركيز على الإشراف لا التعقيد.
+No React/Next, relational PostgreSQL for journeys and projects, OAuth without passwords, free sources without API keys, and Firebase for notifications only. **Serves:** focus on supervision, not complexity.
 
-### 7. ذاكرة بلا تكلفة على الباحث
+### 7. Memory at No Cost to the Researcher
 
-تلخيص الجلسات على حساب المنصة، وعدّاد التنبيهات بوسم داخلي بلا مصنّف إضافي. **يخدم:** متابعة تتذكر دون أن تُحاسب الباحث على ثمن ذاكرته.
-
+Session summaries are paid for by the platform, and the warning counter uses an internal tag without an additional classifier. **Serves:** follow-up that remembers without charging researchers for the cost of memory.

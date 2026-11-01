@@ -16,19 +16,13 @@ import { listFiles } from '../services/files.js';
 import { renderNotice } from '../views/layout.js';
 import { renderChatPage, renderChatUpdate } from '../views/chat.js';
 
-/**
- * مسارات الشات (1F):
- * - GET  /chat                    صفحة المحادثة (?c=id لعرض محادثة، ?step= للسياق)
- * - POST /chat                    إرسال رسالة (تُحفظ في messages ويُسجَّل الاستهلاك)
- * - POST /chat/:id/delete         حذف محادثة
- * النقاط تُخصم ذرّياً داخل services/chat.js ولا يوجد أي تسعير في الواجهة.
- */
+/** Supervisor chat routes; billing is handled by the chat service. */
 const router = express.Router();
 
-/** حدّ قراءة واسع على صفحة الشات (M5): 120 طلباً/5 دقائق لكل حساب. */
+/** Per-account read limit for the chat page. */
 const pageReadLimit = rateLimitUser('page_read', { limit: 120, windowMs: 5 * 60 * 1000 });
 
-/** رسائل النتيجة بعد التحويل. */
+/** Flash messages shown after redirects. */
 const FLASH = {
   sent: { type: 'ok', message: 'وصل رد المشرف الذكي.' },
   empty: { type: 'error', message: 'اكتب رسالتك أولاً.' },
@@ -37,7 +31,7 @@ const FLASH = {
   failed: { type: 'error', message: 'تعذّر الوصول للمشرف الذكي الآن — نقاطك أُعيدت لرصيدك، أعد المحاولة.' },
   bad_step: { type: 'error', message: 'الخطوة المحددة غير موجودة في مسارك.' },
   missing_conversation: { type: 'error', message: 'المحادثة غير موجودة.' },
-  // بطاقة مراجعة اكتمال الخطوة: لا شيء يُكتب في المسار قبل «حفظ» الباحث
+  // Step-review data remains pending until the user saves it.
   review_saved: { type: 'ok', message: 'أُكملت الخطوة وحُفظت في مسارك.' },
   review_edited: { type: 'ok', message: 'عدّل البيانات ثم اضغط «حفظ وإتمام الخطوة» لإتمامها.' },
   review_cancelled: { type: 'ok', message: 'أُلغيت المراجعة — لم يتغيّر شيء في مسارك.' },
@@ -47,17 +41,17 @@ const FLASH = {
   review_failed: { type: 'error', message: 'تعذّرت عملية مراجعة الخطوة — أعد المحاولة.' }
 };
 
-/** تنبيه النتيجة من باراميترات الرابط. */
+/** Resolves a redirect flash message. */
 function flashFromQuery(query) {
   const base = FLASH[String(query.ok || query.err || '')];
   if (!base) return null;
 
-  // رسالة نقص الرصيد تحمل معناها من services/chat.js (كم نحتاج وكم لديه)
+  // The service supplies balance and reservation details for low-balance errors.
   const custom = String(query.msg || '').trim();
   return custom ? { ...base, message: custom.slice(0, 300) } : base;
 }
 
-/** كود خطأ من askSupervisor → مفتاح رسالةFLASH. */
+/** Maps askSupervisor errors to flash-message keys. */
 function flashKeyForError(error) {
   const map = {
     EMPTY_PROMPT: 'empty',
@@ -70,7 +64,7 @@ function flashKeyForError(error) {
   return map[error?.code] || 'failed';
 }
 
-/** صفحة الشات: القراءة مسموحة للجميع، والإرسال يتطلب الملف الأساسي. */
+/** Chat page; sending requires a completed core profile. */
 router.get('/chat', pageReadLimit, requireAccount, async (req, res) => {
   try {
     const userId = req.account.id;
@@ -85,7 +79,7 @@ router.get('/chat', pageReadLimit, requireAccount, async (req, res) => {
       unreadCount(userId)
     ]);
 
-    // المحادثة الحالية: ?c= لاختيار محادثة محفوظة، وإلا محادثة جديدة فارغة
+    // Load the selected conversation or render a new empty one.
     const conversation = conversationId ? await getConversation(userId, conversationId) : null;
 
     res.type('html').send(
@@ -96,12 +90,12 @@ router.get('/chat', pageReadLimit, requireAccount, async (req, res) => {
         conversations,
         stepKey,
         stepName: stepKey ? await stepTitle(stepKey) : '',
-        // ?prompt= يملأ مربع الرسالة مسبقاً (يصل من روابط الخطوات/الملاحظات)
+        // Prefill prompts from journey or note links.
         prefill: seedPrompt,
-        // ملفات الباحث لاختيارها وإرفاقها بالرسالة (بحد أقصى ٣ في الرسالة)
+        // Offer up to three owned files as attachments.
         attachableFiles: await listFiles(userId, { limit: 12 }),
         providers: availableProviders(),
-        // بوابة جزئية: بلا ملف مكتمل يمكنه القراءة، لكن الإرسال يتطلب السياق الأساسي
+        // Reading stays open; sending requires core profile fields.
         profileNotice: needsOnboarding(req.account)
           ? 'لم تُكمل ملفك البحثي بعد — أضف مرحلتك الأكاديمية وتخصصك وهدفك الحالي ليضبط المشرف الذكي إجاباته. <a href="/onboarding?next=/chat">أكمل ملفك الآن</a> (يستغرق دقيقة).'
           : '',
@@ -120,19 +114,12 @@ router.get('/chat', pageReadLimit, requireAccount, async (req, res) => {
   }
 });
 
-/**
- * إرسال رسالة للمشرف الذكي (يتطلب الملف الأساسي — سياق الإشراف).
- *
- * مساران في معالج واحد:
- * - نموذج HTML عادي (بلا جافاسكربت): 303 مع flash في الرابط — كما كان دائماً.
- * - طلب JSON (Accept: application/json من chat-send.js): قطع HTML محدّثة
- *   (رسائل + مراجع + سايدبار) — بلا إعادة تحميل الصفحة.
- */
+/** Sends a supervisor message with normal-form and JSON response modes. */
 router.post('/chat', requireCoreOnboarding, rateLimitUser('chat_message', { limit: 30, windowMs: 5 * 60 * 1000 }), async (req, res) => {
   const body = req.body || {};
   const stepKey = String(body.step || '').trim().slice(0, 100);
   const conversationId = String(body.conversation_id || '').trim();
-  // نكشف JSON من الترويسة الصريحة فقط — طلبات fetch الافتراضية (*/*) تبقى على مسار 303
+  // Detect JSON requests only from the explicit Accept header.
   const wantsJson = String(req.get('accept') || '').includes('application/json');
 
   try {
@@ -143,12 +130,12 @@ router.post('/chat', requireCoreOnboarding, rateLimitUser('chat_message', { limi
       conversationId: conversationId || null,
       stepKey: stepKey || null,
       profile,
-      // ملفات يرفقها الباحث بهذه الرسالة (من ملفاته المرفوعة فقط — يُتحقق من الملكية)
+      // Attach only files owned by the current user.
       fileIds: body.file_ids
     });
 
     if (wantsJson) {
-      // نعيد قطعاً مُعرَّضة بنفس دوال عرض الصفحة — مصدر واحد للشكل.
+      // Reuse the page renderers for consistent response fragments.
       const [conversation, conversations] = await Promise.all([
         getConversation(req.account.id, result.conversationId),
         listConversations(req.account.id)
@@ -164,7 +151,7 @@ router.post('/chat', requireCoreOnboarding, rateLimitUser('chat_message', { limi
     res.redirect(303, `/chat?c=${result.conversationId}&step=${encodeURIComponent(stepKey)}&ok=sent`);
   } catch (error) {
     console.warn(`فشل الشات (${error?.code || 'UNKNOWN'}): ${error?.message || error}${error?.stack ? `\n${String(error.stack).split('\n').slice(0, 6).join('\n')}` : ''}`);
-    // نقص الرصيد ورصيده وكم نحتاج: رسالة الكود أوضح من نص ثابت
+    // Preserve the detailed reservation and current-balance message.
     const message = error?.code === 'NO_TOKENS' ? error.message : '';
 
     if (wantsJson) {
@@ -184,18 +171,14 @@ router.post('/chat', requireCoreOnboarding, rateLimitUser('chat_message', { limi
   }
 });
 
-/**
- * بطاقة مراجعة اكتمال الخطوة: edit ⇄ save ⇄ cancel.
- * الكشف حتمي (services/step-review.js) لكن الكتابة في المسار لا تقع إلا هنا
- * بعد ضغط الباحث «حفظ وإتمام الخطوة» — وقبل ذلك لا يتغيّر شيء في تقدّمه.
- */
+/* Saves step-review data only after explicit user confirmation. */
 router.post('/chat/:id/step-review', requireAccount, async (req, res) => {
   const conversationId = String(req.params.id);
   const action = String(req.body?.action || '');
   const stepKey = String(req.body?.step || '').trim().slice(0, 100);
   const back = `/chat?c=${encodeURIComponent(conversationId)}${stepKey ? `&step=${encodeURIComponent(stepKey)}` : ''}`;
 
-  // حقول البطاقة تصل كـ f_<key> (قيمة واحدة لكل حقل)
+  // Review fields use the f_<key> naming convention.
   const values = {};
   for (const [key, value] of Object.entries(req.body || {})) {
     if (key.startsWith('f_')) values[key.slice(2)] = String(value);
@@ -227,7 +210,7 @@ router.post('/chat/:id/step-review', requireAccount, async (req, res) => {
   }
 });
 
-/** حذف محادثة كاملة. */
+/** Deletes a conversation. */
 router.post('/chat/:id/delete', requireAccount, async (req, res) => {
   await deleteConversation(req.account.id, String(req.params.id));
   res.redirect(303, '/chat');

@@ -220,7 +220,13 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         scriptSrc: ["'self'", 'https://www.gstatic.com'],
-        connectSrc: ["'self'", 'https://*.googleapis.com', 'https://www.gstatic.com'],
+        connectSrc: [
+          "'self'",
+          'https://*.googleapis.com',
+          'https://www.gstatic.com',
+          'https://*.google-analytics.com',
+          'https://*.analytics.google.com'
+        ],
         imgSrc: ["'self'", 'data:', 'https://lh3.googleusercontent.com', 'https://lh4.googleusercontent.com', 'https://lh5.googleusercontent.com', 'https://lh6.googleusercontent.com']
       }
     },
@@ -507,10 +513,10 @@ app.get('/sitemap.xml', async (req, res) => {
 // صفحات الموقع العامة والدخول (قبل لوحة الإدارة)
 app.use(authRouter);
 
-// الإشعارات: APIs توكنات الأجهزة وقائمة الإشعارات (بلا صفحة مخصّصة — تظهر في الجرس المنسدل)
+// Notifications API for device tokens and the notification menu.
 app.use(notificationsRouter);
 
-// مساحة عمل الباحث (1D + 1E + 1F): مسار البحث، المراجع، المفكرة، الملفات، الشات، المناقشة
+// Research workspace: journey, references, notes, files, chat, and defense.
 app.use(journeyRouter);
 app.use(workspaceRouter);
 app.use(chatRouter);
@@ -518,16 +524,16 @@ app.use(assistantRouter);
 app.use(voiceRouter);
 app.use(defenseRouter);
 
-// الاشتراك والدفع اليدوي خارج المنصة (الباحث)
+// Subscription and manual payment routes.
 app.use(paymentsRouter);
 
-// لوحة الإدارة (صفحات HTML مولَّدة على الخادم) — بديل واجهة Next.js القديمة
+// Server-rendered admin pages replace the previous Next.js interface.
 app.use('/admin', adminRouter);
 
-// روابط الموديلات المخصّصة (من /admin/providers) تُقرأ مرة عند الإقلاع إلى كاش الذاكرة
+// Load custom model providers into memory at startup.
 
 app.use((req, res) => {
-  // مسارات الـ API تبقى JSON، وبقية المسارات تحصل على صفحة 404 عربية واضحة
+  // Keep API errors as JSON and render a localized page for other routes.
   if (req.path.startsWith('/api')) {
     res.status(404).json({ message: 'المسار غير موجود.' });
     return;
@@ -537,15 +543,11 @@ app.use((req, res) => {
 });
 
 /**
- * معالج الأخطاء العام (يجب أن يكون آخر وسيط، فهو يلتقط ما يمرّره next(err)).
- *
- * لماذا هو مهم أمنياً: Express 4 **لا يلتقط** الاستثناءات داخل المعالجات غير المتزامنة
- * (async) ولا Promises المرفوضة ⇒ تتحول إلى unhandledRejection ⇒ في Node 20+ تُنهي العملية
- * ⇒ يخرج الموقع بالكامل بسبب طلب واحد خاطئ.
- * هذا المعالج + حارس UUID في طبقة الخدمات يغلقان هذا الطريق بالكامل.
+ * Final Express error handler for synchronous and asynchronous route failures.
+ * The service-layer UUID guard also prevents invalid identifiers from reaching queries.
  */
 app.use((error, req, res, next) => {
-  // إن كانت الاستجابة بدأت بالفعل فلا نكتب فوقها.
+  // Do not write to a response that has already started.
   if (res.headersSent) {
     next(error);
     return;
@@ -569,9 +571,7 @@ app.use((error, req, res, next) => {
 });
 
 /**
- * شبكة أمان أخيرة على مستوى العملية: خطأ غير ملتقَط في أي مكان
- * **لا يُسقط الخادم** (سلوك Node الافتراضي منذ v15 هو الإنهاء).
- * نُسجّله ونكمل ⇒ خطأ واحد لا يوقف خدمة العميل التجريبية.
+ * Log otherwise-unhandled process errors without terminating the server.
  */
 process.on('unhandledRejection', (reason) => {
   console.error('وعد مرفوض لم يُعالَج (تم تسجيله دون إسقاط الخادم):', reason);
@@ -581,16 +581,10 @@ process.on('uncaughtException', (error) => {
   console.error('استثناء غير ملتقَط:', error?.stack || error);
 });
 
-// تشغيل الإقلاع: محلياً (npm run dev/start) نبدأ خادماً حقيقياً على منفذ.
-// أمّا على Vercel فيستورد `api/index.js` هذا الملف ويصدّر `app` وحده،
-// فلا يقلع الخادم هنا ولا يفتح منفذ (سلوك Functions).
+// Start a listening server locally; serverless platforms import and export the app.
 const isServerless = isServerlessPlatform();
 
-/**
- * تنظيف ملفات الحسابات المتوقفة (30+ يوم غياب): سطور files فقط.
- * يُشغَّل مرة عند الإقلاع ثم كل 24 ساعة. يفشل بصمت حتى لا يُسقط الخادم.
- * (تُحذف سطور files فقط — بلا مساس بأي جدول آخر.)
- */
+/** Purges files owned by inactive accounts at startup and every 24 hours. */
 async function sweepStoppedUserFiles(reason) {
   try {
     const { purgeStoppedUserFiles } = await import('./src/services/activity.js');
@@ -609,9 +603,7 @@ if (!isServerless) {
   sweepTimer.unref?.();
 }
 
-// Vercel (ومنصّات Functions) تتطلّب **default export** لدالة أو خادم، لا
-// export مسمّى فقط. لذا نصدّر app بالشكلين: `default` ليعمل كدالة، والمسمّى
-// ليكون `import { app }` متاحاً لـ api/index.js.
+// Export both forms for serverless handlers and named imports.
 export { app };
 export default app;
 
@@ -622,11 +614,7 @@ if (!isServerless) {
   });
 }
 
-/**
- * المنفذ مشغول: نعطي رسالة عربية تشرح الحل بدل انهيار بطباعة أثر المكدس.
- * غالباً السبب تشغيل نسختين (مثلاً `npm run dev` وخادم قديم في الخلفية).
- * (على Vercel لا يوجد `server` أصلاً ⇒ لا نربط المستمع.)
- */
+/** Report a clear recovery hint when the local port is already in use. */
 server?.on('error', (error) => {
   if (error.code === 'EADDRINUSE') {
     console.error(
@@ -649,7 +637,7 @@ server?.on('error', (error) => {
   process.exit(1);
 });
 
-/** إغلاق نظيف: يوقف استقبال الطلبات الجديدة ثم يغلق اتصالات قاعدة البيانات. */
+/** Stop accepting requests, then close database connections. */
 async function shutdown(signal) {
   console.log(`\n${signal}: إيقاف الخادم...`);
 

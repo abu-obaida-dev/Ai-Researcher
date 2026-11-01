@@ -4,13 +4,7 @@ import { can, permissionsFor, servicesFor } from '../services/access.js';
 import { PLATFORM_SERVICES } from '../constants.js';
 import { renderServiceNotice } from '../views/layout.js';
 
-/**
- * جلسة المستخدم: كوكي موقّع (HMAC) يحتوي معرّف الحساب، والبيانات نفسها في PostgreSQL.
- * يُثبَّت هذا الوسيط قبل كل المسارات في server.js فيصبح req.account متاحاً للجميع.
- *
- * يُحمَّل معه services = الخدمات المفتوحة لهذا الحساب (حسب دور باقته أو دور المشرف)
- * مرة واحدة لكل طلب، فالسايدبار والصفحات تعرض المتاح فقط بلا استعلام إضافي.
- */
+/** Loads the signed user session and account permissions for each request. */
 export async function attachAccount(req, _res, next) {
   req.account = null;
 
@@ -22,7 +16,7 @@ export async function attachAccount(req, _res, next) {
 
   try {
     const user = await getUserById(payload.uid);
-    // الحسابات الموقوفة أو المحذوفة لا تُفتح لها جلسة
+    // Suspended or deleted accounts cannot open a session.
     if (user && user.is_active !== false && user.deleted !== true) {
       const account = await syncUserRole(user);
       req.account = {
@@ -32,14 +26,14 @@ export async function attachAccount(req, _res, next) {
       };
     }
   } catch (error) {
-    // الصفحات العامة تظل تعمل حتى لو تعذّرت قراءة الحساب من قاعدة البيانات
+    // Public pages remain available if the account lookup fails.
     console.warn(`تعذّر تحميل حساب الجلسة: ${error.code || error.message}`);
   }
 
   next();
 }
 
-/** الخدمات المفتوحة للحساب، وكلها مفتوحة احتياطاً لو تعذّرت القراءة. */
+/** Returns the account's enabled services, defaulting to all if unavailable. */
 async function loadServices(account) {
   try {
     const list = await servicesFor(account);
@@ -50,10 +44,7 @@ async function loadServices(account) {
   }
 }
 
-/**
- * صلاحيات اللوحة للحساب: المدير كل الصلاحيات، والمشرف ما أعطاه المدير فقط.
- * تُحمَّل مع الحساب لتصفية سايدبار الإدارة بلا استعلام إضافي لكل صفحة.
- */
+/** Loads admin permissions once so each page can filter its sidebar. */
 async function loadAdminPermissions(account) {
   if (!account || account.role === 'admin') return ['*'];
 
@@ -66,7 +57,7 @@ async function loadAdminPermissions(account) {
   }
 }
 
-/** يحمي الصفحات التي تتطلب تسجيل دخول ويعيد الزائر إلى صفحة الدخول مع المسار المطلوب. */
+/** Requires authentication and preserves the requested destination. */
 export function requireAccount(req, res, next) {
   if (req.account) {
     next();
@@ -81,14 +72,7 @@ export function requireAccount(req, res, next) {
   res.redirect(302, `/login?next=${encodeURIComponent(req.originalUrl || '/dashboard')}`);
 }
 
-/**
- * بوابة الخدمات: تمنع فتح صفحة خدمة لا تسمح بها صلاحيات دور الحساب
- * (دور الباقة أو دور المشرف) — وتعرض صفحة عربية تشرح الخدمة والباقة المطلوبة.
- * تُستخدم في /files (الملفات والمراجع) و /notes (المفكرة)
- * و /defense (المناقشة) و /journey (مسار البحث).
- * /chat خارج هذه البوابة قصداً (الشات متاح لكل الباقات بمجرد التسجيل) — حمايته
- * من بوابة الملف الجزئية requireCoreOnboarding على الإرسال فقط (قراءة مفتوحة).
- */
+/** Enforces plan- and role-based access to protected services. */
 export function requireService(serviceKey) {
   const service = PLATFORM_SERVICES.find((item) => item.key === serviceKey);
 
@@ -102,8 +86,7 @@ export function requireService(serviceKey) {
     try {
       allowed = await can(req.account, service?.permission || serviceKey);
     } catch (error) {
-      // الفشل يُغلق الباب (fail-closed): لا نفتح خدمةً مقفولة لأحد بسبب خطأ قراءة مؤقت.
-      // الاستثناء الوحيد المدير: دوره فوق كل البوابات فلا فحص أصلاً.
+      // Fail closed on permission lookup errors; administrators bypass service gates.
       console.warn(`تعذّر التحقق من خدمة ${serviceKey}: ${error.code || error.message}`);
       allowed = req.account.role === 'admin';
     }
@@ -125,14 +108,14 @@ export function requireService(serviceKey) {
   };
 }
 
-/** الصفحة التي ينتهي إليها الحساب بعد الدخول: لوحة الإدارة (للمدير/المشرف)، أو الملف، أو الإحصائية. */
+/** Selects the post-login destination. */
 export function homePathFor(account) {
   if (!account) return '/login';
   if (account.role === 'admin' || hasPanelAccess(account)) return '/admin';
   return account.onboarding_complete ? '/dashboard' : '/onboarding';
 }
 
-/** دخول لوحة الإدارة متاح للمدير، وللمشرف الحامل صلاحية admin:panel. */
+/** Checks whether an account may access the admin panel. */
 function hasPanelAccess(account) {
   return (
     Array.isArray(account?.adminPermissions) &&
@@ -140,25 +123,16 @@ function hasPanelAccess(account) {
   );
 }
 
-/** هل يحتاج الحساب لإكمال ملفه البحثي؟ (المدير لا يحتاج) */
+/** Checks whether the user must complete onboarding. */
 export function needsOnboarding(account) {
   if (!account) return false;
   if (account.role === 'admin' || hasPanelAccess(account)) return false;
   return account.onboarding_complete !== true;
 }
 
-/**
- * البوابة الجزئية التدريجية: الملف الأكاديمي نقطة بداية ضرورية للإشراف
- * المخصص — لا حاجزاً على كل النظام.
- *
- * القاعدة: الوظائف التي تحتاج سياقاً بحثياً (الشات/المراجع/مسار البحث/المناقشة)
- * تتطلب إكمال الأساسيات الثلاث (المرحلة الأكاديمية + التخصص + الهدف الحالي).
- * من لم يكملها يُحوَّل إلى /onboarding مع حفظ وجهته (?next=) ليعود بعد الإكمال.
- * القراءة العامة (لوحة الباحث/الحساب/الدفع) تبقى مفتوحة دائماً.
- */
+/** Requires core research-profile fields only for context-dependent actions. */
 export function requireCoreOnboarding(req, res, next) {
-  // طلبات JSON (chat-send.js): نردّ JSON بدل التوجيه حتى لا يفقد الجافاسكربت معناه
-  // (req.get?. حتى لا ينكسر req الوهمي في اختبارات الوحدة)
+  // Return JSON to fetch callers instead of redirecting.
   const wantsJson = String(req.get?.('accept') || '').includes('application/json');
 
   if (!req.account) {

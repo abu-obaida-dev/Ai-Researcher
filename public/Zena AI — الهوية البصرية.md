@@ -1,91 +1,91 @@
-# Zena AI — الهوية البصرية
+# Zena AI — Visual Identity
 
-## الفكرة المركزية
+## Core Idea
 
-**Zena AI** مساعد بحثي يحوّل عملية البحث والكتابة إلى حوار واضح ومنظّم. الهوية مبنية على رمز واحد يجمع بين **كتاب مفتوح** للمعرفة، و**فقاعة حوار** للنقاش، و**شرارة** للاكتشاف والإرشاد. النتيجة شخصية موثوقة وذكية، لكنها إنسانية ودافئة وليست تقنية باردة.
+**Zena AI** is a research assistant that turns research and writing into a clear, organized conversation. Its identity is built around a single symbol combining an **open book** for knowledge, a **speech bubble** for discussion, and a **spark** for discovery and guidance. The result is a trustworthy, intelligent personality that feels human and warm rather than cold and technical.
 
-## شخصية العلامة
+## Brand Personality
 
-| السمة | التعبير البصري |
+| Attribute | Visual Expression |
 |---|---|
-| موثوقة | أزرق حبر عميق، مساحات بيضاء، شبكة مرتبة |
-| ذكية | هندسة بسيطة، نسب متوازنة، تفاصيل قليلة |
-| حوارية | منحنيات ناعمة وشكل فقاعة مضمّن في الكتاب |
-| مشجّعة | لمسة مشمشي صغيرة ترمز إلى شرارة الفكرة |
-| حديثة | خط Sans هندسي، تباعد مريح، واجهات نظيفة |
+| Trustworthy | Deep ink blue, white space, orderly grid |
+| Intelligent | Simple geometry, balanced proportions, minimal details |
+| Conversational | Soft curves and a speech-bubble shape integrated into the book |
+| Encouraging | A small apricot accent symbolizing a spark of an idea |
+| Modern | Geometric Sans typeface, comfortable spacing, clean interfaces |
 
-## الشعار
+## Logo
 
-الملف الأساسي هو `zena-ai-logo.svg`. استخدمه أفقيًا في الموقع، العروض، والمواد التعريفية. استخدم `zena-ai-icon.svg` كتطبيق أيقونة، favicon، صورة ملف شخصي، أو في المساحات الصغيرة.
+The primary file is `zena-ai-logo.svg`. Use it horizontally on the website, in presentations, and in informational materials. Use `zena-ai-icon.svg` as the app icon, favicon, profile image, or in small spaces.
 
-### مساحة الأمان
+### Clear Space
 
-اترك حول الشعار مساحة فارغة لا تقل عن **ارتفاع شرارة الاكتشاف** من جميع الجهات. لا تضع الشعار ملاصقًا لحافة أو فوق خلفية مزدحمة.
+Leave clear space around the logo on all sides at least equal to the **height of the discovery spark**. Do not place the logo flush against an edge or over a busy background.
 
-### الحد الأدنى
+### Minimum Size
 
-- الشعار الأفقي: لا يقل عرضه عن **150 px** على الشاشة أو **35 mm** في الطباعة.
-- الأيقونة: لا تقل عن **24 px**، مع تفضيل 32 px فأعلى.
+- Horizontal logo: at least **150 px** wide on screen or **35 mm** in print.
+- Icon: at least **24 px**, with 32 px or larger preferred.
 
-### الاستخدامات الممنوعة
+### Prohibited Uses
 
-لا تمدد الشعار أو تضغطه، ولا تغيّر ترتيب الرمز والاسم، ولا تستخدم ألوانًا غير معتمدة، ولا تضف ظلالًا أو حدودًا خارجية، ولا تضعه فوق خلفية منخفضة التباين، ولا تعيد رسمه بتفاصيل إضافية.
+Do not stretch or compress the logo, change the arrangement of the symbol and name, use unapproved colors, add shadows or outlines, place it on a low-contrast background, or redraw it with additional details.
 
-## لوحة الألوان
+## Color Palette
 
-| الاسم | الاستخدام | HEX | RGB |
+| Name | Use | HEX | RGB |
 |---|---|---:|---:|
-| Ink Navy | اللون الأساسي، العناوين، الشعار | `#102A43` | 16, 42, 67 |
-| Sea Teal | الأزرار، الروابط، الحالات النشطة | `#0D8E93` | 13, 142, 147 |
-| Fresh Teal | إبرازات، أيقونات، رسومات مساعدة | `#19B5A5` | 25, 181, 165 |
-| Mist | خلفيات خفيفة، بطاقات، مساحات هادئة | `#D8F3EF` | 216, 243, 239 |
-| Paper | الخلفية الأساسية | `#F7FBFC` | 247, 251, 252 |
-| Apricot Spark | التأكيد، الشرارة، نقاط الانتباه | `#F4A261` | 244, 162, 97 |
-| Slate | النصوص الثانوية | `#526777` | 82, 103, 119 |
+| Ink Navy | Primary color, headings, logo | `#102A43` | 16, 42, 67 |
+| Sea Teal | Buttons, links, active states | `#0D8E93` | 13, 142, 147 |
+| Fresh Teal | Highlights, icons, supporting illustrations | `#19B5A5` | 25, 181, 165 |
+| Mist | Light backgrounds, cards, calm spaces | `#D8F3EF` | 216, 243, 239 |
+| Paper | Primary background | `#F7FBFC` | 247, 251, 252 |
+| Apricot Spark | Emphasis, the spark, points of attention | `#F4A261` | 244, 162, 97 |
+| Slate | Secondary text | `#526777` | 82, 103, 119 |
 
-### نسب الاستخدام المقترحة
+### Suggested Usage Ratios
 
-**55% Paper / 25% Ink Navy / 12% Mist / 6% Teal / 2% Apricot Spark.** استخدم المشمشي كإشارة صغيرة لا كلون مسيطر.
+**55% Paper / 25% Ink Navy / 12% Mist / 6% Teal / 2% Apricot Spark.** Use apricot as a small accent, not a dominant color.
 
-## الخطوط
+## Typography
 
-### الخط الأساسي للإنجليزية والواجهة
+### Primary Typeface for English and the Interface
 
-**Manrope** — أوزان 400، 500، 600، 700، 800. خط Sans معاصر، واضح على الشاشات، ويعطي المنتج شخصية ذكية دون أن يبدو رسميًا أكثر من اللازم.
+**Manrope** — weights 400, 500, 600, 700, 800. A contemporary Sans typeface that is clear on screens and gives the product an intelligent personality without feeling overly formal.
 
 ```css
 font-family: 'Manrope', system-ui, sans-serif;
 ```
 
-### الخط العربي
+### Arabic Typeface
 
-**IBM Plex Sans Arabic** — أوزان 400، 500، 600، 700. مناسب للنصوص العربية الطويلة والواجهات، وله شخصية تقنية هادئة تتماشى مع Manrope.
+**IBM Plex Sans Arabic** — weights 400, 500, 600, 700. Suitable for long Arabic text and interfaces, with a calm technical personality that pairs well with Manrope.
 
 ```css
 font-family: 'IBM Plex Sans Arabic', 'Noto Sans Arabic', sans-serif;
 ```
 
-### بديل محلي
+### Local Alternative
 
-إذا لم يتوفر الخطان: استخدم `Inter` للإنجليزية و`Noto Sans Arabic` للعربية.
+If neither typeface is available, use `Inter` for English and `Noto Sans Arabic` for Arabic.
 
-## قواعد الكتابة البصرية
+## Visual Writing Guidelines
 
-العناوين قصيرة ومباشرة، مع وزن 700 أو 800. النصوص الأساسية بوزن 400 أو 500، وارتفاع سطر مريح بين 1.5 و1.7. استخدم **Ink Navy** للعناوين و**Slate** للنصوص الثانوية. اجعل الأزرار الأساسية باللون **Sea Teal** مع نص أبيض، واستخدم **Apricot Spark** فقط للتنبيه أو لتمييز فكرة أو نتيجة مهمة.
+Keep headings short and direct, using weight 700 or 800. Set body text in weight 400 or 500, with a comfortable line height between 1.5 and 1.7. Use **Ink Navy** for headings and **Slate** for secondary text. Style primary buttons in **Sea Teal** with white text, and use **Apricot Spark** only for alerts or to highlight an important idea or result.
 
-## أمثلة نصية للمنتج
+## Product Copy Examples
 
-- **ابحث بعمق. اكتب بوضوح.**
-- **من الفكرة الأولى إلى فصل متماسك.**
-- **مراجع أفضل، صياغة أقوى، وحوار يساعدك على التفكير.**
-- **ناقش فكرتك مع Zena.**
+- **Research deeply. Write clearly.**
+- **From the first idea to a cohesive chapter.**
+- **Better references, stronger writing, and a conversation that helps you think.**
+- **Discuss your idea with Zena.**
 
-## تطبيق سريع على واجهة المنتج
+## Quick Application to the Product Interface
 
-الخلفية: `#F7FBFC`، الشريط الجانبي: `#102A43`، الزر الرئيسي: `#0D8E93`، البطاقات: أبيض مع حدود `#D8F3EF`، الاقتباسات والمراجع: خلفية `#D8F3EF`، حالات المراجعة أو الاقتراح: لمسات `#F4A261`.
+Background: `#F7FBFC`, sidebar: `#102A43`, primary button: `#0D8E93`, cards: white with `#D8F3EF` borders, quotations and references: `#D8F3EF` background, review or suggestion states: `#F4A261` accents.
 
-## الملفات
+## Files
 
-- `zena-ai-logo.svg` — الشعار الأفقي الأساسي.
-- `zena-ai-icon.svg` — أيقونة التطبيق والـ favicon.
-- `zena-ai-brand-guidelines.md` — دليل الهوية.
+- `zena-ai-logo.svg` — primary horizontal logo.
+- `zena-ai-icon.svg` — app icon and favicon.
+- `zena-ai-brand-guidelines.md` — brand guidelines.

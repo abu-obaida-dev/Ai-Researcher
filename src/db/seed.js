@@ -8,14 +8,7 @@ dotenv.config();
 
 const { Pool } = pg;
 
-/**
- * بذرة قاعدة البيانات: الباقات (بنفس نصوص الموقع وأسعاره) + إعدادات المنصة الافتراضية.
- * المزايا تُخزَّن نصاً بأسطر متعددة وتُعرض كقائمة في بطاقات الأسعار.
- *
- * مهم: البذرة تملأ الفراغ فقط (DO NOTHING) — تعديلات المدير من صفحة الباقات
- * (النقاط/السعر/الاسم...) مقدَّسة ولا يمسّها أي تشغيل لاحق لـ db:seed،
- * وإلا عادت كل تعديلاته إلى القيم الافتراضية صامتاً في كل عملية نشر.
- */
+/** Seeds defaults without overwriting administrator-managed values. */
 const PLANS_SEED = `
   INSERT INTO plans (code, title, tagline, price, tokens, storage_mb, max_file_mb, period, period_days, cta, popular, display_order, features, role_code, is_active)
   VALUES ($1, $2, $3, $4, $5, $6, $14, $7, $13, $8, $9, $10, $11, $12, true)
@@ -28,7 +21,7 @@ const SETTINGS_SEED = `
   ON CONFLICT (key) DO NOTHING;
 `;
 
-/** أدوار النظام + صلاحياتها (تٌفعَّل في requireRole مع المرحلة الثانية). */
+/** Seeds system roles and permissions. */
 const ROLES_SEED = `
   INSERT INTO roles (code, title, level, is_system)
   VALUES ($1, $2, $3, true)
@@ -41,11 +34,7 @@ const ROLE_PERMISSIONS_SEED = `
   ON CONFLICT (role_code, permission) DO NOTHING;
 `;
 
-/**
- * مسارات البحث وخطواتها — نفس التعريفات في src/data/research-paths.js.
- * البذرة اختيارية: صفحة «مسار البحث» تستخدم التعريفات نفسها مباشرة إن لم تُشغَّل.
- * is_default لا يُحدَّث حتى لا نُلغي اختيار المدير للمسار الافتراضي.
- */
+/** Seeds research paths without overriding the administrator's default selection. */
 const PATH_SEED = `
   INSERT INTO research_paths (degree_level, title, description, is_default)
   VALUES ($1, $2, $3, $4)
@@ -67,7 +56,7 @@ const STEP_SEED = `
     guidance = EXCLUDED.guidance;
 `;
 
-/** يٌزرع الأدوار مع صلاحياتها — يعيد عدد الأدوار. */
+/** Seeds roles and their permissions. */
 async function seedRoles(pool) {
   for (const role of DEFAULT_ROLES) {
     await pool.query(ROLES_SEED, [role.code, role.title, role.level]);
@@ -78,7 +67,7 @@ async function seedRoles(pool) {
   return DEFAULT_ROLES.length;
 }
 
-/** يٌزرع المسارات وخطواتها — يعيد { paths, steps }. */
+/** Seeds research paths and steps. */
 async function seedResearchPaths(pool) {
   let steps = 0;
 

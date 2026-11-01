@@ -12,37 +12,25 @@ import {
   unreadCount
 } from '../services/notifications.js';
 
-/**
- * مسارات الإشعارات (بلا صفحة مخصّصة — تظهر كلها في قائمة جرس الإشعارات المنسدلة):
- * - GET  /notifications                تحويل إلى /dashboard (توافق مع الروابط القديمة)
- * - GET  /api/firebase-config          إعدادات Firebase العامة للواجهة والـ SW (بدون أسرار)
- * - GET  /api/notifications            JSON: عدد غير المقروء + آخر الإشعارات (يغذي جرس الشريط العلوي)
- * - POST /api/notifications/register    حفظ توكن جهاز (FCM)
- * - POST /api/notifications/unregister  إيقاف توكن جهاز
- * - POST /api/notifications/read-all    تعليم الكل كمقروء (يستخدمه زر الجرس «تعليم الكل كمقروء»)
- * - POST /api/notifications/:id/read    تعليم إشعار واحد كمقروء (يستخدمه زر الجرس)
- * - DELETE /api/notifications/:id       حذف إشعار واحد من قائمة صاحبه (يستخدمه زر «حذف» في الجرس)
- */
+/** In-app notification and device-token routes. */
 const router = express.Router();
 
-/** استجابة JSON موحّدة لخطأ بسيط برسالة عربية قصيرة. */
+/** Sends a consistent JSON error response. */
 function sendError(res, status, message) {
   res.status(status).json({ ok: false, message });
 }
 
-// إعدادات عامة فقط (apiKey/appId/...) — يقرأها Service Worker والصفحة من نفس النطاق.
-// السرّيات (FCM_PRIVATE_KEY مثلاً) لا تظهر هنا أبداً.
+// Expose public Firebase settings only; never return server credentials.
 router.get('/api/firebase-config', (_req, res) => {
   res.json(firebaseWebConfig());
 });
 
-// لا توجد صفحة إشعارات مخصّصة: الإشعارات تظهر في قائمة الجرس المنسدلة فقط.
-// نُبقي المسار كتحويل لعدم كسر الروابط القديمة أو روابط الـ push المحفوظة.
+// Preserve the legacy route while keeping notifications in the shared dropdown.
 router.get('/notifications', (_req, res) => {
   res.redirect(302, '/dashboard');
 });
 
-// JSON للاستخدام من أي واجهة: آخر إشعارات الحساب + عدّاد غير المقروء
+// Return the account's latest notifications and unread count.
 router.get('/api/notifications', requireAccount, async (req, res) => {
   try {
     const [items, unread, devices] = await Promise.all([
@@ -56,7 +44,7 @@ router.get('/api/notifications', requireAccount, async (req, res) => {
   }
 });
 
-// تسجيل توكن جهاز — يأتي من زر «تفعيل على هذا الجهاز» في صفحة الإشعارات
+// Register a device token from the opt-in UI.
 router.post('/api/notifications/register', requireAccount, async (req, res) => {
   try {
     const token = String(req.body?.token || '');
