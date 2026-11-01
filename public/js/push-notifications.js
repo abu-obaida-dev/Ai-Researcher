@@ -135,15 +135,18 @@
           return null;
         }
         return ensureWorker()
-          .then(loadConfig)
-          .then(function (config) {
-            state.config = config;
-            return loadFirebase(config);
+          .then(function (registration) {
+            return loadConfig().then(function (config) {
+              state.config = config;
+              return loadFirebase(config).then(function () {
+                return registration;
+              });
+            });
           })
-          .then(function () {
+          .then(function (registration) {
             return window.firebase.messaging().getToken({
               vapidKey: state.config.vapidKey || undefined,
-              serviceWorkerRegistration: navigator.serviceWorker
+              serviceWorkerRegistration: registration
             });
           })
           .then(function (token) {
