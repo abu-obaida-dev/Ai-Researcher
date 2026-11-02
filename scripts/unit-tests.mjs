@@ -67,7 +67,8 @@ import {
   detectAssistantTask,
   isExplicitSearchRequest
 } from '../src/services/assistant-prompt.js';
-import { isUuid, SUPPORT_EMAIL, SUPPORT_WHATSAPP } from '../src/constants.js';
+import { isUuid, isValidWhatsappNumber, SUPPORT_EMAIL, SUPPORT_WHATSAPP } from '../src/constants.js';
+import { toInternationalWhatsapp } from '../src/services/payments.js';
 import { SESSION_TTL_MS, createSessionCookie } from '../src/auth/google.js';
 import { renderLandingPage } from '../src/views/landing.js';
 import { whatsappLink } from '../src/views/layout.js';
@@ -150,6 +151,20 @@ test('normalizeCurrency: يقبل المدعوم ويُرجع الافتراضي
   assert.equal(normalizeCurrency('EUR'), 'LYD', 'عملة غير مدعومة ⇒ الافتراضي');
   assert.equal(normalizeCurrency(''), 'LYD');
   assert.equal(normalizeCurrency(null), 'LYD');
+});
+
+test('WhatsApp: يدعم بادئات ليبيا 91 إلى 95 ويتحقق من الرقم حسب الدولة', () => {
+  for (const prefix of ['91', '92', '93', '94', '95']) {
+    const local = `${prefix}1234567`;
+    assert.equal(isValidWhatsappNumber('LY', local), true, `البادئة الليبية ${prefix} مقبولة`);
+    assert.equal(toInternationalWhatsapp(`0${local}`, 'LY'), `+218${local}`);
+    assert.equal(toInternationalWhatsapp(`+218${local}`, 'LY'), `+218${local}`);
+  }
+
+  assert.equal(isValidWhatsappNumber('LY', '961234567'), false, 'البادئة غير المدعومة مرفوضة');
+  assert.equal(isValidWhatsappNumber('LY', '93123456'), false, 'الرقم الأقصر مرفوض');
+  assert.equal(isValidWhatsappNumber('EG', '1234567890'), true, 'قواعد طول مصر تبقى مستقلة');
+  assert.equal(isValidWhatsappNumber('ZZ', '931234567'), false, 'رمز الدولة غير المعروف مرفوض');
 });
 
 /* ---------------------------- Arabic normalization ---------------------------- */

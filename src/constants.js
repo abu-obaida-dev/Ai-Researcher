@@ -56,7 +56,7 @@ export const GENDER_OPTIONS = [
 
 /** Country calling codes, expected national-number lengths, and example numbers. */
 export const WHATSAPP_COUNTRIES = [
-  { code: 'LY', name: 'ليبيا', dial: '218', lengths: [9], pattern: '^9[124][0-9]{7}$', sample: '+218912345678' },
+  { code: 'LY', name: 'ليبيا', dial: '218', lengths: [9], pattern: '^9[1-5][0-9]{7}$', sample: '+218931234567' },
   { code: 'EG', name: 'مصر', dial: '20', lengths: [10, 11], sample: '+201012345678' },
   { code: 'SA', name: 'السعودية', dial: '966', lengths: [9], sample: '+966512345678' },
   { code: 'AE', name: 'الإمارات', dial: '971', lengths: [9], sample: '+971501234567' },
@@ -79,6 +79,15 @@ export const WHATSAPP_COUNTRIES = [
   { code: 'DJ', name: 'جيبوتي', dial: '253', lengths: [8], sample: '+25377123456' },
   { code: 'KM', name: 'جزر القمر', dial: '269', lengths: [7], sample: '+2693212345' }
 ];
+
+/** Validates a national WhatsApp number against its selected country's rules. */
+export function isValidWhatsappNumber(countryCode, value) {
+  const country = WHATSAPP_COUNTRIES.find((item) => item.code === countryCode);
+  if (!country) return false;
+
+  const digits = String(value ?? '').replace(/\D/g, '');
+  return country.lengths.includes(digits.length) && (!country.pattern || new RegExp(country.pattern).test(digits));
+}
 
 export const DEGREE_LEVELS = [
   { value: 'bachelor', label: 'طالب جامعي (بكالوريوس)' },

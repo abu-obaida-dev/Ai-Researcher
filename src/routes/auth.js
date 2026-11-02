@@ -23,7 +23,8 @@ import {
   RESEARCH_STAGES,
   SPECIALIZATIONS,
   UNIVERSITIES,
-  WHATSAPP_COUNTRIES
+  WHATSAPP_COUNTRIES,
+  isValidWhatsappNumber
 } from '../constants.js';
 import { homePathFor, requireAccount } from '../middleware/auth.js';
 import { getJourneySummary } from '../services/journey.js';
@@ -295,7 +296,7 @@ function validateValues(values) {
     errors.push('رقم الواتساب مطلوب.');
   } else if (!country.lengths.includes(wa.length)) {
     errors.push(`رقم واتساب ${country.name} يتكون من ${country.lengths.join(' أو ')} أرقام بعد مفتاح الدولة +${country.dial}.`);
-  } else if (country.pattern && !new RegExp(country.pattern).test(wa)) {
+  } else if (!isValidWhatsappNumber(values.wa_country, wa)) {
     errors.push(`أدخل رقم واتساب ${country.name} صحيحاً (مثال: ${country.sample}).`);
   }
 

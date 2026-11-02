@@ -1,21 +1,10 @@
 import { pool } from '../db/client.js';
-import { DEFAULT_CURRENCY, DEFAULT_PAYMENT_METHODS, SITE_CURRENCIES, WHATSAPP_COUNTRIES, isUuid } from '../constants.js';
+import { DEFAULT_CURRENCY, DEFAULT_PAYMENT_METHODS, SITE_CURRENCIES, WHATSAPP_COUNTRIES, isUuid, isValidWhatsappNumber } from '../constants.js';
 
 /** Manual-payment request creation and administrator approval. */
 
 const STATUSES = ['pending', 'confirmed', 'rejected'];
 const MAX_PENDING_PER_USER = 5;
-
-/** Normalizes a Libyan WhatsApp number. */
-function normalizeWhatsapp(value) {
-  return String(value || '').replace(/[^\d+]/g, '').slice(0, 20);
-}
-
-const WHATSAPP_REGEX = /^(00218|\+?218|0)?9[124]\d{7}$/;
-
-function isValidWhatsapp(value) {
-  return WHATSAPP_REGEX.test(value);
-}
 
 /** Converts local or international input to a normalized international number. */
 export function toInternationalWhatsapp(value, countryCode = 'LY') {
@@ -175,8 +164,8 @@ export async function createPaymentRequest(userId, input = {}) {
   const method = methods.find((item) => item.code === methodCode);
   if (!method) throw badInput('طريقة الدفع غير متاحة — حدّث الصفحة.', 'BAD_METHOD');
   if (Number(plan.price) <= 0) throw badInput('هذه الباقة مجانية — لا تحتاج طلب دفع.', 'BAD_PLAN');
-  if (!whatsappNumber || (!isValidWhatsapp(whatsappNumber) && !country.lengths.includes(localPart.length))) {
-    throw badInput(`رقم واتساب ${country.name} يتكون من ${country.lengths.join(' أو ')} أرقام بعد مفتاح الدولة +${country.dial}.`, 'BAD_WHATSAPP');
+  if (!isValidWhatsappNumber(countryCode, localPart)) {
+    throw badInput(`رقم واتساب ${country.name} غير صالح (مثال: ${country.sample}).`, 'BAD_WHATSAPP');
   }
 
   const { rows: pending } = await pool.query(
